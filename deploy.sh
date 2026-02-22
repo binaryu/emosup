@@ -28,7 +28,7 @@ echo_warn() {
 # --- Prerequisite & Dependency Check ---
 echo_info "This script will install or update the emosup panel."
 read -p "Have you already installed OpenList and Aria2 on this server? [y/N] " -n 1 -r
-echo
+echo ""
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo_error "Please install OpenList and Aria2 before proceeding. See README for details."
 fi
