@@ -1,9 +1,10 @@
 name: Build and Release
 
 on:
+  workflow_dispatch: # Allows manual triggering
   push:
     tags:
-      - 'v*.*.*' # Triggers on version tags like v1.0.0
+      - 'v*' # Triggers on any tag starting with 'v' (e.g., v1.0.0, v1.0.1-beta.1)
 
 jobs:
   build:
@@ -45,7 +46,7 @@ jobs:
         run: |
           $separator = if ($env:RUNNER_OS -eq 'Windows') {';'} else {':'}
           $output_name = "emos-up-${{ runner.os }}-${{ matrix.arch }}"
-          python -m PyInstaller --name $output_name --onefile --add-data "app/templates${separator}app/templates" main.py
+          python -m PyInstaller --name $output_name --onefile --add-data "app/templates${separator}app/templates" --hidden-import=websockets main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -70,8 +71,10 @@ jobs:
         run: ls -R artifacts
 
       - name: Create Release and Upload Assets
+        if: startsWith(github.ref, 'refs/tags/v') # Only run this step for tag pushes
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-rc') }}
           files: |
             artifacts/emos-up-Windows-amd64/emos-up-Windows-amd64.exe
             artifacts/emos-up-Linux-amd64/emos-up-Linux-amd64
