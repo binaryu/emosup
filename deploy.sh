@@ -101,7 +101,7 @@ echo
 echo -e "\033[33m"
 cat << EOF
 [Unit]
-Description=EMOSUP Panel Service
+Description=EMOS Upload Panel Service
 After=network.target
 
 [Service]

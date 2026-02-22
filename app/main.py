@@ -32,7 +32,7 @@ class PrecheckRequest(BaseModel):
     files: List[UploadItem]
 
 
-app = FastAPI(title="EMOS PRO Panel")
+app = FastAPI(title="EMOS Upload Panel")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 def resource_path(relative_path):
