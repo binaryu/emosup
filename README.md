@@ -23,7 +23,9 @@
     pip install -r requirements.txt
     ```
 3.  你需要手动安装openlist和aria2，以便使用该面板
+
     openlist安装:https://doc.oplist.org/guide/installation/script
+    
     aria2安装：
     ```bash
     apt install wget curl ca-certificates
