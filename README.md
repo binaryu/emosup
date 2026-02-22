@@ -1,11 +1,11 @@
 # EMOS PRO Panel
 
-一个用于 EMOS PRO 的 Web UI 面板，方便通过网页批量上传视频资源。
+一个用于 EMOS 的 Web UI 面板，方便通过网页批量上传视频资源。
 
 ## 功能
 
 -   通过 Web UI 批量上传视频。
--   支持从 OpenList/Alist 扫描视频文件。
+-   支持从 OpenList 扫描视频文件。
 -   使用 Aria2 进行高速下载。
 -   自动匹配文件名中的季号和集号。
 -   提供任务状态监控和日志输出。
@@ -14,8 +14,8 @@
 
 1.  克隆本项目到本地：
     ```bash
-    git clone <your-repo-url>
-    cd emos-up
+    git clone https://github.com/binaryu/emosup.git
+    cd emosup
     ```
 
 2.  安装 Python 依赖：
@@ -33,7 +33,7 @@
 2.  打开浏览器，访问 `http://127.0.0.1:12345` 即可看到 Web 面板。
 
 3.  在面板中填写以下参数：
-    -   **EMOS Token**: 你的 EMOS API 访问令牌。
+    -   **EMOS Token**: 你的 EMOS API 访问密钥。
     -   **TMDB ID**: 要上传的影视剧的 TMDB ID。
     -   **OpenList Base URL**: 你的 OpenList/Alist 服务地址。
     -   **OpenList Token**: 你的 OpenList/Alist API 令牌。
