@@ -12,6 +12,24 @@
 ## 快速开始 (推荐)
 
 对于 Linux 用户，推荐使用一键部署脚本。
+<details>
+<summary><strong>使用前需要安装openlist和aria2</strong></summary>
+
+**OpenList / Alist**
+    *   **功能**: 用于列出和管理您的文件，以便面板可以扫描到视频资源。
+    *   **安装**: 请参考官方文档 [OpenList 安装教程](https://doc.oplist.org/guide/installation/script)。
+    *   **注意**: 您的 OpenList/Alist 服务需要**可访问**，并且如果设置了认证，您需要提供相应的 Token。
+
+ **Aria2**
+    *   **功能**: 一个轻量级、多协议、多源的下载工具，面板将利用它来下载视频。
+    *   **安装**:
+        ```bash
+        apt update && apt install -y wget curl ca-certificates # 确保基础工具已安装
+        wget -N git.io/aria2.sh && chmod +x aria2.sh
+        ./aria2.sh # 运行脚本安装 Aria2
+        ```
+    *   **注意**: 确保您的 Aria2 RPC 服务已**启动并监听**，并且您知道其 RPC URL 和可能需要的 Secret。
+</details>
 
 **前提**: 请确保您的服务器已安装 `curl` 和 `jq`。
 ( `sudo apt-get update && sudo apt-get install curl jq`)
@@ -20,7 +38,7 @@
 ```bash
 curl -sSL https://raw.githubusercontent.com/binaryu/emosup/main/deploy.sh | sudo bash
 ```
-脚本将会引导您完成安装，并将可执行文件安装到 `/usr/local/bin/emosup`。最后，它会自动生成 `systemd` 服务配置，您只需复制粘贴即可完成部署，实现开机自启。
+脚本将会引导您完成安装，并将可执行文件安装到 `/usr/local/bin/emosup`。最后，它会自动生成 `systemd` 服务配置，实现开机自启。
 
 ## 下载
 
@@ -29,7 +47,7 @@ curl -sSL https://raw.githubusercontent.com/binaryu/emosup/main/deploy.sh | sudo
 ## 进阶使用
 
 <details>
-<summary><strong>开发者：从源码运行</strong></summary>
+<summary><strong>开发者</strong></summary>
 
 1.  克隆本项目到本地：
     ```bash
