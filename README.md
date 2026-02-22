@@ -9,30 +9,38 @@
 -   **高效传输**: 集成 Aria2 进行高速下载。
 -   **智能匹配**: 自动识别文件名中的季号和集号。
 
+## 前置依赖 (Prerequisites)
+
+**在使用此面板之前，您必须已经在服务器上安装并运行了以下两个服务：**
+
+1.  **OpenList / Alist**: 用于提供文件列表。
+2.  **Aria2**: 用于处理下载任务。
+
+<details>
+<summary>点击查看 OpenList 和 Aria2 的参考安装说明</summary>
+
+-   **OpenList / Alist**
+    -   **功能**: 用于列出和管理您的文件，以便面板可以扫描到视频资源。
+    -   **安装**: 请参考官方文档 [OpenList 安装教程](https://doc.oplist.org/guide/installation/script)。
+    -   **注意**: 您的 OpenList/Alist 服务需要**可访问**，并且如果设置了认证，您需要提供相应的 Token。
+
+-   **Aria2**
+    -   **功能**: 一个轻量级、多协议、多源的下载工具，面板将利用它来下载视频。
+    -   **安装 (Debian/Ubuntu)**:
+        ```bash
+        sudo apt update && sudo apt install -y wget curl ca-certificates
+        wget -N git.io/aria2.sh && chmod +x aria2.sh
+        sudo ./aria2.sh # 以 root 权限运行以进行系统级安装
+        ```
+    -   **注意**: 确保您的 Aria2 RPC 服务已**启动并监听**，并且您知道其 RPC URL 和可能需要的 Secret。
+</details>
+
 ## 快速开始 (推荐)
 
 对于 Linux 用户，推荐使用一键部署脚本。
-<details>
-<summary><strong>使用前需要安装openlist和aria2</strong></summary>
-
-**OpenList / Alist**
-    *   **功能**: 用于列出和管理您的文件，以便面板可以扫描到视频资源。
-    *   **安装**: 请参考官方文档 [OpenList 安装教程](https://doc.oplist.org/guide/installation/script)。
-    *   **注意**: 您的 OpenList/Alist 服务需要**可访问**，并且如果设置了认证，您需要提供相应的 Token。
-
- **Aria2**
-    *   **功能**: 一个轻量级、多协议、多源的下载工具，面板将利用它来下载视频。
-    *   **安装**:
-        ```bash
-        apt update && apt install -y wget curl ca-certificates # 确保基础工具已安装
-        wget -N git.io/aria2.sh && chmod +x aria2.sh
-        ./aria2.sh # 运行脚本安装 Aria2
-        ```
-    *   **注意**: 确保您的 Aria2 RPC 服务已**启动并监听**，并且您知道其 RPC URL 和可能需要的 Secret。
-</details>
 
 **前提**: 请确保您的服务器已安装 `curl` 和 `jq`。
-( `sudo apt-get update && sudo apt-get install curl jq`)
+(例如: `sudo apt-get update && sudo apt-get install curl jq`)
 
 **运行脚本**:
 ```bash
