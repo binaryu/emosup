@@ -1,0 +1,11 @@
+# Set default behavior, in case users don't have core.autocrlf set.
+* text=auto
+
+# Explicitly declare text files you want to always have LF line endings.
+*.sh eol=lf
+*.py eol=lf
+*.yml eol=lf
+*.md eol=lf
+*.txt eol=lf
+.gitignore eol=lf
+.gitattributes eol=lf

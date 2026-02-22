@@ -9,11 +9,15 @@
 -   使用 Aria2 进行高速下载。
 -   自动匹配文件名中的季号和集号。
 -   提供任务状态监控和日志输出。
--   通过 GitHub Actions 自动构建和发布跨平台的可执行文件。
 
-## 下载
+### 一键部署脚本 (Linux)
 
-您可以直接从 [GitHub Releases](https://github.com/binaryu/emosup/releases) 页面下载适用于您操作系统的最新版本，无需安装 Python 环境。
+**依赖**: 脚本需要 `curl` 和 `jq`。请先确保已安装 (`sudo apt-get update && sudo apt-get install curl jq`)。
+
+**运行脚本**:
+```bash
+curl -sSL https://raw.githubusercontent.com/binaryu/emosup/main/deploy.sh | sudo bash
+```
 
 ## 安装 (开发者)
 

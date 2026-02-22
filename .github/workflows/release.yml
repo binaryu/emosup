@@ -45,13 +45,13 @@ jobs:
         shell: pwsh
         run: |
           $separator = if ($env:RUNNER_OS -eq 'Windows') {';'} else {':'}
-          $output_name = "emos-up-${{ runner.os }}-${{ matrix.arch }}"
+          $output_name = "emosup-${{ runner.os }}-${{ matrix.arch }}"
           python -m PyInstaller --name $output_name --onefile --add-data "app/templates${separator}app/templates" --hidden-import=websockets main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: emos-up-${{ runner.os }}-${{ matrix.arch }}
+          name: emosup-${{ runner.os }}-${{ matrix.arch }}
           path: dist/*
 
   release:
