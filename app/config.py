@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import threading
+import collections
 from typing import List, Dict, Any
 
 # ==============================
@@ -43,7 +44,7 @@ class AppState:
         self.parallel_tasks = DEFAULT_PARALLEL_TASKS
         self.download_threads = DEFAULT_DOWNLOAD_THREADS
 
-        self.logs: List[str] = []
+        self.logs: collections.deque = collections.deque(maxlen=500)
         self.lock = threading.Lock()
 
         self.task: Dict[str, Any] = {

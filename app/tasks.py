@@ -231,35 +231,35 @@ class BatchWorker:
         selected = [f for f in req.files if f.selected]
         state.task.update({"is_running": True, "cancel": False, "total_files": len(selected), "completed_files": 0, "stage": "precheck"})
         
-        state.emos_token, state.emos_api_base, state.openlist_base, state.openlist_token, state.cache_dir, state.aria2_rpc_url, state.aria2_rpc_secret, state.chunk_size_mb, state.parallel_tasks, state.download_threads = \
-            req.emos_token, req.emos_api_base, req.openlist_base_url, req.openlist_token, req.cache_dir, req.aria2_rpc_url, req.aria2_rpc_secret, req.chunk_size_mb, req.parallel_tasks, req.download_threads
-        ensure_dir(req.cache_dir)
+        try:
+            state.emos_token, state.emos_api_base, state.openlist_base, state.openlist_token, state.cache_dir, state.aria2_rpc_url, state.aria2_rpc_secret, state.chunk_size_mb, state.parallel_tasks, state.download_threads = \
+                req.emos_token, req.emos_api_base, req.openlist_base_url, req.openlist_token, req.cache_dir, req.aria2_rpc_url, req.aria2_rpc_secret, req.chunk_size_mb, req.parallel_tasks, req.download_threads
+            ensure_dir(req.cache_dir)
 
-        aria2_client = Aria2RpcClient(req.aria2_rpc_url, req.aria2_rpc_secret)
-        if not aria2_client.check_version():
-            log("Aria2 RPC 连接失败，请检查 URL 和密钥", "ERROR")
-            state.task["is_running"] = False
-            return
+            aria2_client = Aria2RpcClient(req.aria2_rpc_url, req.aria2_rpc_secret)
+            if not aria2_client.check_version():
+                log("Aria2 RPC 连接失败，请检查 URL 和密钥", "ERROR")
+                return
 
-        tree = self.client.get_tree_by_tmdb(req.tmdb_id)
-        if not tree:
-            log("无法获取 video/tree，请确认 tmdb_id 是否存在且已同步", "ERROR")
-            state.task["is_running"] = False
-            return
+            tree = self.client.get_tree_by_tmdb(req.tmdb_id)
+            if not tree:
+                log("无法获取 video/tree，请确认 tmdb_id 是否存在且已同步", "ERROR")
+                return
 
-        idx = self.build_tree_index(tree)
-        log(f"Tree加载完成：video_type={idx.get('video_type')} vl_id={idx.get('vl_id')} title={idx.get('title')} episodes={len(idx.get('episodes') or {})} default_season={idx.get('default_season')}", "INFO")
-        enriched, conflicts = self.precheck_files(idx, selected, req.match_mode)
-        if conflicts:
-            for c in conflicts: log(c, "WARN")
-        enrich_map = {x["ol_path"]: x for x in enriched}
-        log(f"=== 任务开始：files={len(selected)} tmdb={req.tmdb_id} match_mode={req.match_mode} parallel={req.parallel_tasks} ===", "INFO")
-        
-        sem = asyncio.Semaphore(req.parallel_tasks)
-        tasks = [self._process_file(f, req, idx, enrich_map, aria2_client, sem) for f in selected]
-        await asyncio.gather(*tasks)
+            idx = self.build_tree_index(tree)
+            log(f"Tree加载完成：video_type={idx.get('video_type')} vl_id={idx.get('vl_id')} title={idx.get('title')} episodes={len(idx.get('episodes') or {})} default_season={idx.get('default_season')}", "INFO")
+            enriched, conflicts = self.precheck_files(idx, selected, req.match_mode)
+            if conflicts:
+                for c in conflicts: log(c, "WARN")
+            enrich_map = {x["ol_path"]: x for x in enriched}
+            log(f"=== 任务开始：files={len(selected)} tmdb={req.tmdb_id} match_mode={req.match_mode} parallel={req.parallel_tasks} ===", "INFO")
+            
+            sem = asyncio.Semaphore(req.parallel_tasks)
+            tasks = [self._process_file(f, req, idx, enrich_map, aria2_client, sem) for f in selected]
+            await asyncio.gather(*tasks)
 
-        state.task.update({"stage": "idle", "is_running": False})
-        log("=== 所有任务结束 ===", "SUCCESS")
+            log("=== 所有任务结束 ===", "SUCCESS")
+        finally:
+            state.task.update({"stage": "idle", "is_running": False})
 
 worker = BatchWorker()

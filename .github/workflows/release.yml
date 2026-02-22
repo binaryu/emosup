@@ -76,6 +76,6 @@ jobs:
         with:
           prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-rc') }}
           files: |
-            artifacts/emos-up-Windows-amd64/emos-up-Windows-amd64.exe
-            artifacts/emos-up-Linux-amd64/emos-up-Linux-amd64
-            artifacts/emos-up-Linux-arm64/emos-up-Linux-arm64
+            artifacts/emosup-Windows-amd64/emosup-Windows-amd64.exe
+            artifacts/emosup-Linux-amd64/emosup-Linux-amd64
+            artifacts/emosup-Linux-arm64/emosup-Linux-arm64
