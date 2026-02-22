@@ -107,8 +107,9 @@ async def ws(ws: WebSocket):
     last_len = 0
     try:
         while True:
-            new_logs = state.logs[last_len:]
-            last_len = len(state.logs)
+            all_logs = list(state.logs)
+            new_logs = all_logs[last_len:]
+            last_len = len(all_logs)
             # Reduce payload size when task is running
             log_payload = new_logs if not state.task.get("is_running") else new_logs[-10:]
             await ws.send_json({"logs": log_payload, "task": state.task})

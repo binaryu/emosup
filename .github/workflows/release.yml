@@ -48,11 +48,20 @@ jobs:
           $output_name = "emosup-${{ runner.os }}-${{ matrix.arch }}"
           python -m PyInstaller --name $output_name --onefile --add-data "app/templates${separator}app/templates" --hidden-import=websockets main.py
 
+      - name: Package as zip
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            7z a emosup-${{ runner.os }}-${{ matrix.arch }}.zip ./dist/emosup-${{ runner.os }}-${{ matrix.arch }}.exe
+          else
+            zip -j emosup-${{ runner.os }}-${{ matrix.arch }}.zip ./dist/emosup-${{ runner.os }}-${{ matrix.arch }}
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: emosup-${{ runner.os }}-${{ matrix.arch }}
-          path: dist/*
+          path: emosup-*.zip
 
   release:
     name: Create GitHub Release
@@ -75,7 +84,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-rc') }}
-          files: |
-            artifacts/emosup-Windows-amd64/emosup-Windows-amd64.exe
-            artifacts/emosup-Linux-amd64/emosup-Linux-amd64
-            artifacts/emosup-Linux-arm64/emosup-Linux-arm64
+          files: artifacts/*/*.zip

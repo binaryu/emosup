@@ -63,25 +63,38 @@ if [[ $(echo "$RELEASE_INFO" | jq -r '.message') == "Not Found" ]]; then
 fi
 
 ASSET_NAME="emosup-Linux-${ARCH}"
-DOWNLOAD_URL=$(echo "$RELEASE_INFO" | jq -r ".assets[] | select(.name == \"$ASSET_NAME\") | .browser_download_url")
+DOWNLOAD_URL=$(echo "$RELEASE_INFO" | jq -r ".assets[] | select(.name == \"$ASSET_NAME.zip\") | .browser_download_url")
 
 if [ -z "$DOWNLOAD_URL" ]; then
-    echo_error "Could not find a release asset named '$ASSET_NAME' for the latest release."
+    echo_error "Could not find a release asset named '$ASSET_NAME.zip' for the latest release."
 fi
 
-echo_info "Found asset: $ASSET_NAME"
+echo_info "Found asset: $ASSET_NAME.zip"
 echo_info "Download URL: $DOWNLOAD_URL"
 
 # --- Download and Install ---
 INSTALL_PATH="/usr/local/bin/emosup"
-TEMP_FILE=$(mktemp)
+TEMP_DIR=$(mktemp -d)
+TEMP_ZIP_PATH="$TEMP_DIR/$ASSET_NAME.zip"
+TEMP_EXTRACT_PATH="$TEMP_DIR/extracted"
 
 echo_info "Downloading to a temporary file..."
-curl -L -o "$TEMP_FILE" "$DOWNLOAD_URL"
+curl -L -o "$TEMP_ZIP_PATH" "$DOWNLOAD_URL"
+
+echo_info "Unzipping the executable..."
+unzip "$TEMP_ZIP_PATH" -d "$TEMP_EXTRACT_PATH"
+EXECUTABLE_PATH=$(find "$TEMP_EXTRACT_PATH" -type f -name "emosup-*" | head -n 1)
+
+if [ -z "$EXECUTABLE_PATH" ]; then
+    echo_error "Could not find the executable in the downloaded zip file."
+fi
 
 echo_info "Installing to $INSTALL_PATH (requires sudo)..."
-chmod +x "$TEMP_FILE"
-sudo mv "$TEMP_FILE" "$INSTALL_PATH"
+chmod +x "$EXECUTABLE_PATH"
+sudo mv "$EXECUTABLE_PATH" "$INSTALL_PATH"
+
+# Clean up temporary directory
+rm -rf "$TEMP_DIR"
 
 echo_info "Installation complete!"
 echo_info "Executable is now available at $INSTALL_PATH"
