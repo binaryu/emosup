@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 
 # This script downloads and installs/updates the latest release of emosup for Linux.
 # It requires curl, jq, and unzip to be installed.
