@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import sys
 import asyncio
 import argparse
 import uvicorn
@@ -33,7 +34,17 @@ class PrecheckRequest(BaseModel):
 
 app = FastAPI(title="EMOS PRO Panel")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-templates = Jinja2Templates(directory="app/templates")
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+templates = Jinja2Templates(directory=resource_path("app/templates"))
 register_upload_routes(app)
 register_openlist_routes(app)
 
