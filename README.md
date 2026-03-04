@@ -36,22 +36,38 @@
     -   **注意**: 确保您的 Aria2 RPC 服务已**启动并监听**，并且您知道其 RPC URL 和可能需要的 Secret。
 </details>
 
-## 快速开始 (推荐)
+## Docker 部署（推荐）
 
-对于 Linux 用户，推荐使用一键部署脚本。
+本项目已移除一键脚本与自动部署逻辑，改为 Docker 部署方式。提供 `docker-compose.yml`，会自动构建镜像。
 
-**前提**: 请确保您的服务器已安装 `curl` 和 `jq`。
-(例如: `sudo apt-get update && sudo apt-get install curl jq`)
+1. 克隆项目：
+   ```bash
+   git clone https://github.com/binaryu/emosup.git
+   cd emosup
+   ```
 
-**运行脚本**:
-```bash
-curl -sSL https://raw.githubusercontent.com/binaryu/emosup/main/deploy.sh | sudo bash
-```
-脚本将会引导您完成安装，并将可执行文件安装到 `/usr/local/bin/emosup`。最后，它会自动生成 `systemd` 服务配置，实现开机自启。
+2. 启动服务（自动构建镜像）：
+   ```bash
+   docker compose up -d --build
+   ```
 
-## 下载
+3. 访问面板：
+   ```
+   http://服务器IP:12345
+   ```
 
-对于 Windows 和其他用户，或者希望手动安装的用户，可以从 [**GitHub Releases**](https://github.com/binaryu/emosup/releases) 页面下载最新的预编译版本。
+## 配置说明（环境变量）
+
+可在 `docker-compose.yml` 中按需修改环境变量：
+
+- `EMOS_API_BASE`：EMOS API 地址（默认 `https://emos.best`）
+- `EMOS_TOKEN`：EMOS 访问令牌
+- `OPENLIST_BASE_URL`：OpenList/Alist 地址
+- `OPENLIST_TOKEN`：OpenList/Alist Token
+- `ARIA2_RPC_URL`：Aria2 RPC 地址
+- `ARIA2_RPC_SECRET`：Aria2 RPC Secret
+- `CACHE_DIR`：缓存目录（容器内）
+- `DEFAULT_CHUNK_SIZE_MB`、`DEFAULT_PARALLEL_TASKS`、`DEFAULT_DOWNLOAD_THREADS`：下载与并发参数
 
 ## 进阶使用
 
@@ -76,60 +92,5 @@ curl -sSL https://raw.githubusercontent.com/binaryu/emosup/main/deploy.sh | sudo
 
     # 或者指定一个不同的端口
     python main.py --port 8080
-    ```
-</details>
-
-<details>
-<summary><strong>Linux：手动部署为 Systemd 服务</strong></summary>
-
-1.  **下载可执行文件**:
-    从 [GitHub Releases](https://github.com/binaryu/emosup/releases) 页面下载最新的 Linux 可执行文件 (例如 `emosup-Linux-amd64`)。
-    将其放置在一个合适的目录，例如 `/opt/emosup/`，并重命名为 `emosup`。
-    ```bash
-    sudo mkdir -p /opt/emosup
-    sudo mv ./emosup-Linux-amd64 /opt/emosup/emosup
-    sudo chmod +x /opt/emosup/emosup
-    ```
-
-2.  **创建 service 文件**:
-    创建一个新的 service 文件：
-    ```bash
-    sudo nano /etc/systemd/system/emosup.service
-    ```
-    将以下内容复制进去。**注意**：如果您的可执行文件路径或用户名不同，请修改 `ExecStart` 和 `User` 字段。
-
-    ```ini
-    [Unit]
-    Description=EMOS Upload Panel Service
-    After=network.target
-
-    [Service]
-    Type=simple
-    User=your_user_name  # 替换为运行此服务的用户名
-    WorkingDirectory=/opt/emosup
-    ExecStart=/opt/emosup/emosup --port 12345
-    Restart=on-failure
-    RestartSec=5s
-
-    [Install]
-    WantedBy=multi-user.target
-    ```
-
-3.  **管理服务**:
-    ```bash
-    # 重新加载 systemd 配置
-    sudo systemctl daemon-reload
-
-    # 启动服务
-    sudo systemctl start emosup
-
-    # 设置开机自启
-    sudo systemctl enable emosup
-
-    # 查看服务状态
-    sudo systemctl status emosup
-
-    # 查看实时日志
-    sudo journalctl -u emosup -f
     ```
 </details>

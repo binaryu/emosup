@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  emosup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emosup
+    restart: unless-stopped
+    ports:
+      - "12345:12345"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "12345"
+      EMOS_API_BASE: "https://emos.best"
+      EMOS_TOKEN: ""
+      OPENLIST_BASE_URL: "http://127.0.0.1:5244"
+      OPENLIST_TOKEN: ""
+      ARIA2_RPC_URL: "http://127.0.0.1:6800/jsonrpc"
+      ARIA2_RPC_SECRET: ""
+      CACHE_DIR: "data/cache"
+      DEFAULT_CHUNK_SIZE_MB: "128"
+      DEFAULT_PARALLEL_TASKS: "3"
+      DEFAULT_DOWNLOAD_THREADS: "4"
+    volumes:
+      - ./data:/app/data
