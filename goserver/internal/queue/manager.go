@@ -8,22 +8,25 @@ import (
 
 	"emosup/goserver/internal/domain"
 	"emosup/goserver/internal/events"
+	"emosup/goserver/internal/service"
 	"emosup/goserver/internal/store"
 )
 
 type Manager struct {
-	store     *store.MemoryTaskStore
-	bus       *events.Bus
-	mu        sync.Mutex
-	running   bool
-	cancelFn  context.CancelFunc
-	workerCtx context.Context
+	store        *store.MemoryTaskStore
+	bus          *events.Bus
+	aria2Service *service.Aria2Service
+	mu           sync.Mutex
+	running      bool
+	cancelFn     context.CancelFunc
+	workerCtx    context.Context
 }
 
 func NewManager(taskStore *store.MemoryTaskStore, bus *events.Bus) *Manager {
 	return &Manager{
-		store: taskStore,
-		bus:   bus,
+		store:        taskStore,
+		bus:          bus,
+		aria2Service: service.NewAria2Service(),
 	}
 }
 
@@ -146,6 +149,38 @@ func (m *Manager) workerLoop(ctx context.Context) {
 		m.logf("[INFO] 开始处理队列任务：%s", task.Name)
 		m.publish(domain.Event{Type: domain.EventTaskStarted, TaskID: task.ID, Task: &task, Timestamp: now})
 		m.publishSnapshot()
+
+		if task.Source != "local" && task.OLPath != "" && task.Aria2RPCURL != "" {
+			_ = m.aria2Service.CheckVersion(task.Aria2RPCURL, task.Aria2RPCSecret)
+			task.Stage = domain.TaskStageDownload
+			task.StatusText = "下载中：" + task.Name
+			m.store.Update(task)
+			m.publishSnapshot()
+			downloadURL := task.OpenListBaseURL + "/d/" + task.OLPath
+			dstPath := task.CacheDir + "/" + task.Name
+			err := m.aria2Service.DownloadAndMonitor(ctx, task.Aria2RPCURL, task.Aria2RPCSecret, downloadURL, dstPath, task.DownloadThreads, func(progress service.Aria2Progress) {
+				m.store.UpdateDownloadProgress(task.ID, domain.Progress{
+					Percent: progress.Percent,
+					Speed:   progress.Speed,
+					ETA:     progress.ETA,
+					Done:    progress.Done,
+				}, fmt.Sprintf("下载中 %.1f%% | %s | %s", progress.Percent, progress.Speed, task.Name))
+				m.publishSnapshot()
+			})
+			if err != nil && ctx.Err() == nil {
+				finish := time.Now()
+				task.Status = domain.TaskStatusFailed
+				task.Stage = domain.TaskStageIdle
+				task.LastError = err.Error()
+				task.StatusText = "任务failed"
+				task.FinishedAt = &finish
+				m.store.Update(task)
+				m.logf("[ERROR] 下载失败：%s | %v", task.Name, err)
+				m.publish(domain.Event{Type: domain.EventTaskFinished, TaskID: task.ID, Task: &task, Timestamp: finish})
+				m.publishSnapshot()
+				continue
+			}
+		}
 
 		select {
 		case <-ctx.Done():

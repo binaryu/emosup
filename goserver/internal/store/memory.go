@@ -101,6 +101,22 @@ func (s *MemoryTaskStore) Update(task domain.Task) {
 	}
 }
 
+func (s *MemoryTaskStore) UpdateDownloadProgress(taskID string, progress domain.Progress, statusText string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if task, ok := s.tasks[taskID]; ok {
+		task.Download = progress
+		task.StatusText = statusText
+		task.Stage = domain.TaskStageDownload
+		s.tasks[taskID] = task
+	}
+	if s.currentTaskID == taskID {
+		s.download = progress
+		s.statusText = statusText
+		s.stage = domain.TaskStageDownload
+	}
+}
+
 func (s *MemoryTaskStore) SetWorkerRunning(running bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
