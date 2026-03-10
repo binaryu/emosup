@@ -6,7 +6,7 @@
 ## 主要功能
 
 -   **Web UI 操作**: 提供简洁的网页界面，方便进行批量上传。
--   **文件源支持**: 支持从 OpenList/Alist 扫描视频文件作为上传源。
+-   **文件源支持**: 支持从 OpenList/本地 扫描视频文件作为上传源。
 -   **高效传输**: 集成 Aria2 进行高速下载。
 -   **智能匹配**: 自动识别文件名中的季号和集号。
 
@@ -36,9 +36,12 @@
     -   **注意**: 确保您的 Aria2 RPC 服务已**启动并监听**，并且您知道其 RPC URL 和可能需要的 Secret。
 </details>
 
-## Docker 部署（推荐）
+## 直接运行
+    下载最新发行版 https://github.com/binaryu/emosup/releases  解压后运行
 
-本项目已移除一键脚本与自动部署逻辑，改为 Docker 部署方式。提供 `docker-compose.yml`，会自动构建镜像。
+
+
+## Docker 部署
 
 1. 克隆项目：
    ```bash
@@ -69,28 +72,3 @@
 - `CACHE_DIR`：缓存目录（容器内）
 - `DEFAULT_CHUNK_SIZE_MB`、`DEFAULT_PARALLEL_TASKS`、`DEFAULT_DOWNLOAD_THREADS`：下载与并发参数
 
-## 进阶使用
-
-<details>
-<summary><strong>开发者</strong></summary>
-
-1.  克隆本项目到本地：
-    ```bash
-    git clone https://github.com/binaryu/emosup.git
-    cd emosup
-    ```
-
-2.  安装 Python 依赖：
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-3.  运行主程序：
-    ```bash
-    # 默认在 12345 端口启动
-    python main.py
-
-    # 或者指定一个不同的端口
-    python main.py --port 8080
-    ```
-</details>

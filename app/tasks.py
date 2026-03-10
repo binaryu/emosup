@@ -86,6 +86,9 @@ class BatchWorker:
         conflicts: List[str] = []
         autofill_map: Dict[str, Tuple[int, int]] = {}
 
+        def item_key(file_item: UploadItem) -> str:
+            return file_item.ol_path or file_item.local_path or file_item.name
+
         if video_type == "tv" and match_mode == "single_season_autofill" and default_season is not None:
             used = {int(f.episode) for f in files if f.episode is not None}
             missing = sorted([f for f in files if f.episode is None], key=lambda x: x.name)
@@ -93,21 +96,23 @@ class BatchWorker:
             for f in missing:
                 while ep in used: ep += 1
                 if (default_season, ep) in ep_map:
-                    autofill_map[f.ol_path] = (default_season, ep)
+                    autofill_map[item_key(f)] = (default_season, ep)
                     used.add(ep)
                     ep += 1
 
         for f in files:
             s, e = f.season, f.episode
             if s is None or e is None:
-                ps, pe = guess_season_episode(f.name, f.ol_path)
+                source_path = f.local_path or f.ol_path or f.name
+                ps, pe = guess_season_episode(f.name, source_path)
                 if s is None: s = ps
                 if e is None: e = pe
-            if video_type == "tv" and (s is None or e is None) and f.ol_path in autofill_map:
-                s, e = autofill_map[f.ol_path]
+            current_key = item_key(f)
+            if video_type == "tv" and (s is None or e is None) and current_key in autofill_map:
+                s, e = autofill_map[current_key]
 
             row: Dict[str, Any] = {
-                "name": f.name, "ol_path": f.ol_path, "size_bytes": f.size_bytes,
+                "name": f.name, "ol_path": f.ol_path, "local_path": f.local_path, "size_bytes": f.size_bytes,
                 "season": s, "episode": e, "manual_id": f.manual_id,
                 "match_status": "missing", "match_text": "",
                 "server_item_type": "", "server_item_id": None, "server_has_media": None,
@@ -155,7 +160,7 @@ class BatchWorker:
                 "server_date_air": info.get("date_air") or "",
                 "match_text": f"S{s}E{e} -> ve-{info['item_id']} | {row['server_episode_title']} | has_media={info['has_media']}"
             })
-            matched_keys.setdefault(key, []).append(f.ol_path)
+            matched_keys.setdefault(key, []).append(current_key)
             enriched.append(row)
 
         for key, paths in matched_keys.items():
@@ -173,7 +178,8 @@ class BatchWorker:
                 return
 
             log(f"处理：{f.name}", "INFO")
-            ef = enrich_map.get(f.ol_path) or {}
+            file_key = f.ol_path or f.local_path or f.name
+            ef = enrich_map.get(file_key) or {}
             mstatus = ef.get("match_status")
 
             if mstatus != "ok":
@@ -262,7 +268,7 @@ class BatchWorker:
             enriched, conflicts = self.precheck_files(idx, selected, req.match_mode)
             if conflicts:
                 for c in conflicts: log(c, "WARN")
-            enrich_map = {x["ol_path"]: x for x in enriched}
+            enrich_map = {(x.get("ol_path") or x.get("local_path") or x.get("name")): x for x in enriched}
             log(f"=== 任务开始：files={len(selected)} tmdb={req.tmdb_id} match_mode={req.match_mode} parallel={req.parallel_tasks} ===", "INFO")
             
             sem = asyncio.Semaphore(req.parallel_tasks)

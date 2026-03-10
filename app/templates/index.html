@@ -135,7 +135,7 @@
             <button @click="scanLocal" :disabled="loading" class="px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-700 text-sm">
               {{ loading ? '扫描中...' : '扫描本地' }}
             </button>
-            <button @click="precheck" :disabled="prechecking || files.length===0 || !tmdbId || !emosToken" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 text-sm">
+            <button @click="precheck" :disabled="prechecking || files.length===0 || !tmdbId" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 text-sm">
               {{ prechecking ? '预检查中...' : '检查' }}
             </button>
             <span class="mx-2 h-6 w-px bg-slate-700"></span>
@@ -476,8 +476,8 @@ createApp({
           match_mode: matchMode.value,
           files: files.value.map(f => ({
             name: f.name,
-            ol_path: f.ol_path,
-            local_path: f.local_path,
+            ol_path: f.ol_path || '',
+            local_path: f.local_path || null,
             size_bytes: f.size_bytes || 0,
             season: (f.season !== null && f.season !== undefined && f.season !== '') ? parseInt(f.season) : null,
             episode: (f.episode !== null && f.episode !== undefined && f.episode !== '') ? parseInt(f.episode) : null,
@@ -497,9 +497,10 @@ createApp({
           video_type: res.data.video_type
         };
         conflicts.value = res.data.conflicts || [];
-        const m = new Map((res.data.files || []).map(x => [x.ol_path, x]));
+        const fileKeyOf = (x) => x.ol_path || x.local_path || x.name;
+        const m = new Map((res.data.files || []).map(x => [fileKeyOf(x), x]));
         files.value = files.value.map(f => {
-          const z = m.get(f.ol_path);
+          const z = m.get(fileKeyOf(f));
           if (!z) return f;
           return {
             ...f,
@@ -548,8 +549,8 @@ createApp({
         download_threads: downloadThreads.value,
         files: files.value.filter(f => f.selected).map(f => ({
           name: f.name,
-          ol_path: f.ol_path,
-          local_path: f.local_path,
+          ol_path: f.ol_path || '',
+          local_path: f.local_path || null,
           size_bytes: f.size_bytes || 0,
           season: (f.season !== null && f.season !== undefined && f.season !== '') ? parseInt(f.season) : null,
           episode: (f.episode !== null && f.episode !== undefined && f.episode !== '') ? parseInt(f.episode) : null,
