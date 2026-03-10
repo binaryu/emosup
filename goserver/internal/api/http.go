@@ -7,16 +7,23 @@ import (
 	"emosup/goserver/internal/config"
 	"emosup/goserver/internal/events"
 	"emosup/goserver/internal/queue"
+	"emosup/goserver/internal/service"
 )
 
 type Handler struct {
-	cfg     config.Config
-	manager *queue.Manager
-	bus     *events.Bus
+	cfg         config.Config
+	manager     *queue.Manager
+	bus         *events.Bus
+	scanService *service.ScanService
 }
 
 func NewHandler(cfg config.Config, manager *queue.Manager, bus *events.Bus) *Handler {
-	return &Handler{cfg: cfg, manager: manager, bus: bus}
+	return &Handler{
+		cfg:         cfg,
+		manager:     manager,
+		bus:         bus,
+		scanService: service.NewScanService(),
+	}
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -25,6 +32,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("/healthz", h.handleHealth)
 	mux.HandleFunc("/api/tasks", h.handleTasks)
 	mux.HandleFunc("/api/queue/add", h.handleEnqueue)
+	mux.HandleFunc("/api/scan_remote", h.handleScanRemote)
+	mux.HandleFunc("/api/precheck", h.handlePrecheck)
 	mux.HandleFunc("/api/events", h.handleEvents)
 	return mux
 }

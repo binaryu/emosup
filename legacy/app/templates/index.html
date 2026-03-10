@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh" class="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>EMOS Upload Panel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <style>
+    body { background:#0b1220; color:#cbd5e1; }
+    .terminal-scroll::-webkit-scrollbar { width: 6px; }
+    .terminal-scroll::-webkit-scrollbar-track { background: #111; }
+    .terminal-scroll::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+    code { background:#0f172a; padding:0 6px; border-radius:4px; }
+    .clamp2{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  </style>
+</head>
+<body class="h-screen overflow-hidden">
+<div id="app" class="h-full flex flex-col">
+{% raw %}
+  <header class="h-14 flex items-center justify-between px-6 bg-slate-900 border-b border-slate-700">
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="w-2.5 h-2.5 rounded-full" :class="task.is_running ? 'bg-green-400' : 'bg-gray-500'"></div>
+      <div class="text-white font-bold tracking-wider">EMOS Upload Panel</div>
+    </div>
+    <div class="flex items-center gap-4 text-xs">
+      <button @click="cancel" :disabled="!task.is_running" class="px-3 py-1 rounded bg-red-600 hover:bg-red-700 disabled:bg-gray-700">取消当前任务</button>
+    </div>
+  </header>
+  <main class="flex-1 flex overflow-hidden">
+    <section class="w-2/3 p-4 overflow-y-auto border-r border-slate-800 space-y-3">
+      <div class="bg-slate-900 border border-slate-700 rounded-lg p-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-white font-semibold">参数设置</div>
+            <div class="text-xs text-gray-500 mt-1 truncate" v-if="!showSettings">
+              tmdb={{ tmdbId || '-' }} | storage={{ storage }} | root={{ rootPath || '-' }} | local={{ localPath || '-' }} | openlist={{ openlistBase || '-' }}
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button @click="toggleSettings" class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-gray-200">
+              {{ showSettings ? '折叠' : '展开' }}
+            </button>
+          </div>
+        </div>
+        <div v-if="showSettings" class="mt-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">EMOS Token</label>
+              <input v-model="emosToken" type="password" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Storage</label>
+              <select v-model="storage" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none">
+                <option value="global">global</option>
+                <option value="default">default</option>
+                <option value="internal">internal</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">TMDB ID</label>
+              <input v-model="tmdbId" class="w-full bg-slate-950 border border-blue-500/40 rounded px-3 py-2 outline-none text-blue-300 font-bold">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">缓存目录</label>
+              <input v-model="cacheDir" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">OpenList Base URL</label>
+              <input v-model="openlistBase" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none" placeholder="http://127.0.0.1:5244">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">OpenList Token</label>
+              <input v-model="openlistToken" type="password" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">OPENLIST路径</label>
+              <input v-model="rootPath" @keyup.enter="scan" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none" placeholder="/来自星星的你">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">本地路径</label>
+              <input v-model="localPath" @keyup.enter="scanLocal" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none" placeholder="D:/Videos/来自星星的你">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Aria2 RPC URL</label>
+              <input v-model="aria2RpcUrl" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none" placeholder="http://127.0.0.1:6800/jsonrpc">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">Aria2 RPC Secret</label>
+              <input v-model="aria2RpcSecret" type="password" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">上传分片大小 (MB)</label>
+              <input v-model.number="chunkSizeMb" type="number" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">下载线程数</label>
+              <input v-model.number="downloadThreads" type="number" min="1" max="16" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none">
+            </div>
+          </div>
+          <div class="mt-3 flex flex-wrap items-center gap-5">
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" v-model="forceUpload">
+              <span class="text-gray-300">强制上传（已存在也上传）</span>
+            </label>
+            <div class="flex items-center gap-2 text-sm">
+              <span class="text-gray-300">匹配模式</span>
+              <select v-model="matchMode" class="bg-slate-950 border border-slate-600 rounded px-2 py-1 outline-none">
+                <option value="strict">strict（最精确）</option>
+                <option value="single_season_autofill">single_season_autofill（单季补号）</option>
+              </select>
+            </div>
+            <div class="text-xs text-gray-400">直链：<code>{{ openlistBase }}/d/路径</code></div>
+          </div>
+          <div v-if="treeInfo.title" class="mt-2 text-xs text-gray-300">
+            Tree：<span class="text-white font-semibold">{{ treeInfo.title }}</span>
+            <span class="text-gray-500">（vl_id={{ treeInfo.vl_id }}，default_season={{ treeInfo.default_season }}，type={{ treeInfo.video_type }}）</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-700 rounded-lg p-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <button @click="scan" :disabled="loading" class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-sm">{{ loading ? '扫描中...' : '扫描' }}</button>
+            <button @click="scanLocal" :disabled="loading" class="px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-700 text-sm">{{ loading ? '扫描中...' : '扫描本地' }}</button>
+            <button @click="precheck" :disabled="prechecking || files.length===0 || !tmdbId" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 text-sm">{{ prechecking ? '预检查中...' : '检查' }}</button>
+            <span class="mx-2 h-6 w-px bg-slate-700"></span>
+            <button @click="selectNeedUpload" :disabled="files.length===0" class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-700 text-sm">仅选未上传</button>
+            <button @click="invertSelection" :disabled="files.length===0" class="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-gray-700 text-sm">反选</button>
+            <button @click="clearSelection" :disabled="files.length===0" class="px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 disabled:bg-gray-700 text-sm">清空</button>
+          </div>
+          <div class="text-xs text-gray-400">已选：<span class="text-white font-semibold">{{ selectedCount }}</span> / {{ files.length }}</div>
+        </div>
+        <div v-if="conflicts.length" class="mt-2 text-xs text-yellow-300 space-y-1">
+          <div v-for="(c,i) in conflicts" :key="i">⚠ {{ c }}</div>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden">
+        <div class="grid grid-cols-12 bg-slate-950 p-2 text-xs text-gray-400 font-mono border-b border-slate-800">
+          <div class="col-span-1 text-center"><input type="checkbox" :checked="isAllSelected" :indeterminate.prop="selectedCount>0 && !isAllSelected" @click.prevent="toggleAllHeader"></div>
+          <div class="col-span-4">文件名/路径</div>
+          <div class="col-span-2 text-center">季/集</div>
+          <div class="col-span-3">服务器匹配</div>
+          <div class="col-span-2 text-right pr-2">大小</div>
+        </div>
+        <div class="max-h-[44vh] overflow-y-auto">
+          <template v-if="pagedFiles.length">
+            <div v-for="f in pagedFiles" :key="(f.local_path || f.ol_path || f.name)" class="grid grid-cols-12 items-center p-2 border-b border-slate-800/50 hover:bg-slate-800 text-sm">
+              <div class="col-span-1 text-center"><input type="checkbox" v-model="f.selected"></div>
+              <div class="col-span-4 min-w-0">
+                <div class="flex items-center gap-2 min-w-0">
+                  <div class="text-gray-200 truncate" :title="f.ol_path || f.local_path">{{ f.name }}</div>
+                  <span class="shrink-0 px-2 py-0.5 rounded-full border text-[10px] font-semibold" :class="(f.source || 'openlist') === 'local' ? 'bg-cyan-900/30 text-cyan-300 border-cyan-800' : 'bg-violet-900/30 text-violet-300 border-violet-800'">
+                    {{ (f.source || 'openlist') === 'local' ? '本地' : 'OpenList' }}
+                  </span>
+                </div>
+                <div class="text-xs text-gray-500 truncate" v-if="f.ol_path">OL: {{ f.ol_path }}</div>
+                <div class="text-xs text-gray-500 truncate" v-if="f.local_path">LOCAL: {{ f.local_path }}</div>
+              </div>
+              <div class="col-span-2 text-center text-xs">
+                <input v-model="f.season" placeholder="S" class="w-10 bg-transparent text-center border-b border-slate-700 outline-none">
+                <span class="text-gray-600">/</span>
+                <input v-model="f.episode" placeholder="E" class="w-10 bg-transparent text-center border-b border-slate-700 outline-none">
+                <input v-model="f.manual_id" placeholder="ve-id" class="w-20 mt-1 bg-transparent text-center border-b border-slate-700 outline-none" title="手动指定ID">
+              </div>
+              <div class="col-span-3 text-[11px] leading-4" :title="f.match_text || ''">
+                <div v-if="f.match_status === 'ok'" class="text-emerald-300 clamp2">{{ f.match_text }}</div>
+                <div v-else class="text-gray-300 clamp2">{{ f.match_text || '未预检查' }}</div>
+              </div>
+              <div class="col-span-2 text-right pr-2 text-xs font-mono text-gray-400">{{ f.size }}</div>
+            </div>
+          </template>
+          <div v-else class="p-6 text-gray-500 text-sm">暂无文件，请先扫描</div>
+        </div>
+        <div class="p-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 bg-slate-950/40">
+          <div class="flex items-center gap-3 text-xs text-gray-400">
+            <span>第 {{ page }} / {{ totalPages }} 页</span>
+            <button @click="prevPage" :disabled="page<=1" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:bg-gray-700">上一页</button>
+            <button @click="nextPage" :disabled="page>=totalPages" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:bg-gray-700">下一页</button>
+          </div>
+          <button @click="addToQueue" :disabled="selectedCount===0 || !tmdbId" class="px-6 py-2 rounded bg-green-600 hover:bg-green-700 disabled:bg-gray-700 font-bold">加入队列</button>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden">
+        <div class="px-4 py-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <div class="text-white font-semibold">上传队列</div>
+            <div class="text-xs text-gray-400 mt-1">可边跑边继续追加任务</div>
+          </div>
+          <div class="text-xs text-gray-400">等待 {{ task.queue_size || 0 }} / 成功 {{ task.counts?.success || 0 }} / 失败 {{ task.counts?.failed || 0 }}</div>
+        </div>
+        <div class="max-h-[24vh] overflow-y-auto">
+          <div v-if="task.recent_tasks?.length" v-for="item in task.recent_tasks.slice().reverse()" :key="item.task_id" class="p-3 border-b border-slate-800 text-sm">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-white truncate">{{ item.name }}</div>
+                <div class="text-xs text-gray-500 mt-1 truncate">{{ item.task_id }} | {{ item.server_item_type || '-' }}-{{ item.server_item_id ?? '' }}</div>
+              </div>
+              <span class="px-2 py-0.5 rounded-full text-[10px] border"
+                    :class="item.status === 'success' ? 'bg-emerald-900/30 text-emerald-300 border-emerald-800' : item.status === 'pending' ? 'bg-slate-800 text-gray-200 border-slate-700' : item.status === 'running' ? 'bg-blue-900/30 text-blue-300 border-blue-800' : item.status === 'skipped' ? 'bg-yellow-900/30 text-yellow-300 border-yellow-800' : item.status === 'cancelled' ? 'bg-orange-900/30 text-orange-300 border-orange-800' : 'bg-red-900/30 text-red-300 border-red-800'">
+                {{ item.status }}
+              </span>
+            </div>
+            <div class="mt-1 text-xs text-gray-400 clamp2">{{ item.error || item.match_text || '-' }}</div>
+          </div>
+          <div v-else class="p-6 text-gray-500 text-sm">暂无入队任务</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="w-1/3 flex flex-col bg-black">
+      <div class="p-5 bg-slate-900 border-b border-slate-800">
+        <div class="text-xs text-gray-500 font-mono mb-2">QUEUE STATUS</div>
+        <div class="text-sm text-white truncate">{{ task.current_file || '等待中...' }}</div>
+        <div class="text-xs text-cyan-300 mt-1 break-all">{{ task.status_text || '空闲' }}</div>
+        <div class="text-xs text-gray-400 mt-1">阶段：{{ task.stage }}</div>
+        <div v-if="task.last_error" class="mt-2 text-xs text-red-300 break-all">最近错误：{{ task.last_error }}</div>
+        <div class="mt-4">
+          <div class="flex justify-between text-xs text-gray-400">
+            <span>下载进度</span>
+            <div class="font-mono"><span>{{ task.download?.speed || '0 MB/s' }}</span><span class="ml-2 text-gray-500">ETA: {{ task.download?.eta || 'N/A' }}</span></div>
+          </div>
+          <div class="h-2 bg-slate-700 rounded overflow-hidden mt-1"><div class="h-full bg-cyan-500" :style="{width: (task.download?.percent || 0)+'%'}"></div></div>
+        </div>
+        <div class="mt-4">
+          <div class="flex justify-between text-xs text-gray-400">
+            <span>上传进度</span>
+            <div class="font-mono"><span>{{ task.upload?.speed || '0 MB/s' }}</span><span class="ml-2 text-gray-500">ETA: {{ task.upload?.eta || 'N/A' }}</span></div>
+          </div>
+          <div class="h-2 bg-slate-700 rounded overflow-hidden mt-1"><div class="h-full bg-blue-500" :style="{width: (task.upload?.percent || 0)+'%'}"></div></div>
+        </div>
+        <div class="mt-4 grid grid-cols-2 gap-3">
+          <div class="bg-slate-800 rounded p-2 text-center">
+            <div class="text-xs text-gray-500">已完成</div>
+            <div class="text-lg text-white font-bold">{{ task.completed_files }} / {{ task.total_files }}</div>
+          </div>
+          <div class="bg-slate-800 rounded p-2 text-center">
+            <div class="text-xs text-gray-500">排队中</div>
+            <div class="text-lg text-green-400 font-bold">{{ task.queue_size || 0 }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="flex-1 flex flex-col min-h-0">
+        <div class="px-4 py-2 bg-[#0c0c0c] border-b border-gray-800 flex justify-between items-center">
+          <span class="text-xs font-mono text-gray-500">TERMINAL OUTPUT</span>
+          <span class="text-xs text-gray-600">{{ wsConnected ? 'WS' : '' }}</span>
+        </div>
+        <div id="logs" class="flex-1 overflow-y-auto p-4 font-mono text-xs terminal-scroll space-y-1 bg-[#0c0c0c]">
+          <div v-for="(l,i) in logs" :key="i" class="break-all" :class="{'text-green-400': l.includes('[SUCCESS]'), 'text-red-400': l.includes('[ERROR]'), 'text-yellow-400': l.includes('[WARN]'), 'text-gray-300': l.includes('[INFO]')}">{{ l }}</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<script>
+const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
+createApp({
+  setup() {
+    const cfg = ref({aria2_ok:false, cache_dir:'', openlist_base_url:'', aria2_rpc_url:'', chunk_size_mb: 128, parallel_tasks: 1, download_threads: 4});
+    const files = ref([]);
+    const loading = ref(false);
+    const prechecking = ref(false);
+    const logs = ref([]);
+    const task = ref({download:{}, upload:{}, counts:{}, recent_tasks:[]});
+    const wsConnected = ref(false);
+    const treeInfo = ref({title:'', vl_id:null, default_season:null, video_type:''});
+    const conflicts = ref([]);
+    const emosToken = ref(localStorage.getItem('emos_token') || '');
+    const tmdbId = ref(localStorage.getItem('tmdb_id') || '');
+    const storage = ref(localStorage.getItem('storage') || 'global');
+    const cacheDir = ref(localStorage.getItem('cache_dir') || '');
+    const openlistBase = ref(localStorage.getItem('openlist_base') || '');
+    const openlistToken = ref(localStorage.getItem('openlist_token') || '');
+    const rootPath = ref(localStorage.getItem('root_path') || '/');
+    const localPath = ref(localStorage.getItem('local_path') || '');
+    const aria2RpcUrl = ref(localStorage.getItem('aria2_rpc_url') || '');
+    const aria2RpcSecret = ref(localStorage.getItem('aria2_rpc_secret') || '');
+    const chunkSizeMb = ref(parseInt(localStorage.getItem('chunk_size_mb') || '128'));
+    const downloadThreads = ref(parseInt(localStorage.getItem('download_threads') || '4'));
+    const forceUpload = ref(localStorage.getItem('force_upload') === '1');
+    const matchMode = ref(localStorage.getItem('match_mode') || 'strict');
+    const showSettings = ref(localStorage.getItem('show_settings') !== '0');
+    const page = ref(1);
+    const pageSize = 50;
+
+    const toggleSettings = () => {
+      showSettings.value = !showSettings.value;
+      localStorage.setItem('show_settings', showSettings.value ? '1' : '0');
+    };
+
+    const selectedCount = computed(() => files.value.filter(x => x.selected).length);
+    const isAllSelected = computed(() => files.value.length > 0 && selectedCount.value === files.value.length);
+    const totalPages = computed(() => Math.max(1, Math.ceil(files.value.length / pageSize)));
+    const pagedFiles = computed(() => {
+      const start = (page.value - 1) * pageSize;
+      return files.value.slice(start, start + pageSize);
+    });
+
+    watch(files, () => {
+      if (page.value > totalPages.value) page.value = totalPages.value;
+    }, { deep: true });
+
+    const prevPage = () => { if (page.value > 1) page.value -= 1; };
+    const nextPage = () => { if (page.value < totalPages.value) page.value += 1; };
+
+    const toggleAllHeader = () => {
+      const target = !isAllSelected.value;
+      files.value.forEach(f => f.selected = target);
+    };
+    const selectNeedUpload = () => files.value.forEach(f => { f.selected = (f.match_status === 'ok' && f.server_has_media === false); });
+    const clearSelection = () => files.value.forEach(f => f.selected = false);
+    const invertSelection = () => files.value.forEach(f => f.selected = !f.selected);
+
+    const loadConfig = async () => {
+      const r = await axios.get('/api/config');
+      cfg.value = r.data;
+      if (!cacheDir.value) cacheDir.value = r.data.cache_dir || '';
+      if (!openlistBase.value) openlistBase.value = r.data.openlist_base_url || 'http://127.0.0.1:5244';
+      if (!aria2RpcUrl.value) aria2RpcUrl.value = r.data.aria2_rpc_url || 'http://127.0.0.1:6800/jsonrpc';
+      if (!chunkSizeMb.value) chunkSizeMb.value = r.data.chunk_size_mb || 128;
+      if (!downloadThreads.value) downloadThreads.value = r.data.download_threads || 4;
+    };
+
+    const scan = async () => {
+      loading.value = true;
+      conflicts.value = [];
+      treeInfo.value = {title:'', vl_id:null, default_season:null, video_type:''};
+      try {
+        localStorage.setItem('root_path', rootPath.value);
+        localStorage.setItem('local_path', localPath.value);
+        localStorage.setItem('openlist_base', openlistBase.value);
+        localStorage.setItem('openlist_token', openlistToken.value);
+        const res = await axios.post('/api/scan_combined', {
+          root_path: rootPath.value,
+          local_path: localPath.value,
+          openlist_base_url: openlistBase.value,
+          openlist_token: openlistToken.value
+        });
+        if (res.data.error) {
+          alert(res.data.error);
+          files.value = [];
+        } else {
+          files.value = (res.data.files || []).map(x => ({...x, selected:true}));
+          page.value = 1;
+        }
+      } finally {
+        loading.value = false;
+      }
+    };
+
+    const scanLocal = async () => scan();
+
+    const precheck = async () => {
+      prechecking.value = true;
+      try {
+        localStorage.setItem('emos_token', emosToken.value);
+        localStorage.setItem('tmdb_id', tmdbId.value);
+        localStorage.setItem('match_mode', matchMode.value);
+        const payload = {
+          emos_token: emosToken.value,
+          emos_api_base: cfg.value.emos_api_base,
+          tmdb_id: parseInt(tmdbId.value),
+          match_mode: matchMode.value,
+          files: files.value.map(f => ({
+            name: f.name,
+            source: f.source || (f.local_path ? 'local' : 'openlist'),
+            ol_path: f.ol_path || '',
+            local_path: f.local_path || null,
+            size_bytes: f.size_bytes || 0,
+            season: (f.season !== null && f.season !== undefined && f.season !== '') ? parseInt(f.season) : null,
+            episode: (f.episode !== null && f.episode !== undefined && f.episode !== '') ? parseInt(f.episode) : null,
+            selected: !!f.selected,
+            manual_id: f.manual_id
+          }))
+        };
+        const res = await axios.post('/api/precheck', payload);
+        if (res.data.error) {
+          alert(res.data.error);
+          return;
+        }
+        treeInfo.value = {
+          title: res.data.title,
+          vl_id: res.data.vl_id,
+          default_season: res.data.default_season,
+          video_type: res.data.video_type
+        };
+        conflicts.value = res.data.conflicts || [];
+        const fileKeyOf = (x) => x.ol_path || x.local_path || x.name;
+        const m = new Map((res.data.files || []).map(x => [fileKeyOf(x), x]));
+        files.value = files.value.map(f => {
+          const z = m.get(fileKeyOf(f));
+          if (!z) return f;
+          return {
+            ...f,
+            season: (z.season !== null && z.season !== undefined) ? z.season : f.season,
+            episode: (z.episode !== null && z.episode !== undefined) ? z.episode : f.episode,
+            match_status: z.match_status,
+            match_text: z.match_text,
+            server_item_type: z.server_item_type,
+            server_item_id: z.server_item_id,
+            server_has_media: z.server_has_media,
+            server_episode_title: z.server_episode_title,
+            server_date_air: z.server_date_air,
+          };
+        });
+      } finally {
+        prechecking.value = false;
+      }
+    };
+
+    const addToQueue = async () => {
+      localStorage.setItem('emos_token', emosToken.value);
+      localStorage.setItem('tmdb_id', tmdbId.value);
+      localStorage.setItem('storage', storage.value);
+      localStorage.setItem('cache_dir', cacheDir.value);
+      localStorage.setItem('force_upload', forceUpload.value ? '1' : '0');
+      localStorage.setItem('match_mode', matchMode.value);
+      localStorage.setItem('aria2_rpc_url', aria2RpcUrl.value);
+      localStorage.setItem('aria2_rpc_secret', aria2RpcSecret.value);
+      localStorage.setItem('chunk_size_mb', chunkSizeMb.value);
+      localStorage.setItem('download_threads', downloadThreads.value);
+      const payload = {
+        emos_token: emosToken.value,
+        emos_api_base: cfg.value.emos_api_base,
+        tmdb_id: parseInt(tmdbId.value),
+        storage: storage.value,
+        force_upload: forceUpload.value,
+        match_mode: matchMode.value,
+        openlist_base_url: openlistBase.value,
+        openlist_token: openlistToken.value,
+        cache_dir: cacheDir.value,
+        aria2_rpc_url: aria2RpcUrl.value,
+        aria2_rpc_secret: aria2RpcSecret.value,
+        chunk_size_mb: chunkSizeMb.value,
+        parallel_tasks: 1,
+        download_threads: downloadThreads.value,
+        files: files.value.filter(f => f.selected).map(f => ({
+          name: f.name,
+          source: f.source || (f.local_path ? 'local' : 'openlist'),
+          ol_path: f.ol_path || '',
+          local_path: f.local_path || null,
+          size_bytes: f.size_bytes || 0,
+          season: (f.season !== null && f.season !== undefined && f.season !== '') ? parseInt(f.season) : null,
+          episode: (f.episode !== null && f.episode !== undefined && f.episode !== '') ? parseInt(f.episode) : null,
+          selected: true,
+          manual_id: f.manual_id
+        }))
+      };
+      const res = await axios.post('/api/queue/add', payload);
+      if (res.data.error) {
+        alert(res.data.error);
+        return;
+      }
+      files.value.forEach(f => { if (f.selected) f.selected = false; });
+    };
+
+    const cancel = async () => { await axios.post('/api/cancel'); };
+
+    const startWS = () => {
+      const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+      const ws = new WebSocket(wsUrl);
+      ws.onopen = () => wsConnected.value = true;
+      ws.onmessage = (evt) => {
+        const msg = JSON.parse(evt.data);
+        if (msg.logs?.length) logs.value.push(...msg.logs);
+        if (logs.value.length > 300) logs.value = logs.value.slice(-300);
+        if (msg.task) task.value = msg.task;
+        nextTick(() => {
+          const el = document.getElementById('logs');
+          if (el) el.scrollTop = el.scrollHeight;
+        });
+      };
+      ws.onclose = () => { wsConnected.value = false; setTimeout(startWS, 1000); };
+      ws.onerror = () => { try { ws.close(); } catch(e) {} };
+    };
+
+    onMounted(async () => {
+      await loadConfig();
+      startWS();
+    });
+
+    return {
+      cfg, files, logs, task, loading, wsConnected,
+      prechecking, treeInfo, conflicts,
+      emosToken, tmdbId, storage, cacheDir,
+      openlistBase, openlistToken, rootPath, localPath, forceUpload, matchMode, aria2RpcUrl, aria2RpcSecret, chunkSizeMb, downloadThreads,
+      showSettings, toggleSettings,
+      selectedCount, isAllSelected, toggleAllHeader,
+      selectNeedUpload, invertSelection, clearSelection,
+      scan, scanLocal, precheck, addToQueue, cancel,
+      page, totalPages, pagedFiles, prevPage, nextPage
+    };
+  }
+}).mount('#app');
+</script>
+{% endraw %}
+</body>
+</html>

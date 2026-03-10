@@ -12,6 +12,9 @@
 - 单 worker 队列管理器骨架
 - SSE 事件推送接口
 - 基础任务面板首页
+- OpenList 远程扫描接口
+- 预检查逻辑第一版迁移
+- legacy 参考代码目录
 
 ## 当前接口
 - `GET /`
@@ -19,6 +22,8 @@
 - `GET /api/tasks`
 - `POST /api/queue/add`
 - `GET /api/events`
+- `POST /api/scan_remote`
+- `POST /api/precheck`
 
 ## 当前页面能力
 访问根路径 [`/`](goserver/internal/api/http.go) 可看到一个基础任务面板，支持：
@@ -27,6 +32,13 @@
 - 查看当前队列长度
 - 查看 worker 状态
 - 通过 SSE 实时刷新任务列表
+
+## legacy 参考代码
+旧 Python 逻辑已经恢复到 [`legacy/`](legacy/)，仅作为迁移参考：
+- [`legacy/app/tasks.py`](legacy/app/tasks.py)
+- [`legacy/app/upload.py`](legacy/app/upload.py)
+- [`legacy/app/aria2.py`](legacy/app/aria2.py)
+- [`legacy/app/openlist.py`](legacy/app/openlist.py)
 
 ## 运行方式
 在 [`goserver/go.mod`](goserver/go.mod) 所在目录执行：
@@ -38,9 +50,8 @@ go run ./cmd/server
 默认监听地址：`127.0.0.1:8081` 对应配置环境变量 `GO_EMOS_HTTP_ADDR`，默认值为 `:8081`。
 
 ## 下一步
-- 接入真实任务执行器，替换当前模拟完成逻辑
-- 接入 OpenList 扫描和本地扫描
-- 接入 EMOS 预检查
-- 接入 aria2 下载与上传流程
-- 增加取消任务与日志流
+- 接入真实 EMOS tree 获取，替换当前预检查对外部 tree 的依赖输入
+- 增加本地扫描接口
+- 迁移队列执行、取消和日志事件
+- 迁移 aria2 下载和上传链路
 - 将当前基础面板升级为完整业务页面
