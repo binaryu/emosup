@@ -43,6 +43,7 @@ func (m *Manager) Enqueue(req EnqueueRequest) domain.Task {
 		CreatedAt:   now,
 	}
 	m.store.Enqueue(task)
+	m.logf("[INFO] 已加入队列：%s", task.Name)
 	m.publish(domain.Event{Type: domain.EventTaskQueued, TaskID: task.ID, Task: &task, Timestamp: now})
 	m.publishSnapshot()
 	m.EnsureWorker(context.Background())
@@ -74,25 +75,43 @@ func (m *Manager) workerLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			m.logf("[WARN] worker loop cancelled")
 			return
 		default:
 		}
 
 		task, ok := m.store.Dequeue()
 		if !ok {
+			m.logf("[INFO] worker loop exit: queue empty")
 			return
 		}
 
 		now := time.Now()
 		task.Status = domain.TaskStatusRunning
 		task.Stage = domain.TaskStageRunning
-		task.StatusText = "开始处理"
+		task.StatusText = "开始处理：" + task.Name
+		task.CurrentFile = task.Name
 		task.StartedAt = &now
 		m.store.Update(task)
+		m.logf("[INFO] 开始处理队列任务：%s", task.Name)
 		m.publish(domain.Event{Type: domain.EventTaskStarted, TaskID: task.ID, Task: &task, Timestamp: now})
 		m.publishSnapshot()
 
-		time.Sleep(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			finish := time.Now()
+			task.Status = domain.TaskStatusCancelled
+			task.Stage = domain.TaskStageIdle
+			task.LastError = "cancelled"
+			task.StatusText = "任务cancelled"
+			task.FinishedAt = &finish
+			m.store.Update(task)
+			m.logf("[WARN] 任务取消：%s", task.Name)
+			m.publish(domain.Event{Type: domain.EventTaskFinished, TaskID: task.ID, Task: &task, Timestamp: finish})
+			m.publishSnapshot()
+			return
+		case <-time.After(2 * time.Second):
+		}
 
 		finish := time.Now()
 		task.Status = domain.TaskStatusSuccess
@@ -102,6 +121,7 @@ func (m *Manager) workerLoop(ctx context.Context) {
 		task.Download = domain.Progress{Percent: 100, Speed: "done", ETA: "N/A", Done: true}
 		task.Upload = domain.Progress{Percent: 100, Speed: "done", ETA: "N/A", Done: true}
 		m.store.Update(task)
+		m.logf("[SUCCESS] 任务完成：%s", task.Name)
 		m.publish(domain.Event{Type: domain.EventTaskFinished, TaskID: task.ID, Task: &task, Timestamp: finish})
 		m.publishSnapshot()
 	}
@@ -109,6 +129,10 @@ func (m *Manager) workerLoop(ctx context.Context) {
 
 func (m *Manager) Snapshot() domain.Snapshot {
 	return m.store.Snapshot()
+}
+
+func (m *Manager) LogsTail(n int) []string {
+	return m.store.LogsTail(n)
 }
 
 func (m *Manager) publish(event domain.Event) {
@@ -122,4 +146,10 @@ func (m *Manager) publishSnapshot() {
 		Snapshot:  &snapshot,
 		Timestamp: time.Now(),
 	})
+}
+
+func (m *Manager) logf(format string, args ...any) {
+	line := fmt.Sprintf(format, args...)
+	m.store.AppendLog(line)
+	m.bus.Publish(domain.Event{Type: domain.EventLog, Message: line, Timestamp: time.Now()})
 }
