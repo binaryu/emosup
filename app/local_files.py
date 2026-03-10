@@ -29,7 +29,8 @@ class LocalFileScanner:
             size = f.stat().st_size
             out.append({
                 "name": rel_name,
-                "ol_path": full,
+                "source": "local",
+                "ol_path": "",
                 "local_path": full,
                 "size_bytes": size,
                 "season": s,

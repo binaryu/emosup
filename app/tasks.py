@@ -195,16 +195,24 @@ class BatchWorker:
                     state.task["completed_files"] += 1
                 return
 
-            if f.local_path:
-                cache_path = str(Path(f.local_path).resolve())
-                if not Path(cache_path).exists():
-                    log(f"本地文件不存在：{cache_path}", "ERROR")
+            source = (f.source or ("local" if f.local_path else "openlist")).lower()
+            if source == "local":
+                cache_path = str(Path(f.local_path or "").resolve())
+                if not f.local_path or not Path(cache_path).exists():
+                    log(f"本地文件不存在：{cache_path or f.local_path}", "ERROR")
                     with state.lock:
                         state.task["completed_files"] += 1
                     return
+                log(f"使用本地文件直传：{cache_path}", "INFO")
             else:
+                if not f.ol_path:
+                    log(f"OpenList 路径缺失：{f.name}", "ERROR")
+                    with state.lock:
+                        state.task["completed_files"] += 1
+                    return
                 direct_url = build_direct_url(req.openlist_base_url, f.ol_path)
                 cache_path = str(Path(req.cache_dir).resolve() / Path(f.name).name)
+                log(f"通过 OpenList + aria2 下载缓存：{f.ol_path}", "INFO")
                 if not aria2_client.download_and_monitor(direct_url, cache_path, req.download_threads):
                     log(f"下载失败：请检查 aria2 日志 -> {cache_path}", "ERROR")
                     with state.lock:
@@ -229,7 +237,7 @@ class BatchWorker:
                 log(f"处理异常：{f.name} | {ex}", "ERROR")
 
             if upload_ok and save_ok:
-                if f.local_path:
+                if source == "local":
                     log("本地文件上传完成（保留源文件）", "INFO")
                 else:
                     safe_unlink(Path(cache_path))
@@ -253,8 +261,9 @@ class BatchWorker:
                 req.emos_token, req.emos_api_base, req.openlist_base_url, req.openlist_token, req.cache_dir, req.aria2_rpc_url, req.aria2_rpc_secret, req.chunk_size_mb, req.parallel_tasks, req.download_threads
             ensure_dir(req.cache_dir)
 
-            aria2_client = Aria2RpcClient(req.aria2_rpc_url, req.aria2_rpc_secret)
-            if not aria2_client.check_version():
+            needs_aria2 = any((f.source or ("local" if f.local_path else "openlist")).lower() != "local" for f in selected)
+            aria2_client = Aria2RpcClient(req.aria2_rpc_url, req.aria2_rpc_secret) if needs_aria2 else None
+            if needs_aria2 and not aria2_client.check_version():
                 log("Aria2 RPC 连接失败，请检查 URL 和密钥", "ERROR")
                 return
 

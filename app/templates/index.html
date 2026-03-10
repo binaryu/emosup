@@ -200,7 +200,15 @@
                     <input type="checkbox" v-model="f.selected">
                   </div>
                   <div class="col-span-4 min-w-0">
-                    <div class="text-gray-200 truncate" :title="f.ol_path || f.local_path">{{ f.name }}</div>
+                    <div class="flex items-center gap-2 min-w-0">
+                      <div class="text-gray-200 truncate" :title="f.ol_path || f.local_path">{{ f.name }}</div>
+                      <span class="shrink-0 px-2 py-0.5 rounded-full border text-[10px] font-semibold"
+                            :class="(f.source || 'openlist') === 'local'
+                              ? 'bg-cyan-900/30 text-cyan-300 border-cyan-800'
+                              : 'bg-violet-900/30 text-violet-300 border-violet-800'">
+                        {{ (f.source || 'openlist') === 'local' ? '本地' : 'OpenList' }}
+                      </span>
+                    </div>
                     <div class="text-xs text-gray-500 truncate" v-if="f.ol_path">OL: {{ f.ol_path }}</div>
                     <div class="text-xs text-gray-500 truncate" v-if="f.local_path">LOCAL: {{ f.local_path }}</div>
                   </div>
@@ -476,6 +484,7 @@ createApp({
           match_mode: matchMode.value,
           files: files.value.map(f => ({
             name: f.name,
+            source: f.source || (f.local_path ? 'local' : 'openlist'),
             ol_path: f.ol_path || '',
             local_path: f.local_path || null,
             size_bytes: f.size_bytes || 0,
@@ -549,6 +558,7 @@ createApp({
         download_threads: downloadThreads.value,
         files: files.value.filter(f => f.selected).map(f => ({
           name: f.name,
+          source: f.source || (f.local_path ? 'local' : 'openlist'),
           ol_path: f.ol_path || '',
           local_path: f.local_path || null,
           size_bytes: f.size_bytes || 0,

@@ -17,6 +17,7 @@ from pydantic import Field
 
 class UploadItem(BaseModel):
     name: str
+    source: str = "openlist"
     ol_path: str = ""
     local_path: Optional[str] = None
     size_bytes: int = 0

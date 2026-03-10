@@ -81,24 +81,35 @@ def _merge_files(remote_files, local_files):
         key = _normalize_key(item.get("name"))
         if not key:
             continue
-        merged[key] = {**item, "source": "remote"}
+        entry = dict(item)
+        entry["source"] = entry.get("source") or "openlist"
+        merged[key] = entry
     for item in local_files or []:
         key = _normalize_key(item.get("name"))
         if not key:
             continue
+        entry = dict(item)
+        entry["source"] = entry.get("source") or "local"
         if key in merged:
             base = merged[key]
             base.update({
-                "local_path": item.get("local_path") or item.get("ol_path"),
-                "source": "both",
+                "local_path": entry.get("local_path") or base.get("local_path"),
+                "size_bytes": base.get("size_bytes") or entry.get("size_bytes") or 0,
+                "season": base.get("season") if base.get("season") is not None else entry.get("season"),
+                "episode": base.get("episode") if base.get("episode") is not None else entry.get("episode"),
+                "source": "local",
             })
-            if not base.get("size_bytes") and item.get("size_bytes"):
-                base["size_bytes"] = item.get("size_bytes")
             merged[key] = base
         else:
-            merged[key] = {**item, "source": "local"}
+            merged[key] = entry
     out = list(merged.values())
-    out.sort(key=lambda x: (x.get("season") or 0, x.get("episode") or 0, x.get("name") or ""))
+    out.sort(key=lambda x: (
+        x.get("season") or 0,
+        x.get("episode") or 0,
+        _normalize_key(x.get("name")),
+        x.get("source") or "",
+        x.get("ol_path") or x.get("local_path") or "",
+    ))
     return out
 
 
