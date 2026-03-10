@@ -15,12 +15,19 @@ from .config import state, DEFAULT_EMOS_API_BASE, DEFAULT_CACHE_DIR, DEFAULT_OPE
 from .utils import ensure_dir
 from .tasks import worker
 from .upload import register_upload_routes, UploadItem
-from .openlist import register_openlist_routes
-from .local_files import register_local_routes
+from .openlist import register_openlist_routes, OpenListClient
+from .local_files import register_local_routes, LocalFileScanner
 
 
 class ScanRemoteRequest(BaseModel):
     root_path: str
+    openlist_base_url: str = DEFAULT_OPENLIST_BASE
+    openlist_token: str = DEFAULT_OPENLIST_TOKEN
+
+
+class ScanCombinedRequest(BaseModel):
+    root_path: Optional[str] = None
+    local_path: Optional[str] = None
     openlist_base_url: str = DEFAULT_OPENLIST_BASE
     openlist_token: str = DEFAULT_OPENLIST_TOKEN
 
@@ -62,6 +69,59 @@ async def api_config():
         "parallel_tasks": state.parallel_tasks,
         "download_threads": state.download_threads,
     }
+
+
+def _normalize_key(name: str) -> str:
+    return (name or "").strip().lower()
+
+
+def _merge_files(remote_files, local_files):
+    merged = {}
+    for item in remote_files or []:
+        key = _normalize_key(item.get("name"))
+        if not key:
+            continue
+        merged[key] = {**item, "source": "remote"}
+    for item in local_files or []:
+        key = _normalize_key(item.get("name"))
+        if not key:
+            continue
+        if key in merged:
+            base = merged[key]
+            base.update({
+                "local_path": item.get("local_path") or item.get("ol_path"),
+                "source": "both",
+            })
+            if not base.get("size_bytes") and item.get("size_bytes"):
+                base["size_bytes"] = item.get("size_bytes")
+            merged[key] = base
+        else:
+            merged[key] = {**item, "source": "local"}
+    out = list(merged.values())
+    out.sort(key=lambda x: (x.get("season") or 0, x.get("episode") or 0, x.get("name") or ""))
+    return out
+
+
+@app.post("/api/scan_combined")
+async def scan_combined(req: ScanCombinedRequest):
+    try:
+        state.task["stage"] = "scan"
+        remote_files = []
+        local_files = []
+        if req.root_path:
+            c = OpenListClient(req.openlist_base_url, req.openlist_token)
+            remote_files = c.walk_videos(req.root_path)
+        if req.local_path:
+            local_files = LocalFileScanner.scan(req.local_path)
+        files = _merge_files(remote_files, local_files)
+        for x in files:
+            sz = int(x.get("size_bytes") or 0)
+            x["size"] = f"{sz / 1024 / 1024:.1f} MB" if sz else "unknown"
+        state.task["stage"] = "idle"
+        return {"files": files}
+    except Exception as e:
+        state.task["stage"] = "idle"
+        return {"error": str(e)}
 
 
 @app.post("/api/precheck")

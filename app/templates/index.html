@@ -162,7 +162,7 @@
           <div class="col-span-1 text-center">
             <input type="checkbox" :checked="isAllSelected" :indeterminate.prop="selectedCount>0 && !isAllSelected" @click.prevent="toggleAllHeader">
           </div>
-          <div class="col-span-4">文件名/远端路径</div>
+          <div class="col-span-4">文件名/路径</div>
           <div class="col-span-2 text-center">季/集</div>
           <div class="col-span-3">服务器匹配</div>
           <div class="col-span-2 text-right pr-2">大小</div>
@@ -195,13 +195,14 @@
                 </div>
               </div>
               <div v-show="!collapsedSeasons[g.key]">
-                <div v-for="(f) in g.items" :key="f.ol_path" class="grid grid-cols-12 items-center p-2 border-b border-slate-800/50 hover:bg-slate-800 text-sm">
+                <div v-for="(f) in g.items" :key="(f.local_path || f.ol_path)" class="grid grid-cols-12 items-center p-2 border-b border-slate-800/50 hover:bg-slate-800 text-sm">
                   <div class="col-span-1 text-center">
                     <input type="checkbox" v-model="f.selected">
                   </div>
                   <div class="col-span-4 min-w-0">
-                    <div class="text-gray-200 truncate" :title="f.ol_path">{{ f.name }}</div>
-                    <div class="text-xs text-gray-500 truncate">{{ f.ol_path }}</div>
+                    <div class="text-gray-200 truncate" :title="f.ol_path || f.local_path">{{ f.name }}</div>
+                    <div class="text-xs text-gray-500 truncate" v-if="f.ol_path">OL: {{ f.ol_path }}</div>
+                    <div class="text-xs text-gray-500 truncate" v-if="f.local_path">LOCAL: {{ f.local_path }}</div>
                   </div>
                   <div class="col-span-2 text-center text-xs">
                     <input v-model="f.season" placeholder="S" class="w-10 bg-transparent text-center border-b border-slate-700 outline-none">
@@ -438,10 +439,12 @@ createApp({
       treeInfo.value = {title:'', vl_id:null, default_season:null, video_type:''};
       try {
         localStorage.setItem('root_path', rootPath.value);
+        localStorage.setItem('local_path', localPath.value);
         localStorage.setItem('openlist_base', openlistBase.value);
         localStorage.setItem('openlist_token', openlistToken.value);
-        const res = await axios.post('/api/scan_remote', {
+        const res = await axios.post('/api/scan_combined', {
           root_path: rootPath.value,
+          local_path: localPath.value,
           openlist_base_url: openlistBase.value,
           openlist_token: openlistToken.value
         });
@@ -458,23 +461,7 @@ createApp({
       }
     };
     const scanLocal = async () => {
-      loading.value = true;
-      conflicts.value = [];
-      treeInfo.value = {title:'', vl_id:null, default_season:null, video_type:''};
-      try {
-        localStorage.setItem('local_path', localPath.value);
-        const res = await axios.post('/api/scan_local', { local_path: localPath.value });
-        if (res.data.error) {
-          alert(res.data.error);
-          files.value = [];
-        } else {
-          files.value = (res.data.files || []).map(x => ({...x, selected:true}));
-          collapsedSeasons.value = {};
-          ensureCollapseKeys();
-        }
-      } finally {
-        loading.value = false;
-      }
+      return scan();
     };
     const precheck = async () => {
       prechecking.value = true;
@@ -490,6 +477,7 @@ createApp({
           files: files.value.map(f => ({
             name: f.name,
             ol_path: f.ol_path,
+            local_path: f.local_path,
             size_bytes: f.size_bytes || 0,
             season: (f.season !== null && f.season !== undefined && f.season !== '') ? parseInt(f.season) : null,
             episode: (f.episode !== null && f.episode !== undefined && f.episode !== '') ? parseInt(f.episode) : null,
