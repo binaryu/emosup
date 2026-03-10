@@ -1,6 +1,6 @@
 # Go Rewrite Skeleton
 
-这个目录用于在不删除现有 Python 项目的前提下，逐步重建一个更稳定的 Go 后端。
+这个目录用于在新分支中逐步重建一个更稳定的 Go 后端。
 
 ## 当前已完成
 - 基础 Go module
@@ -11,12 +11,22 @@
 - 事件总线
 - 单 worker 队列管理器骨架
 - SSE 事件推送接口
+- 基础任务面板首页
 
 ## 当前接口
+- `GET /`
 - `GET /healthz`
 - `GET /api/tasks`
 - `POST /api/queue/add`
 - `GET /api/events`
+
+## 当前页面能力
+访问根路径 [`/`](goserver/internal/api/http.go) 可看到一个基础任务面板，支持：
+- 输入任务名称
+- 加入队列
+- 查看当前队列长度
+- 查看 worker 状态
+- 通过 SSE 实时刷新任务列表
 
 ## 运行方式
 在 [`goserver/go.mod`](goserver/go.mod) 所在目录执行：
@@ -33,4 +43,4 @@ go run ./cmd/server
 - 接入 EMOS 预检查
 - 接入 aria2 下载与上传流程
 - 增加取消任务与日志流
-- 迁移前端状态面板到新接口
+- 将当前基础面板升级为完整业务页面

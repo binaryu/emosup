@@ -21,11 +21,17 @@ func NewHandler(cfg config.Config, manager *queue.Manager, bus *events.Bus) *Han
 
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/healthz", h.handleHealth)
 	mux.HandleFunc("/api/tasks", h.handleTasks)
 	mux.HandleFunc("/api/queue/add", h.handleEnqueue)
 	mux.HandleFunc("/api/events", h.handleEvents)
 	return mux
+}
+
+func (h *Handler) handleIndex(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(indexHTML))
 }
 
 func (h *Handler) handleHealth(w http.ResponseWriter, _ *http.Request) {
