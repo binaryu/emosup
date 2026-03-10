@@ -14,6 +14,7 @@
 - 基础任务面板首页
 - OpenList 远程扫描接口
 - 本地扫描接口第一版
+- scan_combined 合并扫描逻辑第一版
 - EMOS tree 获取第一版
 - 预检查逻辑第一版迁移
 - legacy 参考代码目录
@@ -26,6 +27,7 @@
 - `GET /api/events`
 - `POST /api/scan_remote`
 - `POST /api/scan_local`
+- `POST /api/scan_combined`
 - `POST /api/precheck`
 
 ## 当前页面能力
@@ -44,6 +46,7 @@
 - [`legacy/app/openlist.py`](legacy/app/openlist.py)
 - [`legacy/app/clients.py`](legacy/app/clients.py)
 - [`legacy/app/local_files.py`](legacy/app/local_files.py)
+- [`legacy/app/main.py`](legacy/app/main.py)
 
 ## 运行方式
 在 [`goserver/go.mod`](goserver/go.mod) 所在目录执行：
@@ -55,7 +58,7 @@ go run ./cmd/server
 默认监听地址：`127.0.0.1:8081` 对应配置环境变量 `GO_EMOS_HTTP_ADDR`，默认值为 `:8081`。
 
 ## 下一步
-- 迁移 scan_combined 合并扫描逻辑
-- 迁移队列执行、取消和日志事件
+- 迁移队列执行、取消和状态统计
+- 迁移日志事件流
 - 迁移 aria2 下载和上传链路
 - 将当前基础面板升级为完整业务页面

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"emosup/goserver/internal/domain"
-	"emosup/goserver/internal/service"
 )
 
 func (h *Handler) handleScanRemote(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +56,50 @@ func (h *Handler) handleScanLocal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"files": files})
 }
 
+func (h *Handler) handleScanCombined(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	var req domain.ScanCombinedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if req.RootPath == "" && req.LocalPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "root_path or local_path is required"})
+		return
+	}
+
+	remoteFiles := make([]domain.ScanItem, 0)
+	localFiles := make([]domain.ScanItem, 0)
+	var err error
+
+	if req.RootPath != "" {
+		remoteFiles, err = h.scanService.WalkVideos(domain.ScanRemoteRequest{
+			RootPath:        req.RootPath,
+			OpenListBaseURL: req.OpenListBaseURL,
+			OpenListToken:   req.OpenListToken,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
+	if req.LocalPath != "" {
+		localFiles, err = h.scanService.WalkLocal(req.LocalPath)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
+	files := h.scanService.MergeFiles(remoteFiles, localFiles)
+	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+}
+
 func (h *Handler) handlePrecheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -77,8 +120,7 @@ func (h *Handler) handlePrecheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emos := service.NewEmosService()
-	tree, err := emos.GetTreeByTMDB(req.EmosAPIBase, req.EmosToken, req.TMDBID, 180*time.Second)
+	tree, err := h.emosService.GetTreeByTMDB(req.EmosAPIBase, req.EmosToken, req.TMDBID, 180*time.Second)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return

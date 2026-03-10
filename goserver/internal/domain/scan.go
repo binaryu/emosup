@@ -37,6 +37,13 @@ type ScanLocalRequest struct {
 	LocalPath string `json:"local_path"`
 }
 
+type ScanCombinedRequest struct {
+	RootPath        string `json:"root_path,omitempty"`
+	LocalPath       string `json:"local_path,omitempty"`
+	OpenListBaseURL string `json:"openlist_base_url,omitempty"`
+	OpenListToken   string `json:"openlist_token,omitempty"`
+}
+
 type PrecheckRequest struct {
 	TMDBID      int        `json:"tmdb_id"`
 	MatchMode   MatchMode  `json:"match_mode"`
