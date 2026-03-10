@@ -20,10 +20,6 @@ type Manager struct {
 	workerCtx context.Context
 }
 
-type EnqueueRequest struct {
-	Name string `json:"name"`
-}
-
 func NewManager(taskStore *store.MemoryTaskStore, bus *events.Bus) *Manager {
 	return &Manager{
 		store: taskStore,
@@ -31,10 +27,17 @@ func NewManager(taskStore *store.MemoryTaskStore, bus *events.Bus) *Manager {
 	}
 }
 
-func (m *Manager) Enqueue(req EnqueueRequest) domain.Task {
+func (m *Manager) Enqueue(req EnqueueRequest) any {
+	if len(req.Files) > 0 {
+		return m.enqueueBatch(req)
+	}
+	return m.enqueueSimple(req)
+}
+
+func (m *Manager) enqueueSimple(req EnqueueRequest) domain.Task {
 	now := time.Now()
 	task := domain.Task{
-		ID:          fmt.Sprintf("task-%d", now.UnixNano()),
+		ID:          buildTaskID(now, 0),
 		Name:        req.Name,
 		Status:      domain.TaskStatusPending,
 		Stage:       domain.TaskStageQueued,
@@ -50,6 +53,29 @@ func (m *Manager) Enqueue(req EnqueueRequest) domain.Task {
 	m.publishSnapshot()
 	m.EnsureWorker(context.Background())
 	return task
+}
+
+func (m *Manager) enqueueBatch(req EnqueueRequest) QueueAddResult {
+	now := time.Now()
+	queuedIDs := make([]string, 0)
+	added := 0
+	skipped := 0
+	for idx, item := range req.Files {
+		if !item.Selected {
+			skipped++
+			continue
+		}
+		id := buildTaskID(now, idx)
+		task := item.toTask(id, req, now)
+		m.store.Enqueue(task)
+		m.logf("[INFO] 已加入队列：%s", task.Name)
+		m.publish(domain.Event{Type: domain.EventTaskQueued, TaskID: task.ID, Task: &task, Timestamp: now})
+		queuedIDs = append(queuedIDs, id)
+		added++
+	}
+	m.publishSnapshot()
+	m.EnsureWorker(context.Background())
+	return QueueAddResult{Added: added, Skipped: skipped, QueuedIDs: queuedIDs}
 }
 
 func (m *Manager) EnsureWorker(parent context.Context) {

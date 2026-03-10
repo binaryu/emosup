@@ -72,13 +72,13 @@ func (h *Handler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	if req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+	if req.Name == "" && len(req.Files) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name or files is required"})
 		return
 	}
 
-	task := h.manager.Enqueue(req)
-	writeJSON(w, http.StatusAccepted, task)
+	result := h.manager.Enqueue(req)
+	writeJSON(w, http.StatusAccepted, result)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
