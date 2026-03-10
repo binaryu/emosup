@@ -36,6 +36,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("/api/status", h.handleStatus)
 	mux.HandleFunc("/api/queue/status", h.handleQueueStatus)
 	mux.HandleFunc("/api/queue/add", h.handleEnqueue)
+	mux.HandleFunc("/api/cancel", h.handleCancel)
 	mux.HandleFunc("/api/scan_remote", h.handleScanRemote)
 	mux.HandleFunc("/api/scan_local", h.handleScanLocal)
 	mux.HandleFunc("/api/scan_combined", h.handleScanCombined)

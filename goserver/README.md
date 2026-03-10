@@ -17,13 +17,19 @@
 - scan_combined 合并扫描逻辑第一版
 - EMOS tree 获取第一版
 - 预检查逻辑第一版迁移
+- 队列状态汇总第一版
+- 日志事件流第一版
+- 取消当前任务接口第一版
 - legacy 参考代码目录
 
 ## 当前接口
 - `GET /`
 - `GET /healthz`
 - `GET /api/tasks`
+- `GET /api/status`
+- `GET /api/queue/status`
 - `POST /api/queue/add`
+- `POST /api/cancel`
 - `GET /api/events`
 - `POST /api/scan_remote`
 - `POST /api/scan_local`
@@ -58,7 +64,7 @@ go run ./cmd/server
 默认监听地址：`127.0.0.1:8081` 对应配置环境变量 `GO_EMOS_HTTP_ADDR`，默认值为 `:8081`。
 
 ## 下一步
-- 迁移队列执行、取消和状态统计
-- 迁移日志事件流
-- 迁移 aria2 下载和上传链路
+- 迁移更完整的批量入队请求结构
+- 迁移 aria2 下载链路
+- 迁移上传与保存链路
 - 将当前基础面板升级为完整业务页面

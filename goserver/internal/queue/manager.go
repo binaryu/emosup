@@ -12,10 +12,12 @@ import (
 )
 
 type Manager struct {
-	store   *store.MemoryTaskStore
-	bus     *events.Bus
-	mu      sync.Mutex
-	running bool
+	store     *store.MemoryTaskStore
+	bus       *events.Bus
+	mu        sync.Mutex
+	running   bool
+	cancelFn  context.CancelFunc
+	workerCtx context.Context
 }
 
 type EnqueueRequest struct {
@@ -50,12 +52,15 @@ func (m *Manager) Enqueue(req EnqueueRequest) domain.Task {
 	return task
 }
 
-func (m *Manager) EnsureWorker(ctx context.Context) {
+func (m *Manager) EnsureWorker(parent context.Context) {
 	m.mu.Lock()
 	if m.running {
 		m.mu.Unlock()
 		return
 	}
+	ctx, cancel := context.WithCancel(parent)
+	m.workerCtx = ctx
+	m.cancelFn = cancel
 	m.running = true
 	m.store.SetWorkerRunning(true)
 	m.mu.Unlock()
@@ -63,11 +68,30 @@ func (m *Manager) EnsureWorker(ctx context.Context) {
 	go m.workerLoop(ctx)
 }
 
+func (m *Manager) CancelCurrent() map[string]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.running || m.store.Snapshot().CurrentTaskID == "" {
+		m.logf("[INFO] cancel ignored: no running task")
+		return map[string]string{"status": "no_task"}
+	}
+	m.store.SetCancelRequested(true)
+	if m.cancelFn != nil {
+		m.cancelFn()
+	}
+	m.logf("[WARN] cancel requested")
+	m.publishSnapshot()
+	return map[string]string{"status": "cancelling"}
+}
+
 func (m *Manager) workerLoop(ctx context.Context) {
 	defer func() {
 		m.mu.Lock()
 		m.running = false
+		m.cancelFn = nil
+		m.workerCtx = nil
 		m.store.SetWorkerRunning(false)
+		m.store.SetCancelRequested(false)
 		m.mu.Unlock()
 		m.publishSnapshot()
 	}()
