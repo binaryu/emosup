@@ -13,20 +13,22 @@ import (
 )
 
 type Manager struct {
-	store        *store.MemoryTaskStore
-	bus          *events.Bus
-	aria2Service *service.Aria2Service
-	mu           sync.Mutex
-	running      bool
-	cancelFn     context.CancelFunc
-	workerCtx    context.Context
+	store         *store.MemoryTaskStore
+	bus           *events.Bus
+	aria2Service  *service.Aria2Service
+	uploadService *service.UploadService
+	mu            sync.Mutex
+	running       bool
+	cancelFn      context.CancelFunc
+	workerCtx     context.Context
 }
 
 func NewManager(taskStore *store.MemoryTaskStore, bus *events.Bus) *Manager {
 	return &Manager{
-		store:        taskStore,
-		bus:          bus,
-		aria2Service: service.NewAria2Service(),
+		store:         taskStore,
+		bus:           bus,
+		aria2Service:  service.NewAria2Service(),
+		uploadService: service.NewUploadService(),
 	}
 }
 
@@ -150,6 +152,7 @@ func (m *Manager) workerLoop(ctx context.Context) {
 		m.publish(domain.Event{Type: domain.EventTaskStarted, TaskID: task.ID, Task: &task, Timestamp: now})
 		m.publishSnapshot()
 
+		cachePath := task.LocalPath
 		if task.Source != "local" && task.OLPath != "" && task.Aria2RPCURL != "" {
 			_ = m.aria2Service.CheckVersion(task.Aria2RPCURL, task.Aria2RPCSecret)
 			task.Stage = domain.TaskStageDownload
@@ -157,8 +160,8 @@ func (m *Manager) workerLoop(ctx context.Context) {
 			m.store.Update(task)
 			m.publishSnapshot()
 			downloadURL := task.OpenListBaseURL + "/d/" + task.OLPath
-			dstPath := task.CacheDir + "/" + task.Name
-			err := m.aria2Service.DownloadAndMonitor(ctx, task.Aria2RPCURL, task.Aria2RPCSecret, downloadURL, dstPath, task.DownloadThreads, func(progress service.Aria2Progress) {
+			cachePath = task.CacheDir + "/" + task.Name
+			err := m.aria2Service.DownloadAndMonitor(ctx, task.Aria2RPCURL, task.Aria2RPCSecret, downloadURL, cachePath, task.DownloadThreads, func(progress service.Aria2Progress) {
 				m.store.UpdateDownloadProgress(task.ID, domain.Progress{
 					Percent: progress.Percent,
 					Speed:   progress.Speed,
@@ -182,6 +185,65 @@ func (m *Manager) workerLoop(ctx context.Context) {
 			}
 		}
 
+		if cachePath != "" && task.EmosAPIBase != "" && task.EmosToken != "" {
+			task.Stage = domain.TaskStageUpload
+			task.StatusText = "上传中：" + task.Name
+			m.store.Update(task)
+			m.publishSnapshot()
+			token, err := m.uploadService.GetToken(task.EmosAPIBase, task.EmosToken, cachePath, task.Storage)
+			if err != nil {
+				finish := time.Now()
+				task.Status = domain.TaskStatusFailed
+				task.Stage = domain.TaskStageIdle
+				task.LastError = err.Error()
+				task.StatusText = "任务failed"
+				task.FinishedAt = &finish
+				m.store.Update(task)
+				m.logf("[ERROR] 获取上传令牌失败：%s | %v", task.Name, err)
+				m.publish(domain.Event{Type: domain.EventTaskFinished, TaskID: task.ID, Task: &task, Timestamp: finish})
+				m.publishSnapshot()
+				continue
+			}
+			err = m.uploadService.UploadStreamChunked(ctx, cachePath, token.UploadURL, task.ChunkSizeMB, func(progress service.UploadProgress) {
+				m.store.UpdateUploadProgress(task.ID, domain.Progress{
+					Percent: progress.Percent,
+					Speed:   progress.Speed,
+					ETA:     progress.ETA,
+					Done:    progress.Done,
+				}, fmt.Sprintf("上传中 %.1f%% | %s", progress.Percent, progress.Speed))
+				m.publishSnapshot()
+			})
+			if err != nil && ctx.Err() == nil {
+				finish := time.Now()
+				task.Status = domain.TaskStatusFailed
+				task.Stage = domain.TaskStageIdle
+				task.LastError = err.Error()
+				task.StatusText = "任务failed"
+				task.FinishedAt = &finish
+				m.store.Update(task)
+				m.logf("[ERROR] 上传失败：%s | %v", task.Name, err)
+				m.publish(domain.Event{Type: domain.EventTaskFinished, TaskID: task.ID, Task: &task, Timestamp: finish})
+				m.publishSnapshot()
+				continue
+			}
+			if task.ServerItemType != "" && task.ServerItemID != nil {
+				err = m.uploadService.SaveUpload(task.EmosAPIBase, task.EmosToken, task.ServerItemType, *task.ServerItemID, token.FileID)
+				if err != nil {
+					finish := time.Now()
+					task.Status = domain.TaskStatusFailed
+					task.Stage = domain.TaskStageIdle
+					task.LastError = err.Error()
+					task.StatusText = "任务failed"
+					task.FinishedAt = &finish
+					m.store.Update(task)
+					m.logf("[ERROR] 保存上传结果失败：%s | %v", task.Name, err)
+					m.publish(domain.Event{Type: domain.EventTaskFinished, TaskID: task.ID, Task: &task, Timestamp: finish})
+					m.publishSnapshot()
+					continue
+				}
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			finish := time.Now()
@@ -195,7 +257,7 @@ func (m *Manager) workerLoop(ctx context.Context) {
 			m.publish(domain.Event{Type: domain.EventTaskFinished, TaskID: task.ID, Task: &task, Timestamp: finish})
 			m.publishSnapshot()
 			return
-		case <-time.After(2 * time.Second):
+		case <-time.After(500 * time.Millisecond):
 		}
 
 		finish := time.Now()
