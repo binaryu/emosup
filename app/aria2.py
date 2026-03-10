@@ -14,11 +14,14 @@ class Aria2RpcClient:
         self.session = requests.Session()
 
     def _rpc_call(self, method: str, params: list) -> Dict:
+        rpc_params = list(params)
+        if self.secret:
+            rpc_params = [f"token:{self.secret}"] + rpc_params
         payload = {
             "jsonrpc": "2.0",
             "id": "emos",
             "method": method,
-            "params": [f"token:{self.secret}"] + params,
+            "params": rpc_params,
         }
         try:
             r = self.session.post(self.url, json=payload, timeout=10)

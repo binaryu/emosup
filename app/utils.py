@@ -5,15 +5,13 @@ import random
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .config import state
+from .config import state, MAX_LOG_LINES
 
 
 def log(msg: str, level: str = "INFO"):
     ts = time.strftime("%H:%M:%S")
     line = f"[{ts}] [{level}] {msg}"
     with state.lock:
-        if len(state.logs) > 1500:
-            state.logs = state.logs[-1100:]
         state.logs.append(line)
     print(line, flush=True)
 

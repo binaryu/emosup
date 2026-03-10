@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
-from .config import state, DEFAULT_EMOS_API_BASE, DEFAULT_OPENLIST_BASE, DEFAULT_OPENLIST_TOKEN
+from .config import state, DEFAULT_EMOS_API_BASE, DEFAULT_OPENLIST_BASE, DEFAULT_OPENLIST_TOKEN, WS_LOG_CHUNK
 from .utils import ensure_dir
 from .tasks import worker
 from .upload import register_upload_routes, UploadItem
@@ -181,13 +181,17 @@ async def ws(ws: WebSocket):
     last_len = 0
     try:
         while True:
-            all_logs = list(state.logs)
-            new_logs = all_logs[last_len:]
-            last_len = len(all_logs)
+            with state.lock:
+                all_logs = list(state.logs)
+                total_logs = len(all_logs)
+                if last_len > total_logs:
+                    last_len = 0
+                new_logs = all_logs[last_len:]
+                last_len = total_logs
             public_task = worker.get_public_status()
-            log_payload = new_logs if not public_task.get("is_running") else new_logs[-10:]
+            log_payload = new_logs[-WS_LOG_CHUNK:]
             await ws.send_json({"logs": log_payload, "task": public_task})
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(1.0)
     except WebSocketDisconnect:
         return
 

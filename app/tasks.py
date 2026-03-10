@@ -9,7 +9,7 @@ import uuid
 
 from pydantic import BaseModel
 
-from .config import state, DEFAULT_ARIA2_RPC_URL, DEFAULT_ARIA2_RPC_SECRET, DEFAULT_CHUNK_SIZE_MB, DEFAULT_PARALLEL_TASKS, DEFAULT_DOWNLOAD_THREADS
+from .config import state, DEFAULT_ARIA2_RPC_URL, DEFAULT_ARIA2_RPC_SECRET, DEFAULT_CHUNK_SIZE_MB, DEFAULT_PARALLEL_TASKS, DEFAULT_DOWNLOAD_THREADS, QUEUE_RECENT_LIMIT, QUEUE_STATUS_TASK_LIMIT
 from .utils import log, ensure_dir, safe_unlink, RateMeter, guess_season_episode
 from .clients import EmosClient
 from .aria2 import Aria2RpcClient
@@ -189,7 +189,20 @@ class BatchWorker:
     def _queue_summary(self) -> Dict[str, Any]:
         queue_list = list(state.queue)
         current = state.current_task_id
-        recent = [state.tasks_by_id[tid] for tid in state.task_order[-20:] if tid in state.tasks_by_id]
+        recent_ids = state.task_order[-QUEUE_RECENT_LIMIT:]
+        recent = [state.tasks_by_id[tid] for tid in recent_ids if tid in state.tasks_by_id]
+        counts = {
+            "pending": 0,
+            "running": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "cancelled": 0,
+        }
+        for task in state.tasks_by_id.values():
+            status = task.get("status")
+            if status in counts:
+                counts[status] += 1
         return {
             "is_running": state.worker_running,
             "cancel": state.cancel_current,
@@ -200,17 +213,10 @@ class BatchWorker:
             "download": dict(state.task.get("download") or self._empty_progress()),
             "upload": dict(state.task.get("upload") or self._empty_progress()),
             "queue_size": len(queue_list),
-            "pending_ids": queue_list[:50],
+            "pending_ids": queue_list[:30],
             "running_task_id": current,
             "recent_tasks": recent,
-            "counts": {
-                "pending": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "pending"),
-                "running": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "running"),
-                "success": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "success"),
-                "failed": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "failed"),
-                "skipped": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "skipped"),
-                "cancelled": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "cancelled"),
-            }
+            "counts": counts,
         }
 
     def get_public_status(self) -> Dict[str, Any]:
@@ -335,6 +341,12 @@ class BatchWorker:
                 }
                 state.tasks_by_id[task_id] = queue_task
                 state.task_order.append(task_id)
+                if len(state.task_order) > QUEUE_STATUS_TASK_LIMIT * 3:
+                    expired_ids = state.task_order[:-QUEUE_STATUS_TASK_LIMIT * 2]
+                    state.task_order = state.task_order[-QUEUE_STATUS_TASK_LIMIT * 2:]
+                    for expired_id in expired_ids:
+                        if expired_id != state.current_task_id and expired_id not in state.queue:
+                            state.tasks_by_id.pop(expired_id, None)
                 state.queue.append(task_id)
                 state.queue_stats["total"] += 1
                 added_ids.append(task_id)

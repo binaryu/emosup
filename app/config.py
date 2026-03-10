@@ -18,13 +18,15 @@ DEFAULT_CACHE_DIR = os.environ.get("CACHE_DIR", "data/cache")
 DEFAULT_ARIA2_RPC_URL = os.environ.get("ARIA2_RPC_URL", "http://127.0.0.1:6800/jsonrpc")
 DEFAULT_ARIA2_RPC_SECRET = os.environ.get("ARIA2_RPC_SECRET", "")
 
-DEFAULT_CHUNK_SIZE_MB = int(os.environ.get("DEFAULT_CHUNK_SIZE_MB", "128"))
-DEFAULT_PARALLEL_TASKS = int(os.environ.get("DEFAULT_PARALLEL_TASKS", "3"))
+DEFAULT_CHUNK_SIZE_MB = int(os.environ.get("DEFAULT_CHUNK_SIZE_MB", "64"))
+DEFAULT_PARALLEL_TASKS = int(os.environ.get("DEFAULT_PARALLEL_TASKS", "1"))
 DEFAULT_DOWNLOAD_THREADS = int(os.environ.get("DEFAULT_DOWNLOAD_THREADS", "4"))
-
+QUEUE_RECENT_LIMIT = int(os.environ.get("QUEUE_RECENT_LIMIT", "100"))
+QUEUE_STATUS_TASK_LIMIT = int(os.environ.get("QUEUE_STATUS_TASK_LIMIT", "200"))
+MAX_LOG_LINES = int(os.environ.get("MAX_LOG_LINES", "1200"))
+WS_LOG_CHUNK = int(os.environ.get("WS_LOG_CHUNK", "50"))
+ 
 VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".ts", ".m4v", ".webm"}
-
-
 # ==============================
 # State
 # ==============================
@@ -44,7 +46,7 @@ class AppState:
         self.parallel_tasks = DEFAULT_PARALLEL_TASKS
         self.download_threads = DEFAULT_DOWNLOAD_THREADS
 
-        self.logs: collections.deque = collections.deque(maxlen=500)
+        self.logs: collections.deque = collections.deque(maxlen=MAX_LOG_LINES)
         self.lock = threading.Lock()
 
         self.queue: list[str] = []
