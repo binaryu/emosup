@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Tuple
 from urllib.parse import quote
 import asyncio
 import re
+import threading
 import time
 import uuid
 
@@ -50,6 +51,7 @@ def build_direct_url(openlist_base: str, ol_path: str) -> str:
 class BatchWorker:
     def __init__(self):
         self.client = EmosClient()
+        self._worker_thread: threading.Thread | None = None
 
     @staticmethod
     def build_tree_index(tree: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +212,8 @@ class BatchWorker:
             "total_files": state.queue_stats["total"],
             "completed_files": state.queue_stats["completed"],
             "current_file": state.task.get("current_file", ""),
+            "status_text": state.task.get("status_text", "空闲"),
+            "last_error": state.task.get("last_error", ""),
             "download": dict(state.task.get("download") or self._empty_progress()),
             "upload": dict(state.task.get("upload") or self._empty_progress()),
             "queue_size": len(queue_list),
@@ -226,6 +230,7 @@ class BatchWorker:
     def _reset_runtime_progress(self):
         state.task.update({
             "current_file": "",
+            "status_text": "空闲",
             "stage": "idle",
             "download": self._empty_progress(),
             "upload": self._empty_progress(),
@@ -255,6 +260,8 @@ class BatchWorker:
             state.current_task_id = None
             state.task["current_file"] = ""
             state.task["stage"] = "idle"
+            state.task["status_text"] = f"任务{status}"
+            state.task["last_error"] = error or ""
             state.task["download"] = self._empty_progress()
             state.task["upload"] = self._empty_progress()
             log(
@@ -398,6 +405,8 @@ class BatchWorker:
                 "is_running": True,
                 "cancel": False,
                 "current_file": file_item.name,
+                "status_text": f"开始处理：{file_item.name}",
+                "last_error": "",
                 "stage": "running",
                 "download": self._empty_progress(),
                 "upload": self._empty_progress(),
@@ -430,6 +439,8 @@ class BatchWorker:
             cache_path = str(Path(f.local_path or "").resolve())
             if not f.local_path or not Path(cache_path).exists():
                 raise RuntimeError(f"本地文件不存在：{cache_path or f.local_path}")
+            with state.lock:
+                state.task["status_text"] = f"本地直传：{Path(cache_path).name}"
             log(f"使用本地文件直传：{cache_path}", "INFO")
         else:
             if not f.ol_path:
@@ -438,6 +449,7 @@ class BatchWorker:
             cache_path = str(Path(req.cache_dir).resolve() / Path(f.name).name)
             with state.lock:
                 state.task["stage"] = "download"
+                state.task["status_text"] = f"下载中：{f.name}"
             log(f"通过 OpenList + aria2 下载缓存：{f.ol_path}", "INFO")
             if not aria2_client.download_and_monitor(direct_url, cache_path, req.download_threads):
                 raise RuntimeError(f"下载失败：请检查 aria2 日志 -> {cache_path}")
@@ -446,6 +458,7 @@ class BatchWorker:
         try:
             with state.lock:
                 state.task["stage"] = "upload"
+                state.task["status_text"] = f"上传中：{Path(cache_path).name}"
             token = uploader.get_token(cache_path, "video", req.storage)
             if not token or "data" not in token or "upload_url" not in token["data"]:
                 raise RuntimeError("getUploadToken failed")
@@ -503,11 +516,12 @@ class BatchWorker:
 
     def ensure_worker(self):
         with state.lock:
-            if state.worker_running:
+            if self._worker_thread and self._worker_thread.is_alive():
                 return False
             state.worker_running = True
             state.task["is_running"] = True
-        asyncio.run(self.worker_loop())
+            self._worker_thread = threading.Thread(target=lambda: asyncio.run(self.worker_loop()), daemon=True)
+            self._worker_thread.start()
         return True
 
     def start_worker(self):

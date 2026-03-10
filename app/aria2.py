@@ -92,6 +92,7 @@ class Aria2RpcClient:
                 "speed": bytes_to_speed(speed),
                 "eta": f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s" if eta_seconds > 0 else "N/A",
             })
+            state.task["status_text"] = f"下载中 {percent:.1f}% | {bytes_to_speed(speed)} | {Path(dst_path).name}"
 
             if status["status"] == "complete":
                 state.task["download"].update({"percent": 100.0, "speed": "done", "done": True})

@@ -114,6 +114,7 @@ class Uploader:
             "eta": f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s" if eta_seconds > 0 else "N/A",
             "done": (cur >= total),
         })
+        state.task["status_text"] = f"上传中 {percent:.1f}% | {bytes_to_speed(bps)}"
 
     def upload_stream_chunked(self, file_path: str, upload_url: str, chunk_size_mb: int) -> bool:
         file_size = Path(file_path).stat().st_size

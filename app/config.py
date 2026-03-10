@@ -66,6 +66,8 @@ class AppState:
             "total_files": 0,
             "completed_files": 0,
             "current_file": "",
+            "status_text": "空闲",
+            "last_error": "",
             "stage": "idle",  # idle | scan | precheck | queued | download | upload
             "download": {"percent": 0.0, "speed": "0 MB/s", "eta": "N/A", "done": False},
             "upload": {"percent": 0.0, "speed": "0 MB/s", "eta": "N/A", "done": False},
