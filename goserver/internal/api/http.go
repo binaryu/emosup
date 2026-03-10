@@ -7,25 +7,47 @@ import (
 	"emosup/goserver/internal/config"
 	"emosup/goserver/internal/events"
 	"emosup/goserver/internal/queue"
+	"emosup/goserver/internal/service"
 )
 
 type Handler struct {
-	cfg     config.Config
-	manager *queue.Manager
-	bus     *events.Bus
+	cfg         config.Config
+	manager     *queue.Manager
+	bus         *events.Bus
+	scanService *service.ScanService
+	emosService *service.EmosService
 }
 
 func NewHandler(cfg config.Config, manager *queue.Manager, bus *events.Bus) *Handler {
-	return &Handler{cfg: cfg, manager: manager, bus: bus}
+	return &Handler{
+		cfg:         cfg,
+		manager:     manager,
+		bus:         bus,
+		scanService: service.NewScanService(),
+		emosService: service.NewEmosService(),
+	}
 }
 
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/healthz", h.handleHealth)
 	mux.HandleFunc("/api/tasks", h.handleTasks)
+	mux.HandleFunc("/api/status", h.handleStatus)
+	mux.HandleFunc("/api/queue/status", h.handleQueueStatus)
 	mux.HandleFunc("/api/queue/add", h.handleEnqueue)
+	mux.HandleFunc("/api/cancel", h.handleCancel)
+	mux.HandleFunc("/api/scan_remote", h.handleScanRemote)
+	mux.HandleFunc("/api/scan_local", h.handleScanLocal)
+	mux.HandleFunc("/api/scan_combined", h.handleScanCombined)
+	mux.HandleFunc("/api/precheck", h.handlePrecheck)
 	mux.HandleFunc("/api/events", h.handleEvents)
 	return mux
+}
+
+func (h *Handler) handleIndex(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(indexHTML))
 }
 
 func (h *Handler) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -50,13 +72,13 @@ func (h *Handler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	if req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+	if req.Name == "" && len(req.Files) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name or files is required"})
 		return
 	}
 
-	task := h.manager.Enqueue(req)
-	writeJSON(w, http.StatusAccepted, task)
+	result := h.manager.Enqueue(req)
+	writeJSON(w, http.StatusAccepted, result)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
