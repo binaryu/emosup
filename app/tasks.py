@@ -189,13 +189,21 @@ class BatchWorker:
                     state.task["completed_files"] += 1
                 return
 
-            direct_url = build_direct_url(req.openlist_base_url, f.ol_path)
-            cache_path = str(Path(req.cache_dir).resolve() / Path(f.name).name)
-            if not aria2_client.download_and_monitor(direct_url, cache_path, req.download_threads):
-                log(f"下载失败：请检查 aria2 日志 -> {cache_path}", "ERROR")
-                with state.lock:
-                    state.task["completed_files"] += 1
-                return
+            if f.local_path:
+                cache_path = str(Path(f.local_path).resolve())
+                if not Path(cache_path).exists():
+                    log(f"本地文件不存在：{cache_path}", "ERROR")
+                    with state.lock:
+                        state.task["completed_files"] += 1
+                    return
+            else:
+                direct_url = build_direct_url(req.openlist_base_url, f.ol_path)
+                cache_path = str(Path(req.cache_dir).resolve() / Path(f.name).name)
+                if not aria2_client.download_and_monitor(direct_url, cache_path, req.download_threads):
+                    log(f"下载失败：请检查 aria2 日志 -> {cache_path}", "ERROR")
+                    with state.lock:
+                        state.task["completed_files"] += 1
+                    return
 
             upload_ok, save_ok = False, False
             try:
@@ -215,9 +223,12 @@ class BatchWorker:
                 log(f"处理异常：{f.name} | {ex}", "ERROR")
 
             if upload_ok and save_ok:
-                safe_unlink(Path(cache_path))
-                safe_unlink(Path(cache_path + ".aria2"))
-                log("已删除缓存文件(.aria2 也清理)", "INFO")
+                if f.local_path:
+                    log("本地文件上传完成（保留源文件）", "INFO")
+                else:
+                    safe_unlink(Path(cache_path))
+                    safe_unlink(Path(cache_path + ".aria2"))
+                    log("已删除缓存文件(.aria2 也清理)", "INFO")
             else:
                 log(f"未完全成功：保留缓存用于续传/重试 -> {cache_path}", "WARN")
             

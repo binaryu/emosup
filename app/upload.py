@@ -18,6 +18,7 @@ from pydantic import Field
 class UploadItem(BaseModel):
     name: str
     ol_path: str
+    local_path: Optional[str] = None
     size_bytes: int = 0
     season: Optional[int] = None
     episode: Optional[int] = None

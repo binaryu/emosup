@@ -16,6 +16,7 @@ from .utils import ensure_dir
 from .tasks import worker
 from .upload import register_upload_routes, UploadItem
 from .openlist import register_openlist_routes
+from .local_files import register_local_routes
 
 
 class ScanRemoteRequest(BaseModel):
@@ -47,6 +48,7 @@ def resource_path(relative_path):
 templates = Jinja2Templates(directory=resource_path("app/templates"))
 register_upload_routes(app)
 register_openlist_routes(app)
+register_local_routes(app)
 
 
 @app.get("/api/config")

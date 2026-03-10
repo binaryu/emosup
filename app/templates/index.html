@@ -36,7 +36,7 @@
           <div class="min-w-0">
             <div class="text-white font-semibold">参数设置</div>
             <div class="text-xs text-gray-500 mt-1 truncate" v-if="!showSettings">
-              tmdb={{ tmdbId || '-' }} | storage={{ storage }} | root={{ rootPath || '-' }} | openlist={{ openlistBase || '-' }}
+              tmdb={{ tmdbId || '-' }} | storage={{ storage }} | root={{ rootPath || '-' }} | local={{ localPath || '-' }} | openlist={{ openlistBase || '-' }}
             </div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
@@ -78,6 +78,10 @@
             <div>
               <label class="block text-xs text-gray-400 mb-1">OPENLIST路径</label>
               <input v-model="rootPath" @keyup.enter="scan" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none" placeholder="/来自星星的你">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1">本地路径</label>
+              <input v-model="localPath" @keyup.enter="scanLocal" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none" placeholder="D:/Videos/来自星星的你">
             </div>
             <div>
               <label class="block text-xs text-gray-400 mb-1">Aria2 RPC URL</label>
@@ -127,6 +131,9 @@
           <div class="flex flex-wrap items-center gap-2">
             <button @click="scan" :disabled="loading" class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-sm">
               {{ loading ? '扫描中...' : '扫描' }}
+            </button>
+            <button @click="scanLocal" :disabled="loading" class="px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-700 text-sm">
+              {{ loading ? '扫描中...' : '扫描本地' }}
             </button>
             <button @click="precheck" :disabled="prechecking || files.length===0 || !tmdbId || !emosToken" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 text-sm">
               {{ prechecking ? '预检查中...' : '检查' }}
@@ -328,6 +335,7 @@ createApp({
     const openlistBase = ref(localStorage.getItem('openlist_base') || '');
     const openlistToken = ref(localStorage.getItem('openlist_token') || '');
     const rootPath = ref(localStorage.getItem('root_path') || '/');
+    const localPath = ref(localStorage.getItem('local_path') || '');
     const aria2RpcUrl = ref(localStorage.getItem('aria2_rpc_url') || '');
     const aria2RpcSecret = ref(localStorage.getItem('aria2_rpc_secret') || '');
     const chunkSizeMb = ref(parseInt(localStorage.getItem('chunk_size_mb') || '128'));
@@ -449,6 +457,25 @@ createApp({
         loading.value = false;
       }
     };
+    const scanLocal = async () => {
+      loading.value = true;
+      conflicts.value = [];
+      treeInfo.value = {title:'', vl_id:null, default_season:null, video_type:''};
+      try {
+        localStorage.setItem('local_path', localPath.value);
+        const res = await axios.post('/api/scan_local', { local_path: localPath.value });
+        if (res.data.error) {
+          alert(res.data.error);
+          files.value = [];
+        } else {
+          files.value = (res.data.files || []).map(x => ({...x, selected:true}));
+          collapsedSeasons.value = {};
+          ensureCollapseKeys();
+        }
+      } finally {
+        loading.value = false;
+      }
+    };
     const precheck = async () => {
       prechecking.value = true;
       try {
@@ -534,6 +561,7 @@ createApp({
         files: files.value.filter(f => f.selected).map(f => ({
           name: f.name,
           ol_path: f.ol_path,
+          local_path: f.local_path,
           size_bytes: f.size_bytes || 0,
           season: (f.season !== null && f.season !== undefined && f.season !== '') ? parseInt(f.season) : null,
           episode: (f.episode !== null && f.episode !== undefined && f.episode !== '') ? parseInt(f.episode) : null,
@@ -569,14 +597,14 @@ createApp({
       cfg, files, logs, task, loading, wsConnected,
       prechecking, treeInfo, conflicts,
       emosToken, tmdbId, storage, cacheDir,
-      openlistBase, openlistToken, rootPath, forceUpload, matchMode, aria2RpcUrl, aria2RpcSecret, chunkSizeMb, parallelTasks, downloadThreads,
+      openlistBase, openlistToken, rootPath, localPath, forceUpload, matchMode, aria2RpcUrl, aria2RpcSecret, chunkSizeMb, parallelTasks, downloadThreads,
       showSettings, toggleSettings,
       groupedBySeason, collapsedSeasons,
       toggleCollapse, seasonAllSelected, seasonSomeSelected, seasonSelectedCount,
       toggleSeason, selectOnlyThisSeason, clearThisSeason,
       selectedCount, isAllSelected, toggleAllHeader,
       selectNeedUpload, invertSelection, clearSelection,
-      scan, precheck, startUpload, cancel
+      scan, scanLocal, precheck, startUpload, cancel
     };
   }
 }).mount('#app');
