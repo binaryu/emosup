@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"emosup/goserver/internal/domain"
+	"emosup/goserver/internal/service"
 )
 
 func (h *Handler) handleScanRemote(w http.ResponseWriter, r *http.Request) {
@@ -31,16 +33,37 @@ func (h *Handler) handleScanRemote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"files": files})
 }
 
+func (h *Handler) handleScanLocal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	var req domain.ScanLocalRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if req.LocalPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local_path is required"})
+		return
+	}
+
+	files, err := h.scanService.WalkLocal(req.LocalPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+}
+
 func (h *Handler) handlePrecheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 
-	var req struct {
-		domain.PrecheckRequest
-		Tree domain.TreeInfo `json:"tree"`
-	}
+	var req domain.PrecheckRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
@@ -49,7 +72,22 @@ func (h *Handler) handlePrecheck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "files is required"})
 		return
 	}
+	if req.TMDBID == 0 || req.EmosAPIBase == "" || req.EmosToken == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tmdb_id, emos_api_base and emos_token are required"})
+		return
+	}
 
-	resp := h.scanService.Precheck(req.PrecheckRequest, req.Tree)
+	emos := service.NewEmosService()
+	tree, err := emos.GetTreeByTMDB(req.EmosAPIBase, req.EmosToken, req.TMDBID, 180*time.Second)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	if tree == nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "无法获取 video/tree，请确认 tmdb_id / token"})
+		return
+	}
+
+	resp := h.scanService.Precheck(req, *tree)
 	writeJSON(w, http.StatusOK, resp)
 }

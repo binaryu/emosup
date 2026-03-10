@@ -15,6 +15,7 @@ type Handler struct {
 	manager     *queue.Manager
 	bus         *events.Bus
 	scanService *service.ScanService
+	emosService *service.EmosService
 }
 
 func NewHandler(cfg config.Config, manager *queue.Manager, bus *events.Bus) *Handler {
@@ -23,6 +24,7 @@ func NewHandler(cfg config.Config, manager *queue.Manager, bus *events.Bus) *Han
 		manager:     manager,
 		bus:         bus,
 		scanService: service.NewScanService(),
+		emosService: service.NewEmosService(),
 	}
 }
 
@@ -33,6 +35,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("/api/tasks", h.handleTasks)
 	mux.HandleFunc("/api/queue/add", h.handleEnqueue)
 	mux.HandleFunc("/api/scan_remote", h.handleScanRemote)
+	mux.HandleFunc("/api/scan_local", h.handleScanLocal)
 	mux.HandleFunc("/api/precheck", h.handlePrecheck)
 	mux.HandleFunc("/api/events", h.handleEvents)
 	return mux
