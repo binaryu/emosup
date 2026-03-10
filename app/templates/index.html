@@ -23,10 +23,9 @@
     <div class="flex items-center gap-3 min-w-0">
       <div class="w-2.5 h-2.5 rounded-full" :class="task.is_running ? 'bg-green-400' : 'bg-gray-500'"></div>
       <div class="text-white font-bold tracking-wider">EMOS Upload Panel</div>
-      <div class="text-xs text-gray-400 truncate"></div>
     </div>
     <div class="flex items-center gap-4 text-xs">
-      <button @click="cancel" :disabled="!task.is_running" class="px-3 py-1 rounded bg-red-600 hover:bg-red-700 disabled:bg-gray-700">取消任务</button>
+      <button @click="cancel" :disabled="!task.is_running" class="px-3 py-1 rounded bg-red-600 hover:bg-red-700 disabled:bg-gray-700">取消当前任务</button>
     </div>
   </header>
   <main class="flex-1 flex overflow-hidden">
@@ -96,10 +95,6 @@
               <input v-model.number="chunkSizeMb" type="number" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none">
             </div>
             <div>
-              <label class="block text-xs text-gray-400 mb-1">并行任务数</label>
-              <input v-model.number="parallelTasks" type="number" min="1" max="5" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none">
-            </div>
-            <div>
               <label class="block text-xs text-gray-400 mb-1">下载线程数</label>
               <input v-model.number="downloadThreads" type="number" min="1" max="16" class="w-full bg-slate-950 border border-slate-600 rounded px-3 py-2 outline-none">
             </div>
@@ -116,9 +111,7 @@
                 <option value="single_season_autofill">single_season_autofill（单季补号）</option>
               </select>
             </div>
-            <div class="text-xs text-gray-400">
-              直链：<code>{{ openlistBase }}/d/路径</code>
-            </div>
+            <div class="text-xs text-gray-400">直链：<code>{{ openlistBase }}/d/路径</code></div>
           </div>
           <div v-if="treeInfo.title" class="mt-2 text-xs text-gray-300">
             Tree：<span class="text-white font-semibold">{{ treeInfo.title }}</span>
@@ -126,189 +119,126 @@
           </div>
         </div>
       </div>
+
       <div class="bg-slate-900 border border-slate-700 rounded-lg p-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex flex-wrap items-center gap-2">
-            <button @click="scan" :disabled="loading" class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-sm">
-              {{ loading ? '扫描中...' : '扫描' }}
-            </button>
-            <button @click="scanLocal" :disabled="loading" class="px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-700 text-sm">
-              {{ loading ? '扫描中...' : '扫描本地' }}
-            </button>
-            <button @click="precheck" :disabled="prechecking || files.length===0 || !tmdbId" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 text-sm">
-              {{ prechecking ? '预检查中...' : '检查' }}
-            </button>
+            <button @click="scan" :disabled="loading" class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-sm">{{ loading ? '扫描中...' : '扫描' }}</button>
+            <button @click="scanLocal" :disabled="loading" class="px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-700 text-sm">{{ loading ? '扫描中...' : '扫描本地' }}</button>
+            <button @click="precheck" :disabled="prechecking || files.length===0 || !tmdbId" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 text-sm">{{ prechecking ? '预检查中...' : '检查' }}</button>
             <span class="mx-2 h-6 w-px bg-slate-700"></span>
-            <button @click="selectNeedUpload" :disabled="files.length===0" class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-700 text-sm">
-              仅选未上传
-            </button>
-            <button @click="invertSelection" :disabled="files.length===0" class="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-gray-700 text-sm">
-              反选
-            </button>
-            <button @click="clearSelection" :disabled="files.length===0" class="px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 disabled:bg-gray-700 text-sm">
-              清空
-            </button>
+            <button @click="selectNeedUpload" :disabled="files.length===0" class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-700 text-sm">仅选未上传</button>
+            <button @click="invertSelection" :disabled="files.length===0" class="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-gray-700 text-sm">反选</button>
+            <button @click="clearSelection" :disabled="files.length===0" class="px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 disabled:bg-gray-700 text-sm">清空</button>
           </div>
-          <div class="text-xs text-gray-400">
-            已选：<span class="text-white font-semibold">{{ selectedCount }}</span> / {{ files.length }}
-          </div>
+          <div class="text-xs text-gray-400">已选：<span class="text-white font-semibold">{{ selectedCount }}</span> / {{ files.length }}</div>
         </div>
         <div v-if="conflicts.length" class="mt-2 text-xs text-yellow-300 space-y-1">
           <div v-for="(c,i) in conflicts" :key="i">⚠ {{ c }}</div>
         </div>
       </div>
+
       <div class="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden">
         <div class="grid grid-cols-12 bg-slate-950 p-2 text-xs text-gray-400 font-mono border-b border-slate-800">
-          <div class="col-span-1 text-center">
-            <input type="checkbox" :checked="isAllSelected" :indeterminate.prop="selectedCount>0 && !isAllSelected" @click.prevent="toggleAllHeader">
-          </div>
+          <div class="col-span-1 text-center"><input type="checkbox" :checked="isAllSelected" :indeterminate.prop="selectedCount>0 && !isAllSelected" @click.prevent="toggleAllHeader"></div>
           <div class="col-span-4">文件名/路径</div>
           <div class="col-span-2 text-center">季/集</div>
           <div class="col-span-3">服务器匹配</div>
           <div class="col-span-2 text-right pr-2">大小</div>
         </div>
-        <div class="max-h-[64vh] overflow-y-auto">
-          <template v-if="files.length">
-            <div v-for="(g,gi) in groupedBySeason" :key="g.key">
-              <div class="grid grid-cols-12 items-center p-2 border-b border-slate-800 bg-slate-900/60">
-                <div class="col-span-1 text-center">
-                  <input type="checkbox" :checked="seasonAllSelected(g)" :indeterminate.prop="seasonSomeSelected(g) && !seasonAllSelected(g)" @click.prevent="toggleSeason(g)">
+        <div class="max-h-[44vh] overflow-y-auto">
+          <template v-if="pagedFiles.length">
+            <div v-for="f in pagedFiles" :key="(f.local_path || f.ol_path || f.name)" class="grid grid-cols-12 items-center p-2 border-b border-slate-800/50 hover:bg-slate-800 text-sm">
+              <div class="col-span-1 text-center"><input type="checkbox" v-model="f.selected"></div>
+              <div class="col-span-4 min-w-0">
+                <div class="flex items-center gap-2 min-w-0">
+                  <div class="text-gray-200 truncate" :title="f.ol_path || f.local_path">{{ f.name }}</div>
+                  <span class="shrink-0 px-2 py-0.5 rounded-full border text-[10px] font-semibold" :class="(f.source || 'openlist') === 'local' ? 'bg-cyan-900/30 text-cyan-300 border-cyan-800' : 'bg-violet-900/30 text-violet-300 border-violet-800'">
+                    {{ (f.source || 'openlist') === 'local' ? '本地' : 'OpenList' }}
+                  </span>
                 </div>
-                <div class="col-span-7 flex items-center gap-3 min-w-0">
-                  <button @click="toggleCollapse(g.key)" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-gray-200 shrink-0">
-                    {{ collapsedSeasons[g.key] ? '展开' : '折叠' }}
-                  </button>
-                  <div class="text-sm text-white font-semibold truncate">
-                    {{ g.label }}
-                    <span class="text-xs text-gray-400 font-normal ml-2">
-                      （{{ seasonSelectedCount(g) }}/{{ g.items.length }}）
-                    </span>
-                  </div>
-                </div>
-                <div class="col-span-4 text-right pr-2">
-                  <button @click="selectOnlyThisSeason(g)" class="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-xs">
-                    仅选本季
-                  </button>
-                  <button @click="clearThisSeason(g)" class="ml-2 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs">
-                    清空本季
-                  </button>
-                </div>
+                <div class="text-xs text-gray-500 truncate" v-if="f.ol_path">OL: {{ f.ol_path }}</div>
+                <div class="text-xs text-gray-500 truncate" v-if="f.local_path">LOCAL: {{ f.local_path }}</div>
               </div>
-              <div v-show="!collapsedSeasons[g.key]">
-                <div v-for="(f) in g.items" :key="(f.local_path || f.ol_path)" class="grid grid-cols-12 items-center p-2 border-b border-slate-800/50 hover:bg-slate-800 text-sm">
-                  <div class="col-span-1 text-center">
-                    <input type="checkbox" v-model="f.selected">
-                  </div>
-                  <div class="col-span-4 min-w-0">
-                    <div class="flex items-center gap-2 min-w-0">
-                      <div class="text-gray-200 truncate" :title="f.ol_path || f.local_path">{{ f.name }}</div>
-                      <span class="shrink-0 px-2 py-0.5 rounded-full border text-[10px] font-semibold"
-                            :class="(f.source || 'openlist') === 'local'
-                              ? 'bg-cyan-900/30 text-cyan-300 border-cyan-800'
-                              : 'bg-violet-900/30 text-violet-300 border-violet-800'">
-                        {{ (f.source || 'openlist') === 'local' ? '本地' : 'OpenList' }}
-                      </span>
-                    </div>
-                    <div class="text-xs text-gray-500 truncate" v-if="f.ol_path">OL: {{ f.ol_path }}</div>
-                    <div class="text-xs text-gray-500 truncate" v-if="f.local_path">LOCAL: {{ f.local_path }}</div>
-                  </div>
-                  <div class="col-span-2 text-center text-xs">
-                    <input v-model="f.season" placeholder="S" class="w-10 bg-transparent text-center border-b border-slate-700 outline-none">
-                    <span class="text-gray-600">/</span>
-                    <input v-model="f.episode" placeholder="E" class="w-10 bg-transparent text-center border-b border-slate-700 outline-none">
-                    <input v-model="f.manual_id" placeholder="ve-id" class="w-20 mt-1 bg-transparent text-center border-b border-slate-700 outline-none" title="手动指定ID">
-                  </div>
-                  <div class="col-span-3 text-[11px] leading-4" :title="f.match_text || ''">
-                    <div v-if="f.match_status === 'ok'" class="flex items-start justify-between gap-2">
-                      <div class="min-w-0">
-                        <div class="flex items-center gap-2 min-w-0">
-                          <span class="shrink-0 font-mono text-gray-400">
-                            S{{ (f.season ?? '?') }}E{{ (f.episode ?? '?') }}
-                          </span>
-                          <span class="shrink-0 font-mono text-gray-300">
-                            {{ (f.server_item_type || 've') + '-' + (f.server_item_id ?? '') }}
-                          </span>
-                        </div>
-                        <div class="mt-0.5 text-gray-200 clamp2" :title="f.server_episode_title || ''">
-                          {{ f.server_episode_title || '（无标题）' }}
-                        </div>
-                        <div v-if="f.server_date_air" class="mt-0.5 text-[10px] text-gray-500 font-mono truncate">
-                          {{ f.server_date_air }}
-                        </div>
-                      </div>
-                      <div class="shrink-0 pt-0.5">
-                        <span v-if="f.server_has_media === true" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-300 border border-emerald-800" title="has_media=True（服务器已有资源）">
-                          <svg viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.5 7.5a1 1 0 01-1.42 0l-3.5-3.5a1 1 0 011.42-1.42l2.79 2.79 6.79-6.79a1 1 0 011.42 0z" clip-rule="evenodd"/></svg>
-                          <span class="text-[10px] font-semibold">有</span>
-                        </span>
-                        <span v-else class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-900/30 text-red-300 border border-red-900/60" title="has_media=False（服务器暂无资源）">
-                          <svg viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-                          <span class="text-[10px] font-semibold">无</span>
-                        </span>
-                      </div>
-                    </div>
-                    <div v-else class="flex items-start gap-2">
-                      <span v-if="f.match_status==='conflict'" class="shrink-0 px-2 py-0.5 rounded-full bg-yellow-900/30 text-yellow-300 border border-yellow-800 text-[10px] font-semibold">冲突</span>
-                      <span v-else-if="f.match_status==='missing'" class="shrink-0 px-2 py-0.5 rounded-full bg-red-900/25 text-red-300 border border-red-900/60 text-[10px] font-semibold">缺失</span>
-                      <span v-else-if="f.match_status==='not_in_tree'" class="shrink-0 px-2 py-0.5 rounded-full bg-red-900/25 text-red-300 border border-red-900/60 text-[10px] font-semibold">不在Tree</span>
-                      <span v-else class="shrink-0 px-2 py-0.5 rounded-full bg-slate-800 text-gray-300 border border-slate-700 text-[10px] font-semibold">未检查</span>
-                      <div class="min-w-0 text-gray-300 clamp2">{{ f.match_text || '未预检查' }}</div>
-                    </div>
-                  </div>
-                  <div class="col-span-2 text-right pr-2 text-xs font-mono text-gray-400">{{ f.size }}</div>
-                </div>
+              <div class="col-span-2 text-center text-xs">
+                <input v-model="f.season" placeholder="S" class="w-10 bg-transparent text-center border-b border-slate-700 outline-none">
+                <span class="text-gray-600">/</span>
+                <input v-model="f.episode" placeholder="E" class="w-10 bg-transparent text-center border-b border-slate-700 outline-none">
+                <input v-model="f.manual_id" placeholder="ve-id" class="w-20 mt-1 bg-transparent text-center border-b border-slate-700 outline-none" title="手动指定ID">
               </div>
+              <div class="col-span-3 text-[11px] leading-4" :title="f.match_text || ''">
+                <div v-if="f.match_status === 'ok'" class="text-emerald-300 clamp2">{{ f.match_text }}</div>
+                <div v-else class="text-gray-300 clamp2">{{ f.match_text || '未预检查' }}</div>
+              </div>
+              <div class="col-span-2 text-right pr-2 text-xs font-mono text-gray-400">{{ f.size }}</div>
             </div>
           </template>
           <div v-else class="p-6 text-gray-500 text-sm">暂无文件，请先扫描</div>
         </div>
-        <div class="p-3 flex items-center justify-between border-t border-slate-800 bg-slate-950/40">
-          <div class="text-xs text-gray-400">
-            已选：{{ selectedCount }} / {{ files.length }}
+        <div class="p-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 bg-slate-950/40">
+          <div class="flex items-center gap-3 text-xs text-gray-400">
+            <span>第 {{ page }} / {{ totalPages }} 页</span>
+            <button @click="prevPage" :disabled="page<=1" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:bg-gray-700">上一页</button>
+            <button @click="nextPage" :disabled="page>=totalPages" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:bg-gray-700">下一页</button>
           </div>
-          <button @click="startUpload" :disabled="task.is_running || selectedCount===0 || !tmdbId" class="px-6 py-2 rounded bg-green-600 hover:bg-green-700 disabled:bg-gray-700 font-bold">
-            开始上传
-          </button>
+          <button @click="addToQueue" :disabled="selectedCount===0 || !tmdbId" class="px-6 py-2 rounded bg-green-600 hover:bg-green-700 disabled:bg-gray-700 font-bold">加入队列</button>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden">
+        <div class="px-4 py-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <div class="text-white font-semibold">上传队列</div>
+            <div class="text-xs text-gray-400 mt-1">可边跑边继续追加任务</div>
+          </div>
+          <div class="text-xs text-gray-400">等待 {{ task.queue_size || 0 }} / 成功 {{ task.counts?.success || 0 }} / 失败 {{ task.counts?.failed || 0 }}</div>
+        </div>
+        <div class="max-h-[24vh] overflow-y-auto">
+          <div v-if="task.recent_tasks?.length" v-for="item in task.recent_tasks.slice().reverse()" :key="item.task_id" class="p-3 border-b border-slate-800 text-sm">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-white truncate">{{ item.name }}</div>
+                <div class="text-xs text-gray-500 mt-1 truncate">{{ item.task_id }} | {{ item.server_item_type || '-' }}-{{ item.server_item_id ?? '' }}</div>
+              </div>
+              <span class="px-2 py-0.5 rounded-full text-[10px] border"
+                    :class="item.status === 'success' ? 'bg-emerald-900/30 text-emerald-300 border-emerald-800' : item.status === 'pending' ? 'bg-slate-800 text-gray-200 border-slate-700' : item.status === 'running' ? 'bg-blue-900/30 text-blue-300 border-blue-800' : item.status === 'skipped' ? 'bg-yellow-900/30 text-yellow-300 border-yellow-800' : item.status === 'cancelled' ? 'bg-orange-900/30 text-orange-300 border-orange-800' : 'bg-red-900/30 text-red-300 border-red-800'">
+                {{ item.status }}
+              </span>
+            </div>
+            <div class="mt-1 text-xs text-gray-400 clamp2">{{ item.error || item.match_text || '-' }}</div>
+          </div>
+          <div v-else class="p-6 text-gray-500 text-sm">暂无入队任务</div>
         </div>
       </div>
     </section>
+
     <section class="w-1/3 flex flex-col bg-black">
       <div class="p-5 bg-slate-900 border-b border-slate-800">
-        <div class="text-xs text-gray-500 font-mono mb-2">TASK STATUS</div>
+        <div class="text-xs text-gray-500 font-mono mb-2">QUEUE STATUS</div>
         <div class="text-sm text-white truncate">{{ task.current_file || '等待中...' }}</div>
         <div class="text-xs text-gray-400 mt-1">阶段：{{ task.stage }}</div>
         <div class="mt-4">
           <div class="flex justify-between text-xs text-gray-400">
             <span>下载进度</span>
-            <div class="font-mono">
-              <span>{{ task.download.speed }}</span>
-              <span class="ml-2 text-gray-500">ETA: {{ task.download.eta }}</span>
-            </div>
+            <div class="font-mono"><span>{{ task.download?.speed || '0 MB/s' }}</span><span class="ml-2 text-gray-500">ETA: {{ task.download?.eta || 'N/A' }}</span></div>
           </div>
-          <div class="h-2 bg-slate-700 rounded overflow-hidden mt-1">
-            <div class="h-full bg-cyan-500" :style="{width: task.download.percent+'%'}"></div>
-          </div>
+          <div class="h-2 bg-slate-700 rounded overflow-hidden mt-1"><div class="h-full bg-cyan-500" :style="{width: (task.download?.percent || 0)+'%'}"></div></div>
         </div>
         <div class="mt-4">
           <div class="flex justify-between text-xs text-gray-400">
             <span>上传进度</span>
-            <div class="font-mono">
-              <span>{{ task.upload.speed }}</span>
-              <span class="ml-2 text-gray-500">ETA: {{ task.upload.eta }}</span>
-            </div>
+            <div class="font-mono"><span>{{ task.upload?.speed || '0 MB/s' }}</span><span class="ml-2 text-gray-500">ETA: {{ task.upload?.eta || 'N/A' }}</span></div>
           </div>
-          <div class="h-2 bg-slate-700 rounded overflow-hidden mt-1">
-            <div class="h-full bg-blue-500" :style="{width: task.upload.percent+'%'}"></div>
-          </div>
+          <div class="h-2 bg-slate-700 rounded overflow-hidden mt-1"><div class="h-full bg-blue-500" :style="{width: (task.upload?.percent || 0)+'%'}"></div></div>
         </div>
         <div class="mt-4 grid grid-cols-2 gap-3">
           <div class="bg-slate-800 rounded p-2 text-center">
-            <div class="text-xs text-gray-500">文件完成</div>
+            <div class="text-xs text-gray-500">已完成</div>
             <div class="text-lg text-white font-bold">{{ task.completed_files }} / {{ task.total_files }}</div>
           </div>
           <div class="bg-slate-800 rounded p-2 text-center">
-            <div class="text-xs text-gray-500">总进度</div>
-            <div class="text-lg text-green-400 font-bold">{{ task.total_files ? Math.round(task.completed_files/task.total_files*100) : 0 }}%</div>
+            <div class="text-xs text-gray-500">排队中</div>
+            <div class="text-lg text-green-400 font-bold">{{ task.queue_size || 0 }}</div>
           </div>
         </div>
       </div>
@@ -325,15 +255,15 @@
   </main>
 </div>
 <script>
-const { createApp, ref, computed, onMounted, nextTick } = Vue;
+const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
 createApp({
   setup() {
-    const cfg = ref({aria2_ok:false, cache_dir:'', openlist_base_url:'', aria2_rpc_url:'', chunk_size_mb: 128, parallel_tasks: 3, download_threads: 4});
+    const cfg = ref({aria2_ok:false, cache_dir:'', openlist_base_url:'', aria2_rpc_url:'', chunk_size_mb: 128, parallel_tasks: 1, download_threads: 4});
     const files = ref([]);
     const loading = ref(false);
     const prechecking = ref(false);
     const logs = ref([]);
-    const task = ref({download:{}, upload:{}});
+    const task = ref({download:{}, upload:{}, counts:{}, recent_tasks:[]});
     const wsConnected = ref(false);
     const treeInfo = ref({title:'', vl_id:null, default_season:null, video_type:''});
     const conflicts = ref([]);
@@ -348,89 +278,41 @@ createApp({
     const aria2RpcUrl = ref(localStorage.getItem('aria2_rpc_url') || '');
     const aria2RpcSecret = ref(localStorage.getItem('aria2_rpc_secret') || '');
     const chunkSizeMb = ref(parseInt(localStorage.getItem('chunk_size_mb') || '128'));
-    const parallelTasks = ref(parseInt(localStorage.getItem('parallel_tasks') || '3'));
     const downloadThreads = ref(parseInt(localStorage.getItem('download_threads') || '4'));
     const forceUpload = ref(localStorage.getItem('force_upload') === '1');
     const matchMode = ref(localStorage.getItem('match_mode') || 'strict');
     const showSettings = ref(localStorage.getItem('show_settings') !== '0');
+    const page = ref(1);
+    const pageSize = 50;
+
     const toggleSettings = () => {
       showSettings.value = !showSettings.value;
       localStorage.setItem('show_settings', showSettings.value ? '1' : '0');
     };
-    const collapsedSeasons = ref({});
-    const seasonKeyOf = (f) => {
-      const s = (f.season !== null && f.season !== undefined && f.season !== '') ? Number(f.season) : null;
-      if (s === null || Number.isNaN(s)) return 'UNKNOWN';
-      return `S${s}`;
-    };
-    const seasonLabelOf = (key) => key === 'UNKNOWN' ? '未识别 Season' : key;
-    const ensureCollapseKeys = () => {
-      const keys = new Set(files.value.map(seasonKeyOf));
-      const cur = { ...collapsedSeasons.value };
-      for (const k of keys) if (cur[k] === undefined) cur[k] = false;
-      collapsedSeasons.value = cur;
-    };
-    const groupedBySeason = computed(() => {
-      const m = new Map();
-      for (const f of files.value) {
-        const key = seasonKeyOf(f);
-        if (!m.has(key)) m.set(key, []);
-        m.get(key).push(f);
-      }
-      for (const [, arr] of m.entries()) {
-        arr.sort((a, b) => {
-          const ea = (a.episode !== null && a.episode !== undefined && a.episode !== '') ? Number(a.episode) : 999999;
-          const eb = (b.episode !== null && b.episode !== undefined && b.episode !== '') ? Number(b.episode) : 999999;
-          if (ea !== eb) return ea - eb;
-          return String(a.name).localeCompare(String(b.name));
-        });
-      }
-      const entries = [...m.entries()].map(([key, items]) => {
-        let seasonNum = null;
-        if (key.startsWith('S')) {
-          const n = Number(key.slice(1));
-          seasonNum = Number.isNaN(n) ? null : n;
-        }
-        return { key, label: seasonLabelOf(key), seasonNum, items };
-      });
-      entries.sort((a, b) => {
-        const aU = a.key === 'UNKNOWN';
-        const bU = b.key === 'UNKNOWN';
-        if (aU && !bU) return 1;
-        if (!aU && bU) return -1;
-        if (a.seasonNum !== null && b.seasonNum !== null) return a.seasonNum - b.seasonNum;
-        return String(a.key).localeCompare(String(b.key));
-      });
-      return entries;
-    });
+
     const selectedCount = computed(() => files.value.filter(x => x.selected).length);
     const isAllSelected = computed(() => files.value.length > 0 && selectedCount.value === files.value.length);
+    const totalPages = computed(() => Math.max(1, Math.ceil(files.value.length / pageSize)));
+    const pagedFiles = computed(() => {
+      const start = (page.value - 1) * pageSize;
+      return files.value.slice(start, start + pageSize);
+    });
+
+    watch(files, () => {
+      if (page.value > totalPages.value) page.value = totalPages.value;
+    }, { deep: true });
+
+    const prevPage = () => { if (page.value > 1) page.value -= 1; };
+    const nextPage = () => { if (page.value < totalPages.value) page.value += 1; };
+
     const toggleAllHeader = () => {
       const target = !isAllSelected.value;
       files.value.forEach(f => f.selected = target);
     };
-    const toggleCollapse = (key) => {
-      collapsedSeasons.value = { ...collapsedSeasons.value, [key]: !collapsedSeasons.value[key] };
-    };
-    const seasonAllSelected = (g) => g.items.length > 0 && g.items.every(x => !!x.selected);
-    const seasonSomeSelected = (g) => g.items.some(x => !!x.selected);
-    const seasonSelectedCount = (g) => g.items.filter(x => !!x.selected).length;
-    const toggleSeason = (g) => {
-      const target = !seasonAllSelected(g);
-      g.items.forEach(f => f.selected = target);
-    };
-    const selectOnlyThisSeason = (g) => {
-      files.value.forEach(f => f.selected = false);
-      g.items.forEach(f => f.selected = true);
-    };
-    const clearThisSeason = (g) => g.items.forEach(f => f.selected = false);
-    const selectNeedUpload = () => {
-      files.value.forEach(f => {
-        f.selected = (f.match_status === 'ok' && f.server_has_media === false);
-      });
-    };
+    const selectNeedUpload = () => files.value.forEach(f => { f.selected = (f.match_status === 'ok' && f.server_has_media === false); });
     const clearSelection = () => files.value.forEach(f => f.selected = false);
     const invertSelection = () => files.value.forEach(f => f.selected = !f.selected);
+
     const loadConfig = async () => {
       const r = await axios.get('/api/config');
       cfg.value = r.data;
@@ -438,9 +320,9 @@ createApp({
       if (!openlistBase.value) openlistBase.value = r.data.openlist_base_url || 'http://127.0.0.1:5244';
       if (!aria2RpcUrl.value) aria2RpcUrl.value = r.data.aria2_rpc_url || 'http://127.0.0.1:6800/jsonrpc';
       if (!chunkSizeMb.value) chunkSizeMb.value = r.data.chunk_size_mb || 128;
-      if (!parallelTasks.value) parallelTasks.value = r.data.parallel_tasks || 3;
       if (!downloadThreads.value) downloadThreads.value = r.data.download_threads || 4;
     };
+
     const scan = async () => {
       loading.value = true;
       conflicts.value = [];
@@ -461,16 +343,15 @@ createApp({
           files.value = [];
         } else {
           files.value = (res.data.files || []).map(x => ({...x, selected:true}));
-          collapsedSeasons.value = {};
-          ensureCollapseKeys();
+          page.value = 1;
         }
       } finally {
         loading.value = false;
       }
     };
-    const scanLocal = async () => {
-      return scan();
-    };
+
+    const scanLocal = async () => scan();
+
     const precheck = async () => {
       prechecking.value = true;
       try {
@@ -524,12 +405,12 @@ createApp({
             server_date_air: z.server_date_air,
           };
         });
-        ensureCollapseKeys();
       } finally {
         prechecking.value = false;
       }
     };
-    const startUpload = async () => {
+
+    const addToQueue = async () => {
       localStorage.setItem('emos_token', emosToken.value);
       localStorage.setItem('tmdb_id', tmdbId.value);
       localStorage.setItem('storage', storage.value);
@@ -539,7 +420,6 @@ createApp({
       localStorage.setItem('aria2_rpc_url', aria2RpcUrl.value);
       localStorage.setItem('aria2_rpc_secret', aria2RpcSecret.value);
       localStorage.setItem('chunk_size_mb', chunkSizeMb.value);
-      localStorage.setItem('parallel_tasks', parallelTasks.value);
       localStorage.setItem('download_threads', downloadThreads.value);
       const payload = {
         emos_token: emosToken.value,
@@ -554,7 +434,7 @@ createApp({
         aria2_rpc_url: aria2RpcUrl.value,
         aria2_rpc_secret: aria2RpcSecret.value,
         chunk_size_mb: chunkSizeMb.value,
-        parallel_tasks: parallelTasks.value,
+        parallel_tasks: 1,
         download_threads: downloadThreads.value,
         files: files.value.filter(f => f.selected).map(f => ({
           name: f.name,
@@ -568,10 +448,16 @@ createApp({
           manual_id: f.manual_id
         }))
       };
-      const res = await axios.post('/api/start_upload', payload);
-      if (res.data.error) alert(res.data.error);
+      const res = await axios.post('/api/queue/add', payload);
+      if (res.data.error) {
+        alert(res.data.error);
+        return;
+      }
+      files.value.forEach(f => { if (f.selected) f.selected = false; });
     };
+
     const cancel = async () => { await axios.post('/api/cancel'); };
+
     const startWS = () => {
       const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
       const ws = new WebSocket(wsUrl);
@@ -579,6 +465,7 @@ createApp({
       ws.onmessage = (evt) => {
         const msg = JSON.parse(evt.data);
         if (msg.logs?.length) logs.value.push(...msg.logs);
+        if (logs.value.length > 300) logs.value = logs.value.slice(-300);
         if (msg.task) task.value = msg.task;
         nextTick(() => {
           const el = document.getElementById('logs');
@@ -588,22 +475,22 @@ createApp({
       ws.onclose = () => { wsConnected.value = false; setTimeout(startWS, 1000); };
       ws.onerror = () => { try { ws.close(); } catch(e) {} };
     };
+
     onMounted(async () => {
       await loadConfig();
       startWS();
     });
+
     return {
       cfg, files, logs, task, loading, wsConnected,
       prechecking, treeInfo, conflicts,
       emosToken, tmdbId, storage, cacheDir,
-      openlistBase, openlistToken, rootPath, localPath, forceUpload, matchMode, aria2RpcUrl, aria2RpcSecret, chunkSizeMb, parallelTasks, downloadThreads,
+      openlistBase, openlistToken, rootPath, localPath, forceUpload, matchMode, aria2RpcUrl, aria2RpcSecret, chunkSizeMb, downloadThreads,
       showSettings, toggleSettings,
-      groupedBySeason, collapsedSeasons,
-      toggleCollapse, seasonAllSelected, seasonSomeSelected, seasonSelectedCount,
-      toggleSeason, selectOnlyThisSeason, clearThisSeason,
       selectedCount, isAllSelected, toggleAllHeader,
       selectNeedUpload, invertSelection, clearSelection,
-      scan, scanLocal, precheck, startUpload, cancel
+      scan, scanLocal, precheck, addToQueue, cancel,
+      page, totalPages, pagedFiles, prevPage, nextPage
     };
   }
 }).mount('#app');

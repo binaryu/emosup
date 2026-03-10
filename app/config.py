@@ -2,7 +2,7 @@
 import os
 import threading
 import collections
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 # ==============================
 # Config (env defaults)
@@ -47,13 +47,24 @@ class AppState:
         self.logs: collections.deque = collections.deque(maxlen=500)
         self.lock = threading.Lock()
 
+        self.queue: list[str] = []
+        self.tasks_by_id: Dict[str, Dict[str, Any]] = {}
+        self.task_order: list[str] = []
+        self.current_task_id: str | None = None
+        self.worker_running = False
+        self.cancel_current = False
+        self.queue_stats: Dict[str, int] = {
+            "total": 0,
+            "completed": 0,
+        }
+
         self.task: Dict[str, Any] = {
             "is_running": False,
             "cancel": False,
             "total_files": 0,
             "completed_files": 0,
             "current_file": "",
-            "stage": "idle",  # idle | scan | precheck | download | upload | finalize
+            "stage": "idle",  # idle | scan | precheck | queued | download | upload
             "download": {"percent": 0.0, "speed": "0 MB/s", "eta": "N/A", "done": False},
             "upload": {"percent": 0.0, "speed": "0 MB/s", "eta": "N/A", "done": False},
         }

@@ -4,14 +4,13 @@ import sys
 import asyncio
 import argparse
 import uvicorn
-from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
-from .config import state, DEFAULT_EMOS_API_BASE, DEFAULT_CACHE_DIR, DEFAULT_OPENLIST_BASE, DEFAULT_OPENLIST_TOKEN, DEFAULT_ARIA2_RPC_URL, DEFAULT_ARIA2_RPC_SECRET, DEFAULT_CHUNK_SIZE_MB, DEFAULT_PARALLEL_TASKS, DEFAULT_DOWNLOAD_THREADS
+from .config import state, DEFAULT_EMOS_API_BASE, DEFAULT_OPENLIST_BASE, DEFAULT_OPENLIST_TOKEN
 from .utils import ensure_dir
 from .tasks import worker
 from .upload import register_upload_routes, UploadItem
@@ -43,14 +42,14 @@ class PrecheckRequest(BaseModel):
 app = FastAPI(title="EMOS Upload Panel")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+
 def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
 
 templates = Jinja2Templates(directory=resource_path("app/templates"))
 register_upload_routes(app)
@@ -163,15 +162,17 @@ async def precheck(req: PrecheckRequest):
 
 @app.post("/api/cancel")
 async def cancel_task():
-    if not state.task["is_running"]:
-        return {"status": "no_task"}
-    state.task["cancel"] = True
-    return {"status": "cancelling"}
+    return worker.cancel_current()
 
 
 @app.get("/api/status")
 async def status():
-    return {"logs": state.logs[-80:], "task": state.task}
+    return {"logs": list(state.logs)[-80:], "task": worker.get_public_status()}
+
+
+@app.get("/api/queue/status")
+async def queue_status():
+    return worker.get_public_status()
 
 
 @app.websocket("/ws")
@@ -183,12 +184,13 @@ async def ws(ws: WebSocket):
             all_logs = list(state.logs)
             new_logs = all_logs[last_len:]
             last_len = len(all_logs)
-            # Reduce payload size when task is running
-            log_payload = new_logs if not state.task.get("is_running") else new_logs[-10:]
-            await ws.send_json({"logs": log_payload, "task": state.task})
-            await asyncio.sleep(2.0) # Reduce update frequency
+            public_task = worker.get_public_status()
+            log_payload = new_logs if not public_task.get("is_running") else new_logs[-10:]
+            await ws.send_json({"logs": log_payload, "task": public_task})
+            await asyncio.sleep(2.0)
     except WebSocketDisconnect:
         return
+
 
 @app.get("/")
 async def index(request: Request):
@@ -203,6 +205,7 @@ def main():
     args = parser.parse_args()
     print(f"EMOS PRO Panel running on http://{args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port)
+
 
 if __name__ == "__main__":
     main()

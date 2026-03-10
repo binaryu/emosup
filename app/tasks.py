@@ -1,20 +1,19 @@
 # -*- coding: utf-8 -*-
-import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from urllib.parse import quote
-import time
 import asyncio
 import re
-import requests
+import time
+import uuid
 
-from .config import state, ARIA2_BIN, DEFAULT_ARIA2_RPC_URL, DEFAULT_ARIA2_RPC_SECRET, DEFAULT_CHUNK_SIZE_MB, DEFAULT_PARALLEL_TASKS, DEFAULT_DOWNLOAD_THREADS
-from .utils import log, ensure_dir, safe_unlink, bytes_to_speed, RateMeter, guess_season_episode
+from pydantic import BaseModel
+
+from .config import state, DEFAULT_ARIA2_RPC_URL, DEFAULT_ARIA2_RPC_SECRET, DEFAULT_CHUNK_SIZE_MB, DEFAULT_PARALLEL_TASKS, DEFAULT_DOWNLOAD_THREADS
+from .utils import log, ensure_dir, safe_unlink, RateMeter, guess_season_episode
 from .clients import EmosClient
 from .aria2 import Aria2RpcClient
 from .upload import uploader, UploadItem
-from pydantic import BaseModel, Field
-from typing import Optional
 
 
 class UploadRequest(BaseModel):
@@ -33,6 +32,12 @@ class UploadRequest(BaseModel):
     parallel_tasks: int = DEFAULT_PARALLEL_TASKS
     download_threads: int = DEFAULT_DOWNLOAD_THREADS
     files: List[UploadItem]
+
+
+class QueueAddResult(BaseModel):
+    added: int
+    skipped: int
+    queued_ids: List[str]
 
 
 def build_direct_url(openlist_base: str, ol_path: str) -> str:
@@ -58,12 +63,14 @@ class BatchWorker:
 
         for sea in seasons:
             sn = sea.get("season_number")
-            if sn is None: continue
+            if sn is None:
+                continue
             sn = int(sn)
             for ep in sea.get("episodes") or []:
                 en = ep.get("episode_number")
                 ve_id = ep.get("item_id")
-                if en is None or ve_id is None: continue
+                if en is None or ve_id is None:
+                    continue
                 key = (sn, int(en))
                 episodes[key] = {
                     "item_type": "ve", "item_id": int(ve_id),
@@ -94,7 +101,8 @@ class BatchWorker:
             missing = sorted([f for f in files if f.episode is None], key=lambda x: x.name)
             ep = 1
             for f in missing:
-                while ep in used: ep += 1
+                while ep in used:
+                    ep += 1
                 if (default_season, ep) in ep_map:
                     autofill_map[item_key(f)] = (default_season, ep)
                     used.add(ep)
@@ -105,8 +113,10 @@ class BatchWorker:
             if s is None or e is None:
                 source_path = f.local_path or f.ol_path or f.name
                 ps, pe = guess_season_episode(f.name, source_path)
-                if s is None: s = ps
-                if e is None: e = pe
+                if s is None:
+                    s = ps
+                if e is None:
+                    e = pe
             current_key = item_key(f)
             if video_type == "tv" and (s is None or e is None) and current_key in autofill_map:
                 s, e = autofill_map[current_key]
@@ -172,70 +182,271 @@ class BatchWorker:
                         row["match_text"] = "冲突：" + row.get("match_text", "")
         return enriched, conflicts
 
-    async def _process_file(self, f: UploadItem, req: UploadRequest, idx: Dict, enrich_map: Dict, aria2_client: Aria2RpcClient, sem: asyncio.Semaphore):
-        async with sem:
-            if state.task["cancel"]:
+    @staticmethod
+    def _empty_progress() -> Dict[str, Any]:
+        return {"percent": 0.0, "speed": "0 MB/s", "eta": "N/A", "done": False}
+
+    def _queue_summary(self) -> Dict[str, Any]:
+        queue_list = list(state.queue)
+        current = state.current_task_id
+        recent = [state.tasks_by_id[tid] for tid in state.task_order[-20:] if tid in state.tasks_by_id]
+        return {
+            "is_running": state.worker_running,
+            "cancel": state.cancel_current,
+            "stage": state.task.get("stage", "idle"),
+            "total_files": state.queue_stats["total"],
+            "completed_files": state.queue_stats["completed"],
+            "current_file": state.task.get("current_file", ""),
+            "download": dict(state.task.get("download") or self._empty_progress()),
+            "upload": dict(state.task.get("upload") or self._empty_progress()),
+            "queue_size": len(queue_list),
+            "pending_ids": queue_list[:50],
+            "running_task_id": current,
+            "recent_tasks": recent,
+            "counts": {
+                "pending": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "pending"),
+                "running": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "running"),
+                "success": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "success"),
+                "failed": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "failed"),
+                "skipped": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "skipped"),
+                "cancelled": sum(1 for x in state.tasks_by_id.values() if x.get("status") == "cancelled"),
+            }
+        }
+
+    def get_public_status(self) -> Dict[str, Any]:
+        with state.lock:
+            return self._queue_summary()
+
+    def _reset_runtime_progress(self):
+        state.task.update({
+            "current_file": "",
+            "stage": "idle",
+            "download": self._empty_progress(),
+            "upload": self._empty_progress(),
+        })
+
+    def _update_task_status(self, task_id: str, status: str, error: str = ""):
+        with state.lock:
+            task = state.tasks_by_id.get(task_id)
+            if not task:
                 return
+            task["status"] = status
+            task["error"] = error
+            if status == "running":
+                task["started_at"] = time.time()
+            if status in {"success", "failed", "skipped", "cancelled"}:
+                task["finished_at"] = time.time()
 
-            log(f"处理：{f.name}", "INFO")
-            file_key = f.ol_path or f.local_path or f.name
-            ef = enrich_map.get(file_key) or {}
-            mstatus = ef.get("match_status")
-
-            if mstatus != "ok":
-                log(f"跳过：匹配失败/冲突 status={mstatus} msg={ef.get('match_text')}", "ERROR")
-                with state.lock:
-                    state.task["completed_files"] += 1
+    def _finish_task(self, task_id: str, status: str, error: str = ""):
+        with state.lock:
+            task = state.tasks_by_id.get(task_id)
+            if not task:
                 return
+            task["status"] = status
+            task["error"] = error
+            task["finished_at"] = time.time()
+            state.queue_stats["completed"] += 1
+            state.current_task_id = None
+            state.task["current_file"] = ""
+            state.task["stage"] = "idle"
+            state.task["download"] = self._empty_progress()
+            state.task["upload"] = self._empty_progress()
+            log(
+                f"[queue-debug] finish task_id={task_id} status={status} cancel_current={state.cancel_current} queue_size={len(state.queue)} completed={state.queue_stats['completed']}/{state.queue_stats['total']}",
+                "INFO",
+            )
 
-            item_type, item_id, s, e = ef.get("server_item_type"), ef.get("server_item_id"), ef.get("season"), ef.get("episode")
-            if idx.get("video_type") == "tv" and not req.force_upload and bool(ef.get("server_has_media")):
-                log(f"预检查：S{s}E{e} 已有资源 ve-{item_id}，跳过", "WARN")
-                with state.lock:
-                    state.task["completed_files"] += 1
-                return
+    def _build_runtime_request(self, req: UploadRequest, file_item: UploadItem) -> UploadRequest:
+        return UploadRequest(
+            emos_token=req.emos_token,
+            emos_api_base=req.emos_api_base,
+            tmdb_id=req.tmdb_id,
+            storage=req.storage,
+            force_upload=req.force_upload,
+            match_mode=req.match_mode,
+            openlist_base_url=req.openlist_base_url,
+            openlist_token=req.openlist_token,
+            cache_dir=req.cache_dir,
+            aria2_rpc_url=req.aria2_rpc_url,
+            aria2_rpc_secret=req.aria2_rpc_secret,
+            chunk_size_mb=req.chunk_size_mb,
+            parallel_tasks=1,
+            download_threads=req.download_threads,
+            files=[file_item],
+        )
 
-            source = (f.source or ("local" if f.local_path else "openlist")).lower()
-            if source == "local":
-                cache_path = str(Path(f.local_path or "").resolve())
-                if not f.local_path or not Path(cache_path).exists():
-                    log(f"本地文件不存在：{cache_path or f.local_path}", "ERROR")
-                    with state.lock:
-                        state.task["completed_files"] += 1
-                    return
-                log(f"使用本地文件直传：{cache_path}", "INFO")
-            else:
-                if not f.ol_path:
-                    log(f"OpenList 路径缺失：{f.name}", "ERROR")
-                    with state.lock:
-                        state.task["completed_files"] += 1
-                    return
-                direct_url = build_direct_url(req.openlist_base_url, f.ol_path)
-                cache_path = str(Path(req.cache_dir).resolve() / Path(f.name).name)
-                log(f"通过 OpenList + aria2 下载缓存：{f.ol_path}", "INFO")
-                if not aria2_client.download_and_monitor(direct_url, cache_path, req.download_threads):
-                    log(f"下载失败：请检查 aria2 日志 -> {cache_path}", "ERROR")
-                    with state.lock:
-                        state.task["completed_files"] += 1
-                    return
+    def enqueue(self, req: UploadRequest) -> QueueAddResult:
+        selected = [f for f in req.files if f.selected]
+        if not selected:
+            return QueueAddResult(added=0, skipped=0, queued_ids=[])
 
-            upload_ok, save_ok = False, False
-            try:
-                token = uploader.get_token(cache_path, "video", req.storage)
-                if not token or "data" not in token or "upload_url" not in token["data"]:
-                    raise RuntimeError("getUploadToken failed")
-                upload_url, file_id = token["data"]["upload_url"], token["file_id"]
-                uploader.upl_meter = RateMeter(interval=1.0, alpha=0.35)
-                upload_ok = uploader.upload_stream_chunked(cache_path, upload_url, req.chunk_size_mb)
-                if not upload_ok: raise RuntimeError("upload failed")
-                save_ok = uploader.save_upload(item_type, int(item_id), file_id)
-                if save_ok:
-                    log(f"✅ 保存成功：{f.name} -> {item_type}-{item_id} (S{s}E{e}) | {ef.get('server_episode_title')}" if idx.get('video_type') == "tv" else f"✅ 保存成功：{f.name} -> {item_type}-{item_id}", "SUCCESS")
-                else:
-                    log("上传成功但保存失败（缓存保留）", "ERROR")
-            except Exception as ex:
-                log(f"处理异常：{f.name} | {ex}", "ERROR")
+        state.emos_token = req.emos_token
+        state.emos_api_base = req.emos_api_base
+        state.openlist_base = req.openlist_base_url
+        state.openlist_token = req.openlist_token
+        state.cache_dir = req.cache_dir
+        state.aria2_rpc_url = req.aria2_rpc_url
+        state.aria2_rpc_secret = req.aria2_rpc_secret
+        state.chunk_size_mb = req.chunk_size_mb
+        state.parallel_tasks = 1
+        state.download_threads = req.download_threads
+        ensure_dir(req.cache_dir)
 
+        tree = self.client.get_tree_by_tmdb(req.tmdb_id)
+        if not tree:
+            raise RuntimeError("无法获取 video/tree，请确认 tmdb_id 是否存在且已同步")
+        idx = self.build_tree_index(tree)
+        enriched, conflicts = self.precheck_files(idx, selected, req.match_mode)
+        if conflicts:
+            for c in conflicts:
+                log(c, "WARN")
+
+        enrich_map = {(x.get("ol_path") or x.get("local_path") or x.get("name")): x for x in enriched}
+        added_ids: List[str] = []
+        skipped = 0
+        with state.lock:
+            for f in selected:
+                key = f.ol_path or f.local_path or f.name
+                enrich = dict(enrich_map.get(key) or {})
+                task_id = uuid.uuid4().hex[:12]
+                queue_task = {
+                    "task_id": task_id,
+                    "name": f.name,
+                    "source": f.source or ("local" if f.local_path else "openlist"),
+                    "ol_path": f.ol_path,
+                    "local_path": f.local_path,
+                    "size_bytes": f.size_bytes,
+                    "season": enrich.get("season", f.season),
+                    "episode": enrich.get("episode", f.episode),
+                    "status": "pending",
+                    "error": "",
+                    "match_status": enrich.get("match_status", "missing"),
+                    "match_text": enrich.get("match_text", ""),
+                    "server_item_type": enrich.get("server_item_type", ""),
+                    "server_item_id": enrich.get("server_item_id"),
+                    "server_has_media": enrich.get("server_has_media"),
+                    "server_episode_title": enrich.get("server_episode_title", ""),
+                    "server_date_air": enrich.get("server_date_air", ""),
+                    "created_at": time.time(),
+                    "started_at": None,
+                    "finished_at": None,
+                    "req": req.model_dump(),
+                    "file": f.model_dump(),
+                }
+                state.tasks_by_id[task_id] = queue_task
+                state.task_order.append(task_id)
+                state.queue.append(task_id)
+                state.queue_stats["total"] += 1
+                added_ids.append(task_id)
+
+            state.task["is_running"] = state.worker_running
+            if not state.worker_running and state.queue:
+                state.task["stage"] = "queued"
+
+        log(f"已加入队列：{len(added_ids)} 个文件 | 当前排队 {self.get_public_status().get('queue_size')}", "INFO")
+        return QueueAddResult(added=len(added_ids), skipped=skipped, queued_ids=added_ids)
+
+    async def _process_queue_task(self, queue_task: Dict[str, Any]):
+        task_id = queue_task["task_id"]
+        req = UploadRequest(**queue_task["req"])
+        file_item = UploadItem(**queue_task["file"])
+        runtime_req = self._build_runtime_request(req, file_item)
+        idx = {
+            "video_type": "movie" if queue_task.get("server_item_type") == "vl" else "tv",
+        }
+        enrich_map = {
+            (file_item.ol_path or file_item.local_path or file_item.name): {
+                "match_status": queue_task.get("match_status"),
+                "match_text": queue_task.get("match_text"),
+                "server_item_type": queue_task.get("server_item_type"),
+                "server_item_id": queue_task.get("server_item_id"),
+                "server_has_media": queue_task.get("server_has_media"),
+                "server_episode_title": queue_task.get("server_episode_title"),
+                "server_date_air": queue_task.get("server_date_air"),
+                "season": queue_task.get("season"),
+                "episode": queue_task.get("episode"),
+            }
+        }
+
+        needs_aria2 = (file_item.source or ("local" if file_item.local_path else "openlist")).lower() != "local"
+        aria2_client = Aria2RpcClient(req.aria2_rpc_url, req.aria2_rpc_secret) if needs_aria2 else None
+        if needs_aria2 and not aria2_client.check_version():
+            raise RuntimeError("Aria2 RPC 连接失败，请检查 URL 和密钥")
+
+        self._update_task_status(task_id, "running")
+        with state.lock:
+            log(
+                f"[queue-debug] start task_id={task_id} name={file_item.name} before_reset cancel_current={state.cancel_current} queue_size={len(state.queue)} current_task_id={state.current_task_id}",
+                "INFO",
+            )
+            state.current_task_id = task_id
+            state.cancel_current = False
+            state.worker_running = True
+            state.task.update({
+                "is_running": True,
+                "cancel": False,
+                "current_file": file_item.name,
+                "stage": "running",
+                "download": self._empty_progress(),
+                "upload": self._empty_progress(),
+            })
+            log(
+                f"[queue-debug] start task_id={task_id} name={file_item.name} after_reset cancel_current={state.cancel_current} queue_size={len(state.queue)} current_task_id={state.current_task_id}",
+                "INFO",
+            )
+
+        log(f"开始处理队列任务：{file_item.name}", "INFO")
+        await self._process_file(file_item, runtime_req, idx, enrich_map, aria2_client)
+
+    async def _process_file(self, f: UploadItem, req: UploadRequest, idx: Dict, enrich_map: Dict, aria2_client: Aria2RpcClient):
+        if state.cancel_current:
+            raise RuntimeError("cancelled")
+
+        file_key = f.ol_path or f.local_path or f.name
+        ef = enrich_map.get(file_key) or {}
+        mstatus = ef.get("match_status")
+
+        if mstatus != "ok":
+            raise RuntimeError(f"匹配失败/冲突 status={mstatus} msg={ef.get('match_text')}")
+
+        item_type, item_id, s, e = ef.get("server_item_type"), ef.get("server_item_id"), ef.get("season"), ef.get("episode")
+        if idx.get("video_type") == "tv" and not req.force_upload and bool(ef.get("server_has_media")):
+            raise RuntimeError(f"预检查：S{s}E{e} 已有资源 ve-{item_id}，跳过")
+
+        source = (f.source or ("local" if f.local_path else "openlist")).lower()
+        if source == "local":
+            cache_path = str(Path(f.local_path or "").resolve())
+            if not f.local_path or not Path(cache_path).exists():
+                raise RuntimeError(f"本地文件不存在：{cache_path or f.local_path}")
+            log(f"使用本地文件直传：{cache_path}", "INFO")
+        else:
+            if not f.ol_path:
+                raise RuntimeError(f"OpenList 路径缺失：{f.name}")
+            direct_url = build_direct_url(req.openlist_base_url, f.ol_path)
+            cache_path = str(Path(req.cache_dir).resolve() / Path(f.name).name)
+            with state.lock:
+                state.task["stage"] = "download"
+            log(f"通过 OpenList + aria2 下载缓存：{f.ol_path}", "INFO")
+            if not aria2_client.download_and_monitor(direct_url, cache_path, req.download_threads):
+                raise RuntimeError(f"下载失败：请检查 aria2 日志 -> {cache_path}")
+
+        upload_ok, save_ok = False, False
+        try:
+            with state.lock:
+                state.task["stage"] = "upload"
+            token = uploader.get_token(cache_path, "video", req.storage)
+            if not token or "data" not in token or "upload_url" not in token["data"]:
+                raise RuntimeError("getUploadToken failed")
+            upload_url, file_id = token["data"]["upload_url"], token["file_id"]
+            uploader.upl_meter = RateMeter(interval=1.0, alpha=0.35)
+            upload_ok = uploader.upload_stream_chunked(cache_path, upload_url, req.chunk_size_mb)
+            if not upload_ok:
+                raise RuntimeError("upload failed")
+            save_ok = uploader.save_upload(item_type, int(item_id), file_id)
+            if not save_ok:
+                raise RuntimeError("save upload failed")
+            log(f"✅ 保存成功：{f.name} -> {item_type}-{item_id} (S{s}E{e}) | {ef.get('server_episode_title')}" if idx.get('video_type') == 'tv' else f"✅ 保存成功：{f.name} -> {item_type}-{item_id}", "SUCCESS")
+        finally:
             if upload_ok and save_ok:
                 if source == "local":
                     log("本地文件上传完成（保留源文件）", "INFO")
@@ -245,47 +456,66 @@ class BatchWorker:
                     log("已删除缓存文件(.aria2 也清理)", "INFO")
             else:
                 log(f"未完全成功：保留缓存用于续传/重试 -> {cache_path}", "WARN")
-            
+
+    async def worker_loop(self):
+        while True:
             with state.lock:
-                state.task["completed_files"] += 1
+                log(
+                    f"[queue-debug] loop_enter queue_size={len(state.queue)} current_task_id={state.current_task_id} cancel_current={state.cancel_current} worker_running={state.worker_running}",
+                    "INFO",
+                )
+                if not state.queue:
+                    state.worker_running = False
+                    state.task["is_running"] = False
+                    self._reset_runtime_progress()
+                    log("[queue-debug] loop_exit queue empty, worker stopped", "INFO")
+                    return
+                task_id = state.queue.pop(0)
+                queue_task = state.tasks_by_id.get(task_id)
+                log(
+                    f"[queue-debug] dequeue task_id={task_id} queue_size={len(state.queue)} cancel_current={state.cancel_current}",
+                    "INFO",
+                )
 
-    def process(self, req: UploadRequest):
-        asyncio.run(self.async_process(req))
+            if not queue_task:
+                continue
 
-    async def async_process(self, req: UploadRequest):
-        selected = [f for f in req.files if f.selected]
-        state.task.update({"is_running": True, "cancel": False, "total_files": len(selected), "completed_files": 0, "stage": "precheck"})
-        
-        try:
-            state.emos_token, state.emos_api_base, state.openlist_base, state.openlist_token, state.cache_dir, state.aria2_rpc_url, state.aria2_rpc_secret, state.chunk_size_mb, state.parallel_tasks, state.download_threads = \
-                req.emos_token, req.emos_api_base, req.openlist_base_url, req.openlist_token, req.cache_dir, req.aria2_rpc_url, req.aria2_rpc_secret, req.chunk_size_mb, req.parallel_tasks, req.download_threads
-            ensure_dir(req.cache_dir)
+            try:
+                await self._process_queue_task(queue_task)
+                self._finish_task(task_id, "success")
+            except Exception as ex:
+                msg = str(ex)
+                status = "cancelled" if msg == "cancelled" else ("skipped" if "跳过" in msg or "预检查" in msg else "failed")
+                log(f"任务结束：{queue_task.get('name')} | {msg}", "WARN" if status in {"skipped", "cancelled"} else "ERROR")
+                self._finish_task(task_id, status, msg)
 
-            needs_aria2 = any((f.source or ("local" if f.local_path else "openlist")).lower() != "local" for f in selected)
-            aria2_client = Aria2RpcClient(req.aria2_rpc_url, req.aria2_rpc_secret) if needs_aria2 else None
-            if needs_aria2 and not aria2_client.check_version():
-                log("Aria2 RPC 连接失败，请检查 URL 和密钥", "ERROR")
-                return
+    def ensure_worker(self):
+        with state.lock:
+            if state.worker_running:
+                return False
+            state.worker_running = True
+            state.task["is_running"] = True
+        asyncio.run(self.worker_loop())
+        return True
 
-            tree = self.client.get_tree_by_tmdb(req.tmdb_id)
-            if not tree:
-                log("无法获取 video/tree，请确认 tmdb_id 是否存在且已同步", "ERROR")
-                return
+    def start_worker(self):
+        self.ensure_worker()
 
-            idx = self.build_tree_index(tree)
-            log(f"Tree加载完成：video_type={idx.get('video_type')} vl_id={idx.get('vl_id')} title={idx.get('title')} episodes={len(idx.get('episodes') or {})} default_season={idx.get('default_season')}", "INFO")
-            enriched, conflicts = self.precheck_files(idx, selected, req.match_mode)
-            if conflicts:
-                for c in conflicts: log(c, "WARN")
-            enrich_map = {(x.get("ol_path") or x.get("local_path") or x.get("name")): x for x in enriched}
-            log(f"=== 任务开始：files={len(selected)} tmdb={req.tmdb_id} match_mode={req.match_mode} parallel={req.parallel_tasks} ===", "INFO")
-            
-            sem = asyncio.Semaphore(req.parallel_tasks)
-            tasks = [self._process_file(f, req, idx, enrich_map, aria2_client, sem) for f in selected]
-            await asyncio.gather(*tasks)
+    def cancel_current(self) -> Dict[str, str]:
+        with state.lock:
+            if not state.worker_running or not state.current_task_id:
+                log(
+                    f"[queue-debug] cancel ignored worker_running={state.worker_running} current_task_id={state.current_task_id} queue_size={len(state.queue)} cancel_current={state.cancel_current}",
+                    "INFO",
+                )
+                return {"status": "no_task"}
+            state.cancel_current = True
+            state.task["cancel"] = True
+            log(
+                f"[queue-debug] cancel requested current_task_id={state.current_task_id} queue_size={len(state.queue)} cancel_current={state.cancel_current}",
+                "INFO",
+            )
+            return {"status": "cancelling"}
 
-            log("=== 所有任务结束 ===", "SUCCESS")
-        finally:
-            state.task.update({"stage": "idle", "is_running": False})
 
 worker = BatchWorker()

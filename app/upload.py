@@ -3,7 +3,7 @@ import time
 import mimetypes
 import requests
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 from fastapi import BackgroundTasks
 from pydantic import BaseModel
 from requests.adapters import HTTPAdapter
@@ -12,7 +12,6 @@ from urllib3.util.retry import Retry
 
 from .config import state, DEFAULT_EMOS_API_BASE, DEFAULT_CACHE_DIR, DEFAULT_OPENLIST_BASE, DEFAULT_OPENLIST_TOKEN, DEFAULT_ARIA2_RPC_URL, DEFAULT_ARIA2_RPC_SECRET, DEFAULT_CHUNK_SIZE_MB, DEFAULT_PARALLEL_TASKS, DEFAULT_DOWNLOAD_THREADS
 from .utils import log, bytes_to_speed, RateMeter, _backoff
-from pydantic import Field
 
 
 class UploadItem(BaseModel):
@@ -124,19 +123,19 @@ class Uploader:
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
 
-        CHUNK_SIZE = int(chunk_size_mb) * 1024 * 1024
-        CHUNK_SIZE = (CHUNK_SIZE // (256 * 1024)) * (256 * 1024)
-        if CHUNK_SIZE == 0:
-            CHUNK_SIZE = 256 * 1024
-        log(f"开始上传，分片大小: {CHUNK_SIZE / 1024 / 1024:.2f} MB", "INFO")
+        chunk_size = int(chunk_size_mb) * 1024 * 1024
+        chunk_size = (chunk_size // (256 * 1024)) * (256 * 1024)
+        if chunk_size == 0:
+            chunk_size = 256 * 1024
+        log(f"开始上传，分片大小: {chunk_size / 1024 / 1024:.2f} MB", "INFO")
 
-        MAX_RETRY = 10
+        max_retry = 10
         uploaded = 0
-        buf = bytearray(CHUNK_SIZE)
+        buf = bytearray(chunk_size)
 
         with open(file_path, "rb") as f:
             while uploaded < file_size:
-                if state.task["cancel"]:
+                if state.cancel_current:
                     raise RuntimeError("cancelled")
 
                 n = f.readinto(buf)
@@ -153,8 +152,8 @@ class Uploader:
                     "Content-Length": str(n),
                 }
 
-                for attempt in range(1, MAX_RETRY + 1):
-                    if state.task["cancel"]:
+                for attempt in range(1, max_retry + 1):
+                    if state.cancel_current:
                         raise RuntimeError("cancelled")
 
                     try:
@@ -169,7 +168,7 @@ class Uploader:
                             if code in (429, 500, 502, 503, 504):
                                 ra = resp.headers.get("Retry-After")
                                 sleep_s = int(ra) if ra and ra.isdigit() else _backoff(attempt, cap=60.0)
-                                log(f"分片限流/波动({code})，第{attempt}/{MAX_RETRY}次重试，等待 {sleep_s:.1f}s", "WARN")
+                                log(f"分片限流/波动({code})，第{attempt}/{max_retry}次重试，等待 {sleep_s:.1f}s", "WARN")
                                 time.sleep(sleep_s)
                                 continue
 
@@ -178,29 +177,29 @@ class Uploader:
 
                     except (Timeout, ConnectionError) as e:
                         sleep_s = _backoff(attempt, cap=60.0)
-                        log(f"分片上传网络异常，第{attempt}/{MAX_RETRY}次重试：{e}，等待 {sleep_s:.1f}s", "WARN")
+                        log(f"分片上传网络异常，第{attempt}/{max_retry}次重试：{e}，等待 {sleep_s:.1f}s", "WARN")
                         time.sleep(sleep_s)
                         continue
                     except RequestException as e:
                         sleep_s = _backoff(attempt, cap=60.0)
-                        log(f"分片上传请求异常，第{attempt}/{MAX_RETRY}次重试：{e}，等待 {sleep_s:.1f}s", "WARN")
+                        log(f"分片上传请求异常，第{attempt}/{max_retry}次重试：{e}，等待 {sleep_s:.1f}s", "WARN")
                         time.sleep(sleep_s)
                         continue
-
                 else:
                     log("分片重试次数耗尽，上传失败", "ERROR")
                     return False
-        
+
         self._upload_cb(file_size, file_size)
         return True
 
+
 uploader = Uploader()
 
+
 def register_upload_routes(app):
-    @app.post("/api/start_upload")
-    async def start_upload(req: UploadRequest, background_tasks: BackgroundTasks):
+    @app.post("/api/queue/add")
+    async def add_queue(req: UploadRequest, background_tasks: BackgroundTasks):
         from . import tasks
-        if state.task["is_running"]:
-            return {"error": "已有任务正在运行"}
-        background_tasks.add_task(tasks.worker.process, req)
-        return {"status": "started"}
+        result = tasks.worker.enqueue(tasks.UploadRequest(**req.model_dump()))
+        background_tasks.add_task(tasks.worker.start_worker)
+        return {"status": "queued", "added": result.added, "skipped": result.skipped, "queued_ids": result.queued_ids}
