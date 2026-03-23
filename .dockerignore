@@ -1,0 +1,15 @@
+.git
+.github
+release
+frontend/node_modules
+frontend/dist
+frontend/.vite
+backend/data/config.json
+backend/data/downloads
+backend/data/logs
+backend/data/scans
+backend/data/tasks
+backend/internal/service/data
+plan*.md
+final.md
+.DS_Store

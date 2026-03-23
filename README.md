@@ -236,6 +236,11 @@ curl http://127.0.0.1:8080/api/system/recovery
 - 前端：Vite dev server
 - 后端：Go API server
 
+开发模式下前后端已经连通：
+
+- 前端请求统一走 `/api`
+- Vite 会把 `/api` 代理到 `http://127.0.0.1:8080`
+
 ### 前端构建
 
 ```bash
@@ -251,6 +256,60 @@ npm run build
 - 在发布压缩包里，会优先识别与 `backend/` 同级的 `frontend/`
 
 也就是说，打包好的 Linux 产物解压后，通常只要启动后端，就能通过同一个端口访问界面和 API。
+
+### 直接启动生产模式
+
+如果你已经构建过前端，可以直接只启动后端：
+
+```bash
+cd frontend
+npm install
+npm run build
+
+cd ../backend
+go run ./cmd/server
+```
+
+然后浏览器直接打开：
+
+```text
+http://127.0.0.1:8080
+```
+
+这时页面和 API 都由后端统一提供。
+
+## Docker 一起跑前后端
+
+仓库现在提供了单镜像方案，容器内会同时包含：
+
+- Go 后端二进制
+- 已构建好的前端静态文件
+- 后端启动时直接托管前端页面
+
+最简单的本地启动方式：
+
+```bash
+cp backend/data/config.example.json backend/data/config.json
+docker compose up -d --build
+```
+
+启动后访问：
+
+```text
+http://127.0.0.1:8080
+```
+
+说明：
+
+- `docker-compose.yml` 会把宿主机的 `./backend/data` 挂载到容器内，配置和任务数据会持久化
+- 你只需要改 `backend/data/config.json`
+- `OpenList`、`aria2`、`Emos` 仍然是外部依赖，容器只负责前后端应用本身
+
+停止：
+
+```bash
+docker compose down
+```
 
 ### 后端测试
 
@@ -269,12 +328,20 @@ go test ./...
 - 交叉编译 `linux-x64` 后端二进制
 - 打包成 `emosup-linux-x64.tar.gz`
 - 自动附加到 GitHub Release（预发布）
+- 自动构建并推送 Docker 镜像到 `ghcr.io/binaryu/emosup`
 
 常用命令：
 
 ```bash
 git tag beta
 git push origin main --follow-tags
+```
+
+如果你想直接拉 Docker 镜像，beta 构建完成后可以用：
+
+```bash
+docker pull ghcr.io/binaryu/emosup:beta
+docker run --rm -p 8080:8080 -v $(pwd)/backend/data:/app/backend/data ghcr.io/binaryu/emosup:beta
 ```
 
 ## 常见问题
