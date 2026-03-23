@@ -23,17 +23,15 @@ OpenList -> aria2 -> Emos 的异步上传面板。
 
 1. 初始化配置文件
 
-```bash
-cp backend/data/config.example.json backend/data/config.json
-```
+第一次运行不需要手动复制配置文件，`docker-compose.yaml` 会在命名卷里自动初始化 `config.json`。
 
 2. 修改配置文件
 
-文件位置：
+推荐做法：
 
-```text
-backend/data/config.json
-```
+- 先直接启动服务
+- 打开 Web 界面的“配置页”
+- 填好 OpenList、aria2、Emos 参数后点击保存
 
 至少需要确认这些字段：
 
@@ -78,10 +76,14 @@ docker compose down
 
 说明：
 
-- 当前 `docker-compose.yaml` 直接使用远端镜像 `ghcr.io/binaryu/emosup:beta-20260323-214646`
-- 当前 `docker-compose.yaml` 会把本地 `./backend/data` 挂载到容器内 `/app/backend/data`
+- 当前 `docker-compose.yaml` 直接使用远端镜像，默认值是 `ghcr.io/binaryu/emosup:beta-20260323-214646`
+- 数据目录改成 Docker 命名卷 `emosup_data`，避免宿主机 bind mount 常见的权限问题
+- 首次启动会自动生成 `config.json`，并把 `server.host` 调整为 `0.0.0.0`
+- 首次启动会把默认 `aria2.rpc_url` 调整为 `http://host.docker.internal:6800/jsonrpc`，更适合容器访问宿主机 aria2
 - 镜像内已经包含后端二进制和前端静态文件，不会在本地重新编译
 - 生产访问入口只有后端服务，前端由后端直接托管
+- 如需更换镜像标签，可在启动前设置 `EMOSUP_IMAGE`
+- 如需改对外端口，可在启动前设置 `EMOSUP_PORT`
 
 ## 开发依赖
 
