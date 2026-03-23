@@ -10,7 +10,79 @@ OpenList -> aria2 -> Emos 的异步上传面板。
 - Emos 分片上传与 save
 - 任务队列、日志、失败重试
 
-## 依赖
+## Docker Compose 快速启动
+
+如果你只是想把服务跑起来，优先用这一节。
+
+前置条件：
+
+- 已安装 `Docker` 和 `Docker Compose`
+- 你已经准备好了可访问的 `OpenList`
+- 你已经准备好了可访问的 `aria2 RPC`
+- 你已经准备好了可访问的 `Emos`
+
+1. 初始化配置文件
+
+```bash
+cp backend/data/config.example.json backend/data/config.json
+```
+
+2. 修改配置文件
+
+文件位置：
+
+```text
+backend/data/config.json
+```
+
+至少需要确认这些字段：
+
+- `server.host`
+- `server.port`
+- `openlist.base_url`
+- `openlist.username/password` 或 `openlist.token`
+- `aria2.rpc_url`
+- `aria2.secret`
+- `aria2.download_dir`
+- `emos.base_url`
+- `emos.token`
+- `emos.storage`
+
+3. 启动服务
+
+```bash
+docker compose up -d --build
+```
+
+4. 查看状态
+
+```bash
+docker compose ps
+docker compose logs -f emosup
+```
+
+5. 打开页面
+
+```text
+http://127.0.0.1:8080
+```
+
+常用命令：
+
+```bash
+docker compose restart emosup
+docker compose pull
+docker compose up -d --build
+docker compose down
+```
+
+说明：
+
+- 当前 `docker-compose.yml` 会把本地 `./backend/data` 挂载到容器内 `/app/backend/data`
+- 镜像内已经包含后端二进制和前端静态文件
+- 生产访问入口只有后端服务，前端由后端直接托管
+
+## 开发依赖
 
 - `Go 1.25+`
 - `Node.js 20+`
@@ -85,32 +157,6 @@ go run ./cmd/server
 
 ```text
 http://127.0.0.1:8080
-```
-
-## Docker
-
-仓库提供单镜像方案，镜像内包含：
-
-- 后端二进制
-- 已构建前端静态文件
-
-启动：
-
-```bash
-cp backend/data/config.example.json backend/data/config.json
-docker compose up -d --build
-```
-
-访问：
-
-```text
-http://127.0.0.1:8080
-```
-
-停止：
-
-```bash
-docker compose down
 ```
 
 ## 构建与测试
