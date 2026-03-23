@@ -1,9 +1,6 @@
 services:
   emosup:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: emosup:local
+    image: ghcr.io/binaryu/emosup:beta-20260323-214646
     container_name: emosup
     restart: unless-stopped
     ports:

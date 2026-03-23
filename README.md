@@ -51,7 +51,7 @@ backend/data/config.json
 3. 启动服务
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 4. 查看状态
@@ -72,14 +72,15 @@ http://127.0.0.1:8080
 ```bash
 docker compose restart emosup
 docker compose pull
-docker compose up -d --build
+docker compose up -d
 docker compose down
 ```
 
 说明：
 
-- 当前 `docker-compose.yml` 会把本地 `./backend/data` 挂载到容器内 `/app/backend/data`
-- 镜像内已经包含后端二进制和前端静态文件
+- 当前 `docker-compose.yaml` 直接使用远端镜像 `ghcr.io/binaryu/emosup:beta-20260323-214646`
+- 当前 `docker-compose.yaml` 会把本地 `./backend/data` 挂载到容器内 `/app/backend/data`
+- 镜像内已经包含后端二进制和前端静态文件，不会在本地重新编译
 - 生产访问入口只有后端服务，前端由后端直接托管
 
 ## 开发依赖
