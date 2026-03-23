@@ -71,7 +71,8 @@ import { ElMessage } from 'element-plus'
 
 import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import { useScanStore } from '@/stores/scans'
-import type { ApiResponse, OpenListEntry } from '@/types/api'
+import type { OpenListEntry } from '@/types/api'
+import { parseApiResponse } from '@/utils/api'
 
 const router = useRouter()
 const scanStore = useScanStore()
@@ -85,12 +86,10 @@ const entries = ref<OpenListEntry[]>([])
 async function loadEntries() {
   loading.value = true
   try {
-    const response = await fetch(`/api/openlist/list?path=${encodeURIComponent(currentPath.value)}`)
-    const payload: ApiResponse<{ path: string; items: OpenListEntry[] }> = await response.json()
-    if (!payload.success) {
-      throw new Error(payload.message || '目录加载失败')
-    }
-    entries.value = payload.data.items
+    const data = await parseApiResponse<{ path: string; items: OpenListEntry[] }>(
+      await fetch(`/api/openlist/list?path=${encodeURIComponent(currentPath.value)}`),
+    )
+    entries.value = data.items
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '目录加载失败')
   } finally {

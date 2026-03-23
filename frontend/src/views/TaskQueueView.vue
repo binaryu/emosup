@@ -144,6 +144,7 @@ import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { useTaskStore } from '@/stores/tasks'
 import type { Task, TaskStatus } from '@/types/api'
+import { formatBytes, formatSpeed, formatTime } from '@/utils/format'
 
 const router = useRouter()
 const taskStore = useTaskStore()
@@ -173,29 +174,6 @@ const runtimeDescription = computed(() => {
 })
 
 let timer: number | undefined
-
-function formatTime(value?: string) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
-}
-
-function formatBytes(value?: number) {
-  if (!value) return '0 B'
-
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = value
-  let unitIndex = 0
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024
-    unitIndex += 1
-  }
-  return `${size.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`
-}
-
-function formatSpeed(value?: number) {
-  if (!value) return '0 B/s'
-  return `${formatBytes(value)}/s`
-}
 
 function activeSpeed(task: Task) {
   return task.upload.speed || task.download.speed

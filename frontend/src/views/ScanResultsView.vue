@@ -49,7 +49,7 @@
           <el-table-column prop="file_name" label="文件名" min-width="220" />
           <el-table-column label="大小" width="120">
             <template #default="{ row }">
-              {{ formatSize(row.file_size) }}
+              {{ formatSizeInMB(row.file_size) }}
             </template>
           </el-table-column>
           <el-table-column label="解析结果" min-width="180">
@@ -128,6 +128,7 @@ import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import { useScanStore } from '@/stores/scans'
 import { useTaskStore } from '@/stores/tasks'
 import type { ScanItem } from '@/types/api'
+import { formatSizeInMB } from '@/utils/format'
 
 const router = useRouter()
 const scanStore = useScanStore()
@@ -135,12 +136,6 @@ const taskStore = useTaskStore()
 
 const selectedItemIdsByScan = reactive<Record<string, string[]>>({})
 const tableRefs = reactive<Record<string, { clearSelection?: () => void } | null>>({})
-
-function formatSize(size: number) {
-  if (!size) return '-'
-  const mb = size / 1024 / 1024
-  return `${mb.toFixed(1)} MB`
-}
 
 function canCreateTask(row: ScanItem) {
   return Boolean(
