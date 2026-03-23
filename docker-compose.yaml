@@ -1,43 +1,21 @@
 services:
-  emosup-init:
+  emosup:
     image: ${EMOSUP_IMAGE:-ghcr.io/binaryu/emosup:beta-20260323-214646}
-    container_name: emosup-init
-    restart: "no"
+    container_name: emosup
+    restart: unless-stopped
+    ports:
+      - "${EMOSUP_PORT:-8080}:8080"
+    volumes:
+      - emosup_data:/app/backend/data
     entrypoint:
       - /bin/sh
       - -lc
     command: >
       if [ ! -f /app/backend/data/config.json ]; then
         cp /app/backend/data/config.example.json /app/backend/data/config.json &&
-        sed -i 's/"host": "127.0.0.1"/"host": "0.0.0.0"/' /app/backend/data/config.json &&
-        sed -i 's#http://127.0.0.1:6800/jsonrpc#http://host.docker.internal:6800/jsonrpc#' /app/backend/data/config.json;
-      fi
-    volumes:
-      - emosup_data:/app/backend/data
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  emosup:
-    image: ${EMOSUP_IMAGE:-ghcr.io/binaryu/emosup:beta-20260323-214646}
-    container_name: emosup
-    restart: unless-stopped
-    depends_on:
-      emosup-init:
-        condition: service_completed_successfully
-    ports:
-      - "${EMOSUP_PORT:-8080}:8080"
-    volumes:
-      - emosup_data:/app/backend/data
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - wget -qO- http://127.0.0.1:8080/api/health >/dev/null || exit 1
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+        sed -i 's/"host": "127.0.0.1"/"host": "0.0.0.0"/' /app/backend/data/config.json;
+      fi;
+      exec ./emosup-server
 
 volumes:
   emosup_data:

@@ -77,9 +77,8 @@ docker compose down
 说明：
 
 - 当前 `docker-compose.yaml` 直接使用远端镜像，默认值是 `ghcr.io/binaryu/emosup:beta-20260323-214646`
-- 数据目录改成 Docker 命名卷 `emosup_data`，避免宿主机 bind mount 常见的权限问题
+- 数据目录使用 Docker 命名卷 `emosup_data`，比直接挂宿主机目录更不容易遇到权限问题
 - 首次启动会自动生成 `config.json`，并把 `server.host` 调整为 `0.0.0.0`
-- 首次启动会把默认 `aria2.rpc_url` 调整为 `http://host.docker.internal:6800/jsonrpc`，更适合容器访问宿主机 aria2
 - 镜像内已经包含后端二进制和前端静态文件，不会在本地重新编译
 - 生产访问入口只有后端服务，前端由后端直接托管
 - 如需更换镜像标签，可在启动前设置 `EMOSUP_IMAGE`
