@@ -1,0 +1,15 @@
+backend/data/config.json
+backend/data/downloads/
+backend/data/logs/
+backend/data/scans/
+backend/data/tasks/
+backend/internal/service/data/
+backend/*.exe
+backend/*.test
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+release/
+plan*.md
+final.md
+.DS_Store
