@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"emosup/backend/internal/client"
@@ -21,31 +19,8 @@ type App struct {
 	scheduler *scheduler.Manager
 }
 
-func findFrontendDistDir() string {
-	candidates := []string{
-		os.Getenv("EMOSUP_FRONTEND_DIST"),
-		filepath.Join("..", "frontend", "dist"),
-		filepath.Join("frontend", "dist"),
-		filepath.Join("..", "frontend"),
-		filepath.Join("frontend"),
-	}
-
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		indexInfo, indexErr := os.Stat(filepath.Join(candidate, "index.html"))
-		assetsInfo, assetsErr := os.Stat(filepath.Join(candidate, "assets"))
-		if indexErr == nil && assetsErr == nil && !indexInfo.IsDir() && assetsInfo.IsDir() {
-			return candidate
-		}
-	}
-
-	return ""
-}
-
 func New() (*App, error) {
-	dataRoot := filepath.Join(".", "data")
+	dataRoot := resolveDataRoot()
 	fileStore := store.NewFileStore(dataRoot)
 	if err := fileStore.Init(); err != nil {
 		return nil, err

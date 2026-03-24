@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,10 @@ func (s *FileStore) Init() error {
 		}
 	}
 
+	if err := s.ensureConfig(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -44,7 +49,7 @@ func (s *FileStore) LoadConfig() (model.AppConfig, error) {
 
 	path := filepath.Join(s.root, "config.json")
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return model.DefaultAppConfig(), nil
+		return s.defaultConfig(), nil
 	}
 
 	var cfg model.AppConfig
@@ -52,14 +57,39 @@ func (s *FileStore) LoadConfig() (model.AppConfig, error) {
 		return model.AppConfig{}, err
 	}
 
-	return model.NormalizeAppConfig(cfg), nil
+	return s.normalizeConfig(cfg), nil
 }
 
 func (s *FileStore) SaveConfig(cfg model.AppConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return utils.AtomicWriteJSON(filepath.Join(s.root, "config.json"), model.NormalizeAppConfig(cfg))
+	return utils.AtomicWriteJSON(filepath.Join(s.root, "config.json"), s.normalizeConfig(cfg))
+}
+
+func (s *FileStore) ensureConfig() error {
+	path := filepath.Join(s.root, "config.json")
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	return utils.AtomicWriteJSON(path, s.defaultConfig())
+}
+
+func (s *FileStore) defaultConfig() model.AppConfig {
+	cfg := model.DefaultAppConfig()
+	cfg.Aria2.DownloadDir = filepath.Join(s.root, "downloads")
+	return model.NormalizeAppConfig(cfg)
+}
+
+func (s *FileStore) normalizeConfig(cfg model.AppConfig) model.AppConfig {
+	cfg = model.NormalizeAppConfig(cfg)
+	if strings.TrimSpace(cfg.Aria2.DownloadDir) == "" || cfg.Aria2.DownloadDir == model.DefaultAppConfig().Aria2.DownloadDir {
+		cfg.Aria2.DownloadDir = filepath.Join(s.root, "downloads")
+	}
+	return cfg
 }
 
 func (s *FileStore) SaveScan(scan model.ScanSession) error {

@@ -50,25 +50,18 @@ jobs:
           GOARCH: amd64
           GOOS: linux
         run: |
-          mkdir -p ../release/emosup-linux-x64/backend
-          go build -trimpath -ldflags="-s -w" -o ../release/emosup-linux-x64/backend/emosup-server ./cmd/server
+          mkdir -p ../release/emosup-linux-x64
+          go build -trimpath -ldflags="-s -w" -o ../release/emosup-linux-x64/emosup-server ./cmd/server
 
       - name: Assemble release bundle
         shell: bash
         run: |
           mkdir -p release/emosup-linux-x64/frontend
-          mkdir -p release/emosup-linux-x64/backend/data
+          mkdir -p release/emosup-linux-x64/data
           cp -R frontend/dist/. release/emosup-linux-x64/frontend/
-          cp backend/data/config.example.json release/emosup-linux-x64/backend/data/config.example.json
+          cp backend/data/config.example.json release/emosup-linux-x64/config.example.json
           cp README.md release/emosup-linux-x64/README.md
           cp upload.md release/emosup-linux-x64/upload.md
-          cat > release/emosup-linux-x64/start-backend.sh <<'EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          cd "$(dirname "$0")/backend"
-          ./emosup-server
-          EOF
-          chmod +x release/emosup-linux-x64/start-backend.sh
           tar -C release -czf release/emosup-linux-x64.tar.gz emosup-linux-x64
 
       - name: Upload workflow artifact

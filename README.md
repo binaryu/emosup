@@ -91,21 +91,57 @@ docker compose down
 - `aria2` RPC
 - 可用的 `OpenList` 和 `Emos`
 
+## 本地直接运行
+
+如果你不想用 Docker，现在可以直接从源码启动后端：
+
+```bash
+go run ./backend/cmd/server
+```
+
+说明：
+
+- 第一次启动会自动创建 `backend/data/config.json`
+- 后端会自动查找并托管前端静态文件
+- 打开 `http://127.0.0.1:8080` 后，可以直接在“配置页”里补全 OpenList、aria2、Emos 参数并保存
+
+## 发布包运行
+
+下载 GitHub Release 里的发布包后，解压并直接运行二进制：
+
+```bash
+./emosup-server
+```
+
+说明：
+
+- 第一次启动会自动创建 `data/config.json`
+- 前端静态文件已经包含在发布包里，不需要再单独构建前端
+- 默认访问地址是 `http://127.0.0.1:8080`
+
 ## 配置
 
-配置文件位置：
+配置文件会在第一次启动时自动生成。
+
+源码运行时默认位置：
 
 ```text
 backend/data/config.json
 ```
 
-初始化：
+发布包运行时默认位置：
 
-```bash
-cp backend/data/config.example.json backend/data/config.json
+```text
+data/config.json
 ```
 
-然后按你的环境修改：
+如果你想在启动前手动准备配置，也可以参考：
+
+```text
+backend/data/config.example.json
+```
+
+至少需要按你的环境修改：
 
 - `openlist.base_url`
 - `openlist.username/password` 或 `token`
@@ -119,8 +155,7 @@ cp backend/data/config.example.json backend/data/config.json
 1. 启动后端
 
 ```bash
-cd backend
-go run ./cmd/server
+go run ./backend/cmd/server
 ```
 
 2. 启动前端
@@ -141,10 +176,11 @@ http://127.0.0.1:5173
 
 - 前端请求统一走 `/api`
 - Vite 会把 `/api` 代理到 `http://127.0.0.1:8080`
+- 如果只是想把应用跑起来，不需要这一步，后端会直接托管已构建的前端页面
 
 ## 生产启动
 
-前端构建后，后端会直接托管前端页面，所以生产模式只需要启动后端。
+如果你是从源码构建，先打前端产物，然后直接启动后端：
 
 ```bash
 cd frontend
@@ -159,6 +195,12 @@ go run ./cmd/server
 
 ```text
 http://127.0.0.1:8080
+```
+
+如果你使用 GitHub Release 发布包，则只需要：
+
+```bash
+./emosup-server
 ```
 
 ## 构建与测试
@@ -200,6 +242,8 @@ git push origin refs/tags/beta --force
 ```bash
 docker pull ghcr.io/binaryu/emosup:beta
 ```
+
+发布包结构现在是扁平的，解压后直接运行根目录下的 `./emosup-server` 即可。
 
 ## 说明
 
