@@ -1,6 +1,6 @@
 services:
   emosup:
-    image: ${EMOSUP_IMAGE:-ghcr.io/binaryu/emosup:beta-20260323-214646}
+    image: ${EMOSUP_IMAGE:-ghcr.io/binaryu/emosup:latest}
     container_name: emosup
     restart: unless-stopped
     user: "${EMOSUP_UID:-1000}:${EMOSUP_GID:-1000}"

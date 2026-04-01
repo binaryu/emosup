@@ -44,7 +44,7 @@ http://127.0.0.1:8080
 
 说明：
 
-- `docker-compose.yaml` 默认使用远端镜像 `ghcr.io/binaryu/emosup:beta-20260323-214646`
+- `docker-compose.yaml` 默认使用远端镜像 `ghcr.io/binaryu/emosup:latest`
 - 首次启动会自动初始化配置文件
 - 容器内前端已经构建完成，由后端直接托管
 - 如需更换镜像标签，可在启动前设置 `EMOSUP_IMAGE`

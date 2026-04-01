@@ -144,6 +144,9 @@ if [ "$MODE" = "lite" ]; then
   COMPOSE_FILE="$ROOT/docker-compose.yaml"
 fi
 
+echo "Pulling latest images..."
+"${COMPOSE[@]}" -f "$COMPOSE_FILE" pull
+
 "${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d
 
 echo ""
