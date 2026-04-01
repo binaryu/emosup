@@ -130,6 +130,9 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 		item.SelectedItemType = matchResult.SelectedItemType
 		item.SelectedItemID = matchResult.SelectedItemID
 		item.SelectedTitle = matchResult.SelectedTitle
+		item.Confirmed = matchResult.Status == model.MatchStatusMatched &&
+			item.SelectedItemID > 0 &&
+			strings.TrimSpace(item.SelectedItemType) != ""
 
 		log.Printf(
 			"scan item parsed and matched: scan=%s file=%s season=%v episode=%v status=%s",

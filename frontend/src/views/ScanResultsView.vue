@@ -34,13 +34,46 @@
           </div>
         </template>
 
-        <el-table
-          :ref="bindTableRef(scan.id)"
-          :data="scan.items"
-          row-key="id"
-          stripe
-          @selection-change="onSelectionChange(scan.id)"
-        >
+        <div class="table-scroll">
+          <el-table
+            :ref="bindTableRef(scan.id)"
+            :data="scan.items"
+            row-key="id"
+            stripe
+            @selection-change="onSelectionChange(scan.id)"
+          >
+            <el-table-column type="expand" width="52">
+              <template #default="{ row }">
+                <div class="expand-grid">
+                  <div class="expand-section">
+                    <div class="expand-title">人工修正</div>
+                    <div class="edit-grid">
+                      <el-input v-model="row.selected_item_type" placeholder="item_type" />
+                      <el-input-number v-model="row.selected_item_id" :min="0" />
+                      <el-input v-model="row.selected_title" placeholder="title" class="title-input" />
+                      <el-switch
+                        v-model="row.confirmed"
+                        inline-prompt
+                        active-text="已确认"
+                        inactive-text="未确认"
+                      />
+                    </div>
+                  </div>
+                  <div class="expand-section">
+                    <div class="expand-title">候选</div>
+                    <div v-if="row.match_candidates?.length" class="candidate-list">
+                      <div
+                        v-for="candidate in row.match_candidates"
+                        :key="`${candidate.item_type}-${candidate.item_id}`"
+                      >
+                        {{ candidate.item_type }} / {{ candidate.item_id }} / {{ candidate.title }}
+                      </div>
+                    </div>
+                    <span v-else class="muted-text">无</span>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
           <el-table-column
             type="selection"
             width="54"
@@ -81,39 +114,14 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="人工修正" min-width="320">
+          <el-table-column label="操作" width="160" fixed="right">
             <template #default="{ row }">
-              <div class="edit-grid">
-                <el-input v-model="row.selected_item_type" placeholder="item_type" />
-                <el-input-number v-model="row.selected_item_id" :min="0" />
-                <el-input v-model="row.selected_title" placeholder="title" class="title-input" />
-                <el-switch
-                  v-model="row.confirmed"
-                  inline-prompt
-                  active-text="已确认"
-                  inactive-text="未确认"
-                />
-              </div>
+              <el-button type="primary" link @click="saveItem(scan.id, row.id, row)">保存</el-button>
+              <el-button type="success" link @click="createSingleTask(scan.id, row)">加入队列</el-button>
             </template>
           </el-table-column>
-          <el-table-column label="候选" min-width="220">
-            <template #default="{ row }">
-              <div v-if="row.match_candidates?.length" class="candidate-list">
-                <div v-for="candidate in row.match_candidates" :key="`${candidate.item_type}-${candidate.item_id}`">
-                  {{ candidate.item_type }} / {{ candidate.item_id }} / {{ candidate.title }}
-                </div>
-              </div>
-              <span v-else class="muted-text">无</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="保存" width="100" fixed="right">
-            <template #default="{ row }">
-              <el-button type="primary" link @click="saveItem(scan.id, row.id, row)">
-                保存
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+          </el-table>
+        </div>
       </el-card>
     </el-space>
   </div>
@@ -171,7 +179,7 @@ function getSelectedCount(scanId: string) {
   return selectedItemIdsByScan[scanId]?.length ?? 0
 }
 
-async function saveItem(scanId: string, itemId: string, row: ScanItem) {
+async function persistItem(scanId: string, itemId: string, row: ScanItem, showToast = true) {
   try {
     await scanStore.updateScanItem(scanId, itemId, {
       selected_item_type: row.selected_item_type,
@@ -179,9 +187,51 @@ async function saveItem(scanId: string, itemId: string, row: ScanItem) {
       selected_title: row.selected_title,
       confirmed: row.confirmed,
     })
-    ElMessage.success('扫描项已保存')
+    if (showToast) {
+      ElMessage.success('扫描项已保存')
+    }
+    return true
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '保存失败')
+    return false
+  }
+}
+
+async function saveItem(scanId: string, itemId: string, row: ScanItem) {
+  await persistItem(scanId, itemId, row, true)
+}
+
+async function createSingleTask(scanId: string, row: ScanItem) {
+  if (!row.confirmed) {
+    row.confirmed = true
+  }
+
+  if (!canCreateTask(row)) {
+    ElMessage.warning('当前扫描项信息未补全，无法创建任务')
+    return
+  }
+
+  const saved = await persistItem(scanId, row.id, row, false)
+  if (!saved) {
+    return
+  }
+
+  try {
+    const result = await taskStore.batchCreateTasks(scanId, [row.id])
+    if (result.created.length) {
+      ElMessage.success('已加入任务队列')
+    }
+    if (result.failed.length) {
+      await ElMessageBox.alert(
+        result.failed.map((item) => `${item.item_id}: ${item.reason}`).join('\n'),
+        `任务创建失败`,
+        {
+          confirmButtonText: '知道了',
+        },
+      )
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '创建任务失败')
   }
 }
 
@@ -266,6 +316,27 @@ onMounted(() => {
   color: #42504a;
 }
 
+.table-scroll {
+  overflow-x: auto;
+}
+
+.expand-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 8px 4px;
+}
+
+.expand-title {
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #1f2a24;
+}
+
+.expand-section .muted-text {
+  font-size: 12px;
+}
+
 @media (max-width: 960px) {
   .scan-header {
     flex-direction: column;
@@ -275,6 +346,10 @@ onMounted(() => {
   .scan-actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .expand-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

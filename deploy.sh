@@ -104,13 +104,13 @@ if [ ! -f "$CONFIG_FILE" ]; then
     "port": 8080
   },
   "openlist": {
-    "base_url": "http://openlist:5244",
+    "base_url": "http://127.0.0.1:${OPENLIST_PORT:-5244}",
     "username": "",
     "password": "",
     "token": ""
   },
   "aria2": {
-    "rpc_url": "http://aria2:6800/jsonrpc",
+    "rpc_url": "http://127.0.0.1:${ARIA2_RPC_PORT:-6800}/jsonrpc",
     "secret": "${ARIA2_RPC_SECRET:-P3TERX}",
     "download_dir": "/downloads",
     "poll_interval_seconds": 3,

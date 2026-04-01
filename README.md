@@ -66,8 +66,8 @@ docker compose -f docker-compose.full.yaml up -d
 
 首次启动后，请在配置页把以下字段改成容器内可访问的地址：
 
-- `openlist.base_url`：`http://openlist:5244`
-- `aria2.rpc_url`：`http://aria2:6800/jsonrpc`
+- `openlist.base_url`：`http://127.0.0.1:5244`
+- `aria2.rpc_url`：`http://127.0.0.1:6800/jsonrpc`
 - `aria2.secret`：与 `ARIA2_RPC_SECRET` 保持一致（默认 `P3TERX`，建议改掉）
 
 可选环境变量：

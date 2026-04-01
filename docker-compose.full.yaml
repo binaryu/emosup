@@ -3,6 +3,7 @@ services:
     image: ${EMOSUP_IMAGE:-ghcr.io/binaryu/emosup:beta-20260323-214646}
     container_name: emosup
     restart: unless-stopped
+    network_mode: "host"
     user: "${EMOSUP_UID:-1000}:${EMOSUP_GID:-1000}"
     environment:
       - TZ=${TZ:-Asia/Shanghai}
