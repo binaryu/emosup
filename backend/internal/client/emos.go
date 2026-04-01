@@ -185,12 +185,33 @@ func (c *HTTPEmosClient) GetVideoTree(ctx context.Context, access EmosAccess, tm
 		return EmosVideoTree{}, fmt.Errorf("emos tree request failed: %s", response.Status)
 	}
 
-	var tree EmosVideoTree
-	if err := json.NewDecoder(response.Body).Decode(&tree); err != nil {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
 		return EmosVideoTree{}, err
 	}
 
-	return tree, nil
+	var tree EmosVideoTree
+	if err := json.Unmarshal(body, &tree); err == nil {
+		return tree, nil
+	}
+
+	var trees []EmosVideoTree
+	if err := json.Unmarshal(body, &trees); err == nil {
+		if len(trees) == 0 {
+			return EmosVideoTree{}, errors.New("emos tree response is empty")
+		}
+		if len(trees) == 1 {
+			return trees[0], nil
+		}
+		for _, candidate := range trees {
+			if candidate.TMDBID == tmdbID {
+				return candidate, nil
+			}
+		}
+		return trees[0], nil
+	}
+
+	return EmosVideoTree{}, errors.New("emos tree response format unexpected")
 }
 
 func (c *HTTPEmosClient) GetVideoBase(ctx context.Context, access EmosAccess, itemType string, itemID int64) (EmosVideoBase, error) {

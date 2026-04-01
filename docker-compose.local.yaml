@@ -1,6 +1,9 @@
 services:
   emosup:
-    image: ${EMOSUP_IMAGE:-ghcr.io/binaryu/emosup:beta-20260323-214646}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${EMOSUP_IMAGE_LOCAL:-emosup-local}
     container_name: emosup
     restart: unless-stopped
     user: "${EMOSUP_UID:-1000}:${EMOSUP_GID:-1000}"

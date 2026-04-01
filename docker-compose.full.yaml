@@ -1,0 +1,57 @@
+services:
+  emosup:
+    image: ${EMOSUP_IMAGE:-ghcr.io/binaryu/emosup:beta-20260323-214646}
+    container_name: emosup
+    restart: unless-stopped
+    user: "${EMOSUP_UID:-1000}:${EMOSUP_GID:-1000}"
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    ports:
+      - "${EMOSUP_PORT:-8080}:8080"
+    volumes:
+      - ${EMOSUP_DATA_DIR:-./data}:/app/backend/data
+      - ${EMOSUP_DOWNLOADS_DIR:-./downloads}:/app/backend/data/downloads
+      - ${EMOSUP_DOWNLOADS_DIR:-./downloads}:/downloads
+    depends_on:
+      - openlist
+      - aria2
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        [ -f /app/backend/data/config.json ] || cp /app/backend/data/config.example.json /app/backend/data/config.json
+        sed -i 's/"host": "127.0.0.1"/"host": "0.0.0.0"/' /app/backend/data/config.json || true
+        exec ./emosup-server
+
+  openlist:
+    image: openlistteam/openlist:latest
+    container_name: openlist
+    restart: unless-stopped
+    user: "${OPENLIST_UID:-1000}:${OPENLIST_GID:-1000}"
+    environment:
+      - UMASK=022
+      - TZ=${TZ:-Asia/Shanghai}
+    ports:
+      - "${OPENLIST_PORT:-5244}:5244"
+    volumes:
+      - ${OPENLIST_DATA_DIR:-./openlist-data}:/opt/openlist/data
+
+  aria2:
+    image: p3terx/aria2-pro:latest
+    container_name: aria2
+    restart: unless-stopped
+    environment:
+      - PUID=${ARIA2_UID:-1000}
+      - PGID=${ARIA2_GID:-1000}
+      - UMASK_SET=022
+      - RPC_SECRET=${ARIA2_RPC_SECRET:-P3TERX}
+      - RPC_PORT=${ARIA2_RPC_PORT:-6800}
+      - LISTEN_PORT=${ARIA2_LISTEN_PORT:-6888}
+      - TZ=${TZ:-Asia/Shanghai}
+    ports:
+      - "${ARIA2_RPC_PORT:-6800}:6800"
+      - "${ARIA2_LISTEN_PORT:-6888}:6888"
+      - "${ARIA2_LISTEN_PORT:-6888}:6888/udp"
+    volumes:
+      - ${ARIA2_CONFIG_DIR:-./aria2-config}:/config
+      - ${EMOSUP_DOWNLOADS_DIR:-./downloads}:/downloads

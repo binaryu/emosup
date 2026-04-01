@@ -13,3 +13,8 @@ release/
 plan*.md
 final.md
 .DS_Store
+.env
+data/
+downloads/
+openlist-data/
+aria2-config/
