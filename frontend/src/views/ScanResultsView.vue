@@ -159,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 
@@ -174,7 +174,7 @@ const router = useRouter()
 const scanStore = useScanStore()
 const taskStore = useTaskStore()
 
-const selectedItemIdsByScan = reactive<Record<string, string[]>>({})
+const selectedItemIdsByScan = ref<Record<string, string[]>>({})
 const tableRefs = reactive<Record<string, { clearSelection?: () => void } | null>>({})
 
 function canCreateTask(row: ScanItem, scanSource?: string) {
@@ -231,18 +231,17 @@ const selectionHandlers: Record<string, (rows: ScanItem[]) => void> = {}
 function getSelectionHandler(scanId: string) {
   if (!selectionHandlers[scanId]) {
     selectionHandlers[scanId] = (rows: ScanItem[]) => {
-      handleSelectionChange(scanId, rows)
+      selectedItemIdsByScan.value = {
+        ...selectedItemIdsByScan.value,
+        [scanId]: rows.map((row) => row.id),
+      }
     }
   }
   return selectionHandlers[scanId]
 }
 
-function handleSelectionChange(scanId: string, rows: ScanItem[]) {
-  selectedItemIdsByScan[scanId] = rows.map((row) => row.id)
-}
-
 function getSelectedCount(scanId: string) {
-  return selectedItemIdsByScan[scanId]?.length ?? 0
+  return selectedItemIdsByScan.value[scanId]?.length ?? 0
 }
 
 async function persistItem(scanId: string, itemId: string, row: ScanItem, showToast = true) {
@@ -356,7 +355,7 @@ async function createSingleTask(scanId: string, row: ScanItem) {
 }
 
 async function createTasks(scanId: string) {
-  const itemIds = selectedItemIdsByScan[scanId] ?? []
+  const itemIds = selectedItemIdsByScan.value[scanId] ?? []
   if (!itemIds.length) {
     ElMessage.warning('请先勾选可创建任务的扫描项')
     return
@@ -365,7 +364,7 @@ async function createTasks(scanId: string) {
   try {
     const result = await taskStore.batchCreateTasks(scanId, itemIds)
     tableRefs[scanId]?.clearSelection?.()
-    selectedItemIdsByScan[scanId] = []
+    selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scanId]: [] }
 
     // Remove created items from local scan data
     const scan = scanStore.scans.find((s) => s.id === scanId)
