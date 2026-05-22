@@ -61,7 +61,7 @@
       </div>
     </div>
 
-    <el-card class="queue-card" :body-style="{ padding: '0' }">
+    <el-card class="queue-card" :body-style="{ padding: '0', overflow: 'visible' }">
       <el-table :data="taskStore.tasks" stripe class="task-table">
         <el-table-column label="任务目标" min-width="260">
           <template #default="{ row }">
@@ -145,7 +145,7 @@
             <div class="action-group">
               <el-button link type="primary" @click="goDetail(row.id)">详情</el-button>
               <el-divider direction="vertical" />
-              <el-dropdown trigger="click">
+              <el-dropdown trigger="click" :teleported="true">
                 <el-button link>管理<el-icon class="el-icon--right"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg></el-icon></el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
