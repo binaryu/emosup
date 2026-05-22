@@ -14,6 +14,7 @@
             <el-form-item label="文件来源">
               <div class="source-toggle">
                 <button
+                  type="button"
                   :class="['toggle-btn', { active: source === 'openlist' }]"
                   @click="source = 'openlist'"
                 >
@@ -21,6 +22,7 @@
                   OpenList
                 </button>
                 <button
+                  type="button"
                   :class="['toggle-btn', { active: source === 'local' }]"
                   @click="source = 'local'"
                 >
