@@ -271,6 +271,10 @@ func (s *TaskService) DeleteTask(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *TaskService) LoadConfig(_ context.Context) (model.AppConfig, error) {
+	return s.store.LoadConfig()
+}
+
 func (s *TaskService) GetTask(_ context.Context, id string) (model.Task, error) {
 	task, err := s.store.GetTask(strings.TrimSpace(id))
 	if err != nil {

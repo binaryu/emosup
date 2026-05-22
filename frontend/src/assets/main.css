@@ -1,13 +1,62 @@
 :root {
   color-scheme: light;
-  --bg-app: #f3efe6;
-  --bg-panel: rgba(255, 252, 245, 0.84);
-  --bg-accent: #14342b;
-  --line-soft: rgba(20, 52, 43, 0.12);
-  --text-main: #1f2a24;
-  --text-subtle: #5d6b63;
-  --brand: #b96a2b;
-  --brand-soft: rgba(185, 106, 43, 0.12);
+  /* Light Theme Variables */
+  --bg-app: #f5f7fa;
+  --bg-panel: #ffffff;
+  --bg-sidebar: #ffffff;
+  --bg-accent: #3b82f6;
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --line-soft: #e4e7ed;
+  --text-main: #303133;
+  --text-subtle: #606266;
+  --text-muted: #909399;
+  --brand: #3b82f6;
+  --brand-soft: rgba(59, 130, 246, 0.1);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+
+  /* Element Plus Light Theme Overrides */
+  --el-color-primary: var(--brand);
+  --el-bg-color: var(--bg-app);
+  --el-bg-color-overlay: var(--bg-panel);
+  --el-text-color-primary: var(--text-main);
+  --el-text-color-regular: var(--text-subtle);
+  --el-border-color: var(--line-soft);
+  --el-border-color-light: var(--line-soft);
+  --el-fill-color-blank: var(--bg-panel);
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+  --el-border-radius-round: 20px;
+  --el-box-shadow-light: var(--shadow-md);
+}
+
+html.dark {
+  color-scheme: dark;
+  /* Dark Theme Variables */
+  --bg-app: #0f172a;
+  --bg-panel: #1e293b;
+  --bg-sidebar: #1e293b;
+  --bg-accent: #3b82f6;
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --line-soft: #334155;
+  --text-main: #f8fafc;
+  --text-subtle: #cbd5e1;
+  --text-muted: #94a3b8;
+  --brand: #3b82f6;
+  --brand-soft: rgba(59, 130, 246, 0.2);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+
+  /* Element Plus Dark Theme Overrides */
+  --el-bg-color: var(--bg-app);
+  --el-bg-color-overlay: var(--bg-panel);
+  --el-text-color-primary: var(--text-main);
+  --el-text-color-regular: var(--text-subtle);
+  --el-border-color: var(--line-soft);
+  --el-border-color-light: var(--line-soft);
+  --el-fill-color-blank: var(--bg-panel);
 }
 
 * {
@@ -17,11 +66,13 @@
 body {
   margin: 0;
   min-width: 320px;
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* Performance friendly system font */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
   color: var(--text-main);
-  background:
-    radial-gradient(circle at top left, rgba(185, 106, 43, 0.2), transparent 30%),
-    linear-gradient(160deg, #f8f4ea 0%, #eef4ec 100%);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 a {
@@ -48,27 +99,35 @@ a {
 .glass-panel {
   background: var(--bg-panel);
   border: 1px solid var(--line-soft);
-  border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(20, 52, 43, 0.08);
-  backdrop-filter: blur(8px);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
 }
 
 .el-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--line-soft);
-  border-radius: 20px;
-  box-shadow: 0 18px 48px rgba(20, 52, 43, 0.08);
+  background: var(--bg-panel) !important;
+  border: 1px solid var(--line-soft) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--shadow-sm) !important;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  color: var(--text-main) !important;
+}
+
+.el-card:hover {
+  box-shadow: var(--shadow-md) !important;
 }
 
 .el-card__header {
-  border-bottom: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft) !important;
+  font-weight: 600;
+  padding: 16px 20px !important;
 }
 
 .el-table {
   --el-table-border-color: var(--line-soft);
-  --el-table-header-bg-color: rgba(255, 255, 255, 0.65);
-  --el-table-row-hover-bg-color: rgba(185, 106, 43, 0.08);
-  --el-table-header-text-color: #4c5a53;
+  --el-table-header-bg-color: var(--bg-hover);
+  --el-table-row-hover-bg-color: var(--brand-soft);
+  --el-table-header-text-color: var(--text-main);
+  --el-table-tr-bg-color: var(--bg-panel);
   background: transparent;
 }
 
@@ -79,23 +138,31 @@ a {
 .el-input__wrapper,
 .el-select__wrapper,
 .el-textarea__inner {
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.9);
+  background-color: var(--bg-panel) !important;
+  box-shadow: 0 0 0 1px var(--line-soft) inset !important;
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--brand) inset !important;
 }
 
 .el-button {
-  border-radius: 10px;
+  font-weight: 500;
 }
 
 .page-title {
   margin: 0;
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .page-subtitle {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--text-subtle);
+  font-size: 14px;
 }
 
 @media (max-width: 960px) {
@@ -110,22 +177,18 @@ a {
 
 @media (max-width: 600px) {
   .page-main {
-    padding: 10px;
+    padding: 12px;
   }
 
   .page-title {
-    font-size: 22px;
-  }
-
-  .el-table {
-    font-size: 12px;
+    font-size: 20px;
   }
 
   .el-card__header {
-    padding: 12px 14px;
+    padding: 12px 16px !important;
   }
 
   .el-card__body {
-    padding: 12px;
+    padding: 16px !important;
   }
 }

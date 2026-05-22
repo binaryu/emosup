@@ -109,9 +109,20 @@ func (m *Manager) RecoverySummary() RecoverySummary {
 }
 
 func (m *Manager) tick(ctx context.Context) error {
+	// Dynamically read max concurrency from config so changes take effect without restart
+	cfg, err := m.taskService.LoadConfig(ctx)
+	if err != nil {
+		log.Printf("scheduler failed to load config: %v", err)
+		return err
+	}
+	maxConc := cfg.Worker.MaxConcurrency
+	if maxConc <= 0 {
+		maxConc = 1
+	}
+
 	m.mu.Lock()
 	activeCount := len(m.activeTasks)
-	maxConc := m.maxConcurrency
+	m.maxConcurrency = maxConc
 	m.mu.Unlock()
 
 	if activeCount >= maxConc {

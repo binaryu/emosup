@@ -1,45 +1,52 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import AppLayout from '@/layouts/AppLayout.vue'
+import ConfigView from '@/views/ConfigView.vue'
+import OpenListView from '@/views/OpenListView.vue'
+import LocalBrowseView from '@/views/LocalBrowseView.vue'
+import ScanResultsView from '@/views/ScanResultsView.vue'
+import TaskQueueView from '@/views/TaskQueueView.vue'
+import TaskDetailView from '@/views/TaskDetailView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
       path: '/',
-      redirect: '/config',
+      redirect: '/tasks',
     },
     {
       path: '/',
-      component: () => import('@/layouts/AppLayout.vue'),
+      component: AppLayout,
       children: [
         {
           path: 'config',
           name: 'config',
-          component: () => import('@/views/ConfigView.vue'),
+          component: ConfigView,
         },
         {
           path: 'openlist',
           name: 'openlist',
-          component: () => import('@/views/OpenListView.vue'),
+          component: OpenListView,
         },
         {
           path: 'local',
           name: 'local',
-          component: () => import('@/views/LocalBrowseView.vue'),
+          component: LocalBrowseView,
         },
         {
           path: 'scans',
           name: 'scans',
-          component: () => import('@/views/ScanResultsView.vue'),
+          component: ScanResultsView,
         },
         {
           path: 'tasks',
           name: 'tasks',
-          component: () => import('@/views/TaskQueueView.vue'),
+          component: TaskQueueView,
         },
         {
           path: 'tasks/:id',
           name: 'task-detail',
-          component: () => import('@/views/TaskDetailView.vue'),
+          component: TaskDetailView,
           props: true,
         },
       ],

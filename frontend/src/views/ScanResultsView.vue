@@ -376,7 +376,6 @@ onMounted(() => {
 
 .scan-card {
   width: 100%;
-  border-radius: 20px;
 }
 
 .scan-header {
@@ -390,7 +389,7 @@ onMounted(() => {
 .scan-header p,
 .muted-text {
   margin: 6px 0 0;
-  color: #6a746f;
+  color: var(--text-subtle);
   font-size: 13px;
 }
 
@@ -402,7 +401,7 @@ onMounted(() => {
 }
 
 .selection-text {
-  color: #6a746f;
+  color: var(--text-subtle);
   font-size: 13px;
 }
 
@@ -422,7 +421,7 @@ onMounted(() => {
   margin-bottom: 10px;
   font-weight: 600;
   font-size: 13px;
-  color: #1f2a24;
+  color: var(--text-main);
 }
 
 .expand-section .muted-text {
@@ -444,7 +443,7 @@ onMounted(() => {
 
 .edit-label {
   font-size: 12px;
-  color: #8b9790;
+  color: var(--text-muted);
 }
 
 .title-field {
