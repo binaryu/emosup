@@ -21,12 +21,12 @@ WORKDIR /app
 
 RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -h /app emosup \
-    && mkdir -p /app/backend/data /app/frontend \
+    && mkdir -p /app/backend/data /app/frontend /app/defaults \
     && chown -R emosup:emosup /app
 
 COPY --from=backend-build /out/emosup-server /app/backend/emosup-server
 COPY --from=frontend-build /src/frontend/dist/ /app/frontend/
-COPY backend/data/config.example.json /app/backend/data/config.example.json
+COPY backend/data/config.example.json /app/defaults/config.example.json
 
 USER emosup
 WORKDIR /app/backend

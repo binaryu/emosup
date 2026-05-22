@@ -1,9 +1,16 @@
 services:
   emosup:
-    image: ${EMOSUP_IMAGE:-ghcr.io/binaryu/emosup:latest}
+    image: ${EMOSUP_IMAGE:-emosup:latest}
+    # Build from local source when the image is not already present.
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: emosup
     restart: unless-stopped
-    user: "${EMOSUP_UID:-1000}:${EMOSUP_GID:-1000}"
+    # Default to root so bind-mounted data/ dirs work without permission
+    # tweaks. For production, set EMOSUP_UID / EMOSUP_GID to a non-root user
+    # and chown the data directories accordingly.
+    user: "${EMOSUP_UID:-0}:${EMOSUP_GID:-0}"
     environment:
       - TZ=${TZ:-Asia/Shanghai}
     ports:
@@ -15,6 +22,6 @@ services:
       - /bin/sh
       - -ec
       - |
-        [ -f /app/backend/data/config.json ] || cp /app/backend/data/config.example.json /app/backend/data/config.json
-        sed -i 's/"host": "127.0.0.1"/"host": "0.0.0.0"/' /app/backend/data/config.json || true
+        [ -f /app/backend/data/config.json ] || cp /app/defaults/config.example.json /app/backend/data/config.json || true
+        sed -i 's/"host": "127.0.0.1"/"host": "0.0.0.0"/' /app/backend/data/config.json 2>/dev/null || true
         exec /app/backend/emosup-server
