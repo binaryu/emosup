@@ -225,7 +225,7 @@ func (s *TaskService) GetNextQueuedTask(ctx context.Context) (model.Task, bool, 
 	return model.Task{}, false, nil
 }
 
-func (s *TaskService) GetNextRunnableTask(ctx context.Context) (model.Task, bool, error) {
+func (s *TaskService) GetNextRunnableTask(ctx context.Context, excludeIDs map[string]struct{}) (model.Task, bool, error) {
 	tasks, err := s.ListAllTasks(ctx)
 	if err != nil {
 		return model.Task{}, false, err
@@ -238,9 +238,13 @@ func (s *TaskService) GetNextRunnableTask(ctx context.Context) (model.Task, bool
 	}
 	for _, status := range priorities {
 		for _, task := range tasks {
-			if task.Status == status {
-				return task, true, nil
+			if task.Status != status {
+				continue
 			}
+			if _, excluded := excludeIDs[task.ID]; excluded {
+				continue
+			}
+			return task, true, nil
 		}
 	}
 

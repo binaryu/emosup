@@ -131,7 +131,14 @@ func (m *Manager) tick(ctx context.Context) error {
 
 	// Pick up to (maxConcurrency - activeCount) tasks
 	for i := 0; i < maxConc-activeCount; i++ {
-		task, found, err := m.taskService.GetNextRunnableTask(ctx)
+		m.mu.RLock()
+		activeIDs := make(map[string]struct{}, len(m.activeTasks))
+		for id := range m.activeTasks {
+			activeIDs[id] = struct{}{}
+		}
+		m.mu.RUnlock()
+
+		task, found, err := m.taskService.GetNextRunnableTask(ctx, activeIDs)
 		if err != nil {
 			return err
 		}
