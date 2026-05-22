@@ -66,11 +66,11 @@
                     <div class="edit-grid">
                       <div class="edit-field">
                         <span class="edit-label">item_type</span>
-                        <el-input v-model="row.selected_item_type" placeholder="vl / ve" size="small" />
+                        <el-input v-model="row.selected_item_type" placeholder="vl / ve" size="small" @change="fetchTitle(row, scan.id)" />
                       </div>
                       <div class="edit-field">
                         <span class="edit-label">item_id</span>
-                        <el-input-number v-model="row.selected_item_id" :min="0" size="small" controls-position="right" />
+                        <el-input-number v-model="row.selected_item_id" :min="0" size="small" controls-position="right" @change="fetchTitle(row, scan.id)" />
                       </div>
                       <div class="edit-field title-field">
                         <span class="edit-label">title</span>
@@ -192,6 +192,27 @@ function applyCandidate(row: ScanItem, candidate: MatchCandidate) {
   row.selected_item_type = candidate.item_type
   row.selected_item_id = candidate.item_id
   row.selected_title = candidate.title
+}
+
+let fetchTitleTimer: ReturnType<typeof setTimeout> | null = null
+async function fetchTitle(row: ScanItem, scanId: string) {
+  if (!row.selected_item_type || !row.selected_item_id || row.selected_item_id <= 0) return
+
+  // Debounce to avoid spamming on each keystroke
+  if (fetchTitleTimer) clearTimeout(fetchTitleTimer)
+  fetchTitleTimer = setTimeout(async () => {
+    try {
+      const resp = await fetch(
+        `/api/emos/video/base?item_type=${encodeURIComponent(row.selected_item_type)}&item_id=${row.selected_item_id}`,
+      )
+      const data = await resp.json()
+      if (data.success && data.data?.title) {
+        row.selected_title = data.data.title
+      }
+    } catch {
+      // Silently ignore fetch errors
+    }
+  }, 400)
 }
 
 function setTableRef(scanId: string, table: { clearSelection?: () => void } | null) {

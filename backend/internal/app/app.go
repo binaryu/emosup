@@ -58,6 +58,7 @@ func New() (*App, error) {
 		Config:       handler.NewConfigHandler(configService),
 		OpenList:     handler.NewOpenListHandler(openListService),
 		Local:        handler.NewLocalHandler(localService),
+		Emos:         handler.NewEmosHandler(emosService),
 		Scan:         handler.NewScanHandler(scanService),
 		Task:         handler.NewTaskHandler(taskService),
 		FrontendDist: findFrontendDistDir(),

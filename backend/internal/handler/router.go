@@ -15,6 +15,7 @@ type RouterDependencies struct {
 	Config       *ConfigHandler
 	OpenList     *OpenListHandler
 	Local        *LocalHandler
+	Emos         *EmosHandler
 	Scan         *ScanHandler
 	Task         *TaskHandler
 	FrontendDist string
@@ -40,6 +41,7 @@ func NewRouter(deps RouterDependencies) *gin.Engine {
 	deps.Config.RegisterRoutes(api)
 	deps.OpenList.RegisterRoutes(api)
 	deps.Local.RegisterRoutes(api)
+	deps.Emos.RegisterRoutes(api)
 	deps.Scan.RegisterRoutes(api)
 	deps.Task.RegisterRoutes(api)
 
