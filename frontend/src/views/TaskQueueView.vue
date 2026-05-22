@@ -370,6 +370,21 @@ onUnmounted(() => {
   .toolbar {
     width: 100%;
     flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .toolbar .el-select {
+    width: 100% !important;
+  }
+
+  .action-group {
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+
+  .action-group .el-button {
+    font-size: 11px;
+    padding: 2px 6px;
   }
 }
 </style>

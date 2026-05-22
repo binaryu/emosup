@@ -107,3 +107,25 @@ a {
     padding: 16px;
   }
 }
+
+@media (max-width: 600px) {
+  .page-main {
+    padding: 10px;
+  }
+
+  .page-title {
+    font-size: 22px;
+  }
+
+  .el-table {
+    font-size: 12px;
+  }
+
+  .el-card__header {
+    padding: 12px 14px;
+  }
+
+  .el-card__body {
+    padding: 12px;
+  }
+}

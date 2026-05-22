@@ -66,11 +66,11 @@
                     <div class="edit-grid">
                       <div class="edit-field">
                         <span class="edit-label">item_type</span>
-                        <el-input v-model="row.selected_item_type" placeholder="vl / ve" size="small" @change="fetchTitle(row, scan.id)" />
+                        <el-input v-model="row.selected_item_type" placeholder="vl / ve" size="small" @change="() => fetchTitle(row, scan.id)" />
                       </div>
                       <div class="edit-field">
                         <span class="edit-label">item_id</span>
-                        <el-input-number v-model="row.selected_item_id" :min="0" size="small" controls-position="right" @change="fetchTitle(row, scan.id)" />
+                        <el-input-number v-model="row.selected_item_id" :min="0" size="small" controls-position="right" @change="() => fetchTitle(row, scan.id)" />
                       </div>
                       <div class="edit-field title-field">
                         <span class="edit-label">title</span>
@@ -492,11 +492,30 @@ onMounted(() => {
 
   .scan-actions {
     width: 100%;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .scan-actions .el-button {
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+
+  .selection-text {
+    width: 100%;
+    margin-bottom: 4px;
   }
 
   .expand-panel {
     grid-template-columns: 1fr;
+  }
+
+  .edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .title-field {
+    grid-column: 1;
   }
 }
 </style>
