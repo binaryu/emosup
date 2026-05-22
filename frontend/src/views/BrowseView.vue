@@ -12,15 +12,21 @@
           <template #header>扫描设置</template>
           <el-form label-position="top">
             <el-form-item label="文件来源">
-              <div style="display: flex; gap: 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--el-border-color)">
-                <div
-                  :style="{ flex: 1, padding: '8px 0', textAlign: 'center', cursor: 'pointer', fontSize: '13px', background: source === 'openlist' ? 'var(--el-color-primary)' : '', color: source === 'openlist' ? '#fff' : '' }"
+              <div class="source-toggle">
+                <button
+                  :class="['toggle-btn', { active: source === 'openlist' }]"
                   @click="source = 'openlist'"
-                >OpenList</div>
-                <div
-                  :style="{ flex: 1, padding: '8px 0', textAlign: 'center', cursor: 'pointer', fontSize: '13px', background: source === 'local' ? 'var(--el-color-primary)' : '', color: source === 'local' ? '#fff' : '' }"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                  OpenList
+                </button>
+                <button
+                  :class="['toggle-btn', { active: source === 'local' }]"
                   @click="source = 'local'"
-                >本地目录</div>
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                  本地目录
+                </button>
               </div>
             </el-form-item>
 
@@ -224,4 +230,42 @@ onMounted(loadEntries)
 .browse-header { display: flex; align-items: center; justify-content: space-between; }
 .browse-actions { display: flex; align-items: center; gap: 8px; }
 .path-display { font-size: 12px; color: var(--text-subtle); word-break: break-all; }
+
+.source-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: rgba(0,0,0,0.04);
+  border-radius: 12px;
+}
+
+.toggle-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.toggle-btn:hover:not(.active) {
+  color: var(--text-main);
+  background: rgba(0,0,0,0.04);
+}
+
+.toggle-btn.active {
+  background: #fff;
+  color: var(--text-main);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+  font-weight: 600;
+}
 </style>
