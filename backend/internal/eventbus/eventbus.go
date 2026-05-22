@@ -1,4 +1,4 @@
-package scheduler
+package eventbus
 
 import "sync"
 
@@ -7,18 +7,18 @@ type TaskEvent struct {
 	Status string `json:"status"`
 }
 
-type EventBus struct {
+type Bus struct {
 	mu          sync.RWMutex
 	subscribers map[chan TaskEvent]struct{}
 }
 
-func NewEventBus() *EventBus {
-	return &EventBus{
+func New() *Bus {
+	return &Bus{
 		subscribers: make(map[chan TaskEvent]struct{}),
 	}
 }
 
-func (b *EventBus) Subscribe() chan TaskEvent {
+func (b *Bus) Subscribe() chan TaskEvent {
 	ch := make(chan TaskEvent, 64)
 	b.mu.Lock()
 	b.subscribers[ch] = struct{}{}
@@ -26,14 +26,14 @@ func (b *EventBus) Subscribe() chan TaskEvent {
 	return ch
 }
 
-func (b *EventBus) Unsubscribe(ch chan TaskEvent) {
+func (b *Bus) Unsubscribe(ch chan TaskEvent) {
 	b.mu.Lock()
 	delete(b.subscribers, ch)
 	close(ch)
 	b.mu.Unlock()
 }
 
-func (b *EventBus) Publish(event TaskEvent) {
+func (b *Bus) Publish(event TaskEvent) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	for ch := range b.subscribers {

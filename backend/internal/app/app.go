@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"emosup/backend/internal/client"
+	"emosup/backend/internal/eventbus"
 	"emosup/backend/internal/handler"
 	"emosup/backend/internal/scheduler"
 	"emosup/backend/internal/service"
@@ -37,9 +38,9 @@ func New() (*App, error) {
 
 	aria2Client := client.NewHTTPAria2Client()
 	taskService := service.NewTaskService(fileStore, aria2Client, openListClient)
-	downloadExecutor := service.NewDownloadExecutor(taskService, aria2Client)
-	uploadExecutor := service.NewUploadExecutor(taskService, emosClient)
-	eventBus := scheduler.NewEventBus()
+	eventBus := eventbus.New()
+	downloadExecutor := service.NewDownloadExecutor(taskService, aria2Client, eventBus)
+	uploadExecutor := service.NewUploadExecutor(taskService, emosClient, eventBus)
 	tmdbClient := client.NewTMDBClient()
 
 	cfg, err := configService.GetConfig(context.Background())

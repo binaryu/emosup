@@ -180,20 +180,15 @@ function connectSSE() {
   if (eventSource) return
   eventSource = new EventSource('/api/tasks/events')
   eventSource.onmessage = () => {
-    refreshData()
+    void Promise.all([
+      taskStore.fetchTasks({ status: filterStatus.value, page: taskStore.page }),
+      taskStore.fetchTaskStats(),
+      taskStore.fetchRuntimeStatus(),
+    ])
   }
   eventSource.onerror = () => {
     eventSource?.close()
     eventSource = undefined
-  }
-  // Also poll every 5s for progress updates during active tasks
-  if (!progressTimer) {
-    progressTimer = window.setInterval(() => {
-      void Promise.all([
-        taskStore.fetchTasks({ status: filterStatus.value, page: taskStore.page }),
-        taskStore.fetchRuntimeStatus(),
-      ])
-    }, 5000)
   }
 }
 

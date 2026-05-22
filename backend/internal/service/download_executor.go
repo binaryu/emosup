@@ -9,17 +9,20 @@ import (
 
 	"emosup/backend/internal/client"
 	"emosup/backend/internal/model"
+	"emosup/backend/internal/eventbus"
 )
 
 type DownloadExecutor struct {
 	taskService *TaskService
 	aria2Client client.Aria2Client
+	eventBus    *eventbus.Bus
 }
 
-func NewDownloadExecutor(taskService *TaskService, aria2Client client.Aria2Client) *DownloadExecutor {
+func NewDownloadExecutor(taskService *TaskService, aria2Client client.Aria2Client, eventBus *eventbus.Bus) *DownloadExecutor {
 	return &DownloadExecutor{
 		taskService: taskService,
 		aria2Client: aria2Client,
+		eventBus:    eventBus,
 	}
 }
 
@@ -106,6 +109,9 @@ func (e *DownloadExecutor) Execute(ctx context.Context, taskID string) error {
 
 		if _, err := e.taskService.SyncDownloadStatus(ctx, task.ID, status); err != nil {
 			return err
+		}
+		if e.eventBus != nil {
+			e.eventBus.Publish(eventbus.TaskEvent{TaskID: task.ID, Status: "downloading"})
 		}
 
 		switch status.Status {

@@ -11,6 +11,7 @@ import (
 
 	"emosup/backend/internal/client"
 	"emosup/backend/internal/model"
+	"emosup/backend/internal/eventbus"
 )
 
 var errTaskCanceled = errors.New("task canceled")
@@ -18,12 +19,14 @@ var errTaskCanceled = errors.New("task canceled")
 type UploadExecutor struct {
 	taskService *TaskService
 	emosClient  client.EmosClient
+	eventBus    *eventbus.Bus
 }
 
-func NewUploadExecutor(taskService *TaskService, emosClient client.EmosClient) *UploadExecutor {
+func NewUploadExecutor(taskService *TaskService, emosClient client.EmosClient, eventBus *eventbus.Bus) *UploadExecutor {
 	return &UploadExecutor{
 		taskService: taskService,
 		emosClient:  emosClient,
+		eventBus:    eventBus,
 	}
 }
 
@@ -123,6 +126,9 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 		}
 
 		_, syncErr := e.taskService.SyncUploadProgress(ctx, task.ID, progress)
+		if e.eventBus != nil {
+			e.eventBus.Publish(eventbus.TaskEvent{TaskID: task.ID, Status: "uploading"})
+		}
 		return syncErr
 	})
 	if err != nil {

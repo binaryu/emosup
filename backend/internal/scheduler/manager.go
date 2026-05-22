@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"emosup/backend/internal/eventbus"
 	"emosup/backend/internal/model"
 	"emosup/backend/internal/service"
 )
@@ -24,7 +25,7 @@ type Manager struct {
 	uploadExecutor   *service.UploadExecutor
 	pollInterval     time.Duration
 	maxConcurrency   int
-	eventBus         *EventBus
+	eventBus         *eventbus.Bus
 
 	mu            sync.RWMutex
 	running       bool
@@ -39,7 +40,7 @@ func NewManager(
 	uploadExecutor *service.UploadExecutor,
 	pollInterval time.Duration,
 	maxConcurrency int,
-	eventBus *EventBus,
+	eventBus *eventbus.Bus,
 ) *Manager {
 	if pollInterval <= 0 {
 		pollInterval = 5 * time.Second
@@ -276,7 +277,7 @@ func (m *Manager) setActiveTask(taskID string, stage string) {
 		m.startedAt = &now
 	}
 	if m.eventBus != nil {
-		m.eventBus.Publish(TaskEvent{TaskID: taskID, Status: stage})
+		m.eventBus.Publish(eventbus.TaskEvent{TaskID: taskID, Status: stage})
 	}
 }
 
@@ -288,7 +289,7 @@ func (m *Manager) clearActiveTask(taskID string) {
 		m.startedAt = nil
 	}
 	if m.eventBus != nil {
-		m.eventBus.Publish(TaskEvent{TaskID: taskID, Status: "done"})
+		m.eventBus.Publish(eventbus.TaskEvent{TaskID: taskID, Status: "done"})
 	}
 }
 

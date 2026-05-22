@@ -6,14 +6,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"emosup/backend/internal/scheduler"
+	"emosup/backend/internal/eventbus"
 )
 
 type EventsHandler struct {
-	eventBus *scheduler.EventBus
+	eventBus *eventbus.Bus
 }
 
-func NewEventsHandler(eventBus *scheduler.EventBus) *EventsHandler {
+func NewEventsHandler(eventBus *eventbus.Bus) *EventsHandler {
 	return &EventsHandler{eventBus: eventBus}
 }
 
