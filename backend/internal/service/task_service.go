@@ -159,6 +159,16 @@ func (s *TaskService) BatchCreateTasks(_ context.Context, req BatchCreateTasksRe
 		}
 	}
 
+	// If scan is now empty, delete the whole scan session
+	updatedScan, err := s.store.GetScan(scan.ID)
+	if err == nil && updatedScan.TotalCount == 0 {
+		if delErr := s.store.DeleteScan(scan.ID); delErr != nil {
+			log.Printf("auto-cleanup empty scan failed: scan=%s err=%v", scan.ID, delErr)
+		} else {
+			log.Printf("auto-cleanup empty scan deleted: scan=%s", scan.ID)
+		}
+	}
+
 	return result, nil
 }
 

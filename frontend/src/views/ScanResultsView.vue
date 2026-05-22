@@ -309,6 +309,9 @@ async function createSingleTask(scanId: string, row: ScanItem) {
         scan.total_count = scan.items.length
         scan.matched_count = scan.items.filter((i) => i.match_status === 'matched').length
         scan.unmatched_count = scan.total_count - scan.matched_count
+        if (scan.total_count === 0) {
+          scanStore.scans = scanStore.scans.filter((s) => s.id !== scanId)
+        }
       }
     }
     if (result.failed.length) {
@@ -344,6 +347,10 @@ async function createTasks(scanId: string) {
       scan.total_count = scan.items.length
       scan.matched_count = scan.items.filter((i) => i.match_status === 'matched').length
       scan.unmatched_count = scan.total_count - scan.matched_count
+      // Auto-remove empty scan card
+      if (scan.total_count === 0) {
+        scanStore.scans = scanStore.scans.filter((s) => s.id !== scanId)
+      }
     }
 
     if (result.created.length) {
