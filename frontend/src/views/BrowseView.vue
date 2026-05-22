@@ -12,9 +12,9 @@
           <template #header>扫描设置</template>
           <el-form label-position="top">
             <el-form-item label="文件来源">
-              <el-radio-group v-model="source" @change="loadEntries">
-                <el-radio-button value="openlist">OpenList</el-radio-button>
-                <el-radio-button value="local">本地下载目录</el-radio-button>
+              <el-radio-group v-model="source" style="width: 100%">
+                <el-radio-button value="openlist" style="flex: 1">OpenList</el-radio-button>
+                <el-radio-button value="local" style="flex: 1">本地目录</el-radio-button>
               </el-radio-group>
             </el-form-item>
 
