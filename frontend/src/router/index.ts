@@ -22,6 +22,11 @@ const router = createRouter({
           component: () => import('@/views/OpenListView.vue'),
         },
         {
+          path: 'local',
+          name: 'local',
+          component: () => import('@/views/LocalBrowseView.vue'),
+        },
+        {
           path: 'scans',
           name: 'scans',
           component: () => import('@/views/ScanResultsView.vue'),

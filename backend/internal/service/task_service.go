@@ -130,7 +130,7 @@ func (s *TaskService) BatchCreateTasks(_ context.Context, req BatchCreateTasksRe
 			result.Failed = append(result.Failed, FailedTaskItem{ItemID: itemID, Reason: "scan item not found"})
 			continue
 		}
-		if reason := validateScanItemForTask(scanItem); reason != "" {
+		if reason := validateScanItemForTask(scan, scanItem); reason != "" {
 			result.Failed = append(result.Failed, FailedTaskItem{ItemID: itemID, Reason: reason})
 			continue
 		}
@@ -139,7 +139,7 @@ func (s *TaskService) BatchCreateTasks(_ context.Context, req BatchCreateTasksRe
 			continue
 		}
 
-		task := newTaskFromScan(scan, scanItem, cfg.Emos.Storage)
+		task := newTaskFromScan(scan, scanItem, cfg.Emos.Storage, cfg.Aria2.DownloadDir)
 		if err := s.store.SaveTask(task); err != nil {
 			return BatchCreateTasksResult{}, err
 		}
@@ -989,7 +989,7 @@ func (s *TaskService) markTaskCanceled(taskID, downloadStatus, message string) (
 	return task, nil
 }
 
-func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage string) model.Task {
+func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage string, downloadDir string) model.Task {
 	now := time.Now()
 	title := strings.TrimSpace(item.SelectedTitle)
 	if title == "" {
@@ -999,14 +999,33 @@ func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage string
 		storage = "default"
 	}
 
+	isLocal := strings.EqualFold(scan.Source, "local")
+	sourceType := "openlist"
+	status := model.TaskStatusQueued
+	localPath := ""
+	downloadStatus := ""
+	downloadProgress := float64(0)
+	uploadStatus := "pending"
+
+	if isLocal {
+		sourceType = "local"
+		status = model.TaskStatusUploadPending
+		// Resolve the local file path from download dir
+		cleanRel := filepath.Clean(strings.TrimPrefix(filepath.Clean(item.OpenListPath), "/"))
+		localPath = filepath.Join(downloadDir, cleanRel)
+		downloadStatus = "complete"
+		downloadProgress = 100
+		uploadStatus = "pending"
+	}
+
 	return model.Task{
 		ID:            utils.NewID("task"),
 		ScanSessionID: scan.ID,
 		ScanItemID:    item.ID,
-		Status:        model.TaskStatusQueued,
+		Status:        status,
 		RetryCount:    0,
 		Source: model.TaskSource{
-			Type:     "openlist",
+			Type:     sourceType,
 			Path:     item.OpenListPath,
 			RawURL:   item.RawURL,
 			FileName: item.FileName,
@@ -1024,12 +1043,16 @@ func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage string
 			Title:    title,
 		},
 		Download: model.TaskDownload{
-			TotalBytes: item.FileSize,
+			TotalBytes:     item.FileSize,
+			CompletedBytes: item.FileSize,
+			LocalPath:      localPath,
+			Status:         downloadStatus,
+			Progress:       downloadProgress,
 		},
 		Upload: model.TaskUpload{
 			Storage:    storage,
 			TotalBytes: item.FileSize,
-			Status:     "pending",
+			Status:     uploadStatus,
 		},
 		Result:    model.TaskResult{},
 		CreatedAt: now,
@@ -1037,7 +1060,7 @@ func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage string
 	}
 }
 
-func validateScanItemForTask(item model.ScanItem) string {
+func validateScanItemForTask(scan model.ScanSession, item model.ScanItem) string {
 	if !item.Confirmed {
 		return "scan item not confirmed"
 	}
@@ -1047,11 +1070,12 @@ func validateScanItemForTask(item model.ScanItem) string {
 	if item.SelectedItemID <= 0 {
 		return "selected item_id is required"
 	}
-	if strings.TrimSpace(item.RawURL) == "" {
-		return "raw_url is required"
-	}
 	if !item.IsVideo {
 		return "scan item is not a video file"
+	}
+	// Only OpenList scans require raw_url; local files are already on disk
+	if !strings.EqualFold(scan.Source, "local") && strings.TrimSpace(item.RawURL) == "" {
+		return "raw_url is required"
 	}
 	return ""
 }

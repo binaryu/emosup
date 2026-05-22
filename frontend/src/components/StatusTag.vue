@@ -10,9 +10,10 @@ const props = defineProps<{
 }>()
 
 const tagType = computed(() => {
-  if (['completed'].includes(props.status)) return 'success'
-  if (['queued', 'download_completed', 'upload_pending', 'saving', 'pending', 'uploaded'].includes(props.status)) return 'warning'
-  if (['download_failed', 'upload_failed', 'canceled'].includes(props.status)) return 'danger'
+  if (['completed', 'matched'].includes(props.status)) return 'success'
+  if (['queued', 'download_completed', 'upload_pending', 'saving', 'pending', 'uploaded', 'unmatched', 'ambiguous'].includes(props.status)) return 'warning'
+  if (['download_failed', 'upload_failed', 'canceled', 'invalid', 'failed'].includes(props.status)) return 'danger'
+  if (['downloading', 'uploading'].includes(props.status)) return ''
   return 'info'
 })
 </script>

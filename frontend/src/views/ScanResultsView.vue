@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="scan-results-page">
     <PageHeaderCard
       title="扫描结果"
       subtitle="确认匹配结果后，可以直接把扫描项批量创建成任务快照，进入后续任务队列。"
@@ -8,12 +8,20 @@
       <el-button :loading="scanStore.loading" @click="scanStore.fetchScans()">刷新</el-button>
     </PageHeaderCard>
 
-    <el-space direction="vertical" fill size="large">
+    <el-space direction="vertical" fill size="large" style="width: 100%">
       <el-card v-for="scan in scanStore.scans" :key="scan.id" class="scan-card">
         <template #header>
           <div class="scan-header">
             <div>
               <strong>{{ scan.path }}</strong>
+              <el-tag
+                :type="scan.source === 'local' ? 'warning' : 'primary'"
+                size="small"
+                effect="plain"
+                style="margin-left: 10px"
+              >
+                {{ scan.source === 'local' ? '本地' : 'OpenList' }}
+              </el-tag>
               <p>
                 TMDB ID: {{ scan.tmdb_id }} / 类型: {{ scan.video_type || '自动' }} / 共
                 {{ scan.total_count }} 项 / 已匹配 {{ scan.matched_count }} 项
@@ -30,6 +38,14 @@
               >
                 创建任务
               </el-button>
+              <el-button
+                type="danger"
+                plain
+                size="small"
+                @click="deleteScan(scan.id)"
+              >
+                删除扫描
+              </el-button>
             </div>
           </div>
         </template>
@@ -42,32 +58,48 @@
             stripe
             @selection-change="onSelectionChange(scan.id)"
           >
-            <el-table-column type="expand" width="52">
+            <el-table-column type="expand" width="48">
               <template #default="{ row }">
-                <div class="expand-grid">
+                <div class="expand-panel">
                   <div class="expand-section">
                     <div class="expand-title">人工修正</div>
                     <div class="edit-grid">
-                      <el-input v-model="row.selected_item_type" placeholder="item_type" />
-                      <el-input-number v-model="row.selected_item_id" :min="0" />
-                      <el-input v-model="row.selected_title" placeholder="title" class="title-input" />
-                      <el-switch
-                        v-model="row.confirmed"
-                        inline-prompt
-                        active-text="已确认"
-                        inactive-text="未确认"
-                      />
+                      <div class="edit-field">
+                        <span class="edit-label">item_type</span>
+                        <el-input v-model="row.selected_item_type" placeholder="vl / ve" size="small" />
+                      </div>
+                      <div class="edit-field">
+                        <span class="edit-label">item_id</span>
+                        <el-input-number v-model="row.selected_item_id" :min="0" size="small" controls-position="right" />
+                      </div>
+                      <div class="edit-field title-field">
+                        <span class="edit-label">title</span>
+                        <el-input v-model="row.selected_title" placeholder="目标标题" size="small" />
+                      </div>
+                      <div class="edit-field">
+                        <span class="edit-label">确认</span>
+                        <el-switch
+                          v-model="row.confirmed"
+                          inline-prompt
+                          active-text="已确认"
+                          inactive-text="未确认"
+                          size="small"
+                        />
+                      </div>
                     </div>
                   </div>
                   <div class="expand-section">
-                    <div class="expand-title">候选</div>
+                    <div class="expand-title">匹配候选</div>
                     <div v-if="row.match_candidates?.length" class="candidate-list">
-                      <div
+                      <el-tag
                         v-for="candidate in row.match_candidates"
                         :key="`${candidate.item_type}-${candidate.item_id}`"
+                        size="small"
+                        class="candidate-tag"
+                        @click="applyCandidate(row, candidate)"
                       >
-                        {{ candidate.item_type }} / {{ candidate.item_id }} / {{ candidate.title }}
-                      </div>
+                        {{ candidate.item_type }}/{{ candidate.item_id }} {{ candidate.title }}
+                      </el-tag>
                     </div>
                     <span v-else class="muted-text">无</span>
                   </div>
@@ -76,48 +108,47 @@
             </el-table-column>
           <el-table-column
             type="selection"
-            width="54"
-            :selectable="(row: ScanItem) => canCreateTask(row)"
+            width="42"
+            :selectable="(row: ScanItem) => canCreateTask(row, scan.source)"
           />
-          <el-table-column prop="file_name" label="文件名" min-width="220" />
-          <el-table-column label="大小" width="120">
+          <el-table-column prop="file_name" label="文件名" min-width="200" show-overflow-tooltip />
+          <el-table-column label="大小" width="100" align="right">
             <template #default="{ row }">
               {{ formatSizeInMB(row.file_size) }}
             </template>
           </el-table-column>
-          <el-table-column label="解析结果" min-width="180">
+          <el-table-column label="解析结果" width="150">
             <template #default="{ row }">
-              <span>
-                S{{ row.parsed.season ?? '-' }} / E{{ row.parsed.episode ?? '-' }}
-                <template v-if="row.parsed.is_special"> / 特别篇</template>
+              <span class="parse-info">
+                S{{ row.parsed.season ?? '-' }}E{{ row.parsed.episode ?? '-' }}
+                <template v-if="row.parsed.is_special"> · 特别篇</template>
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="确认状态" width="110">
+          <el-table-column label="匹配" width="90" align="center">
             <template #default="{ row }">
-              <el-tag :type="row.confirmed ? 'success' : 'info'" effect="light" round>
-                {{ row.confirmed ? '已确认' : '未确认' }}
-              </el-tag>
+              <StatusTag :status="row.match_status" />
             </template>
           </el-table-column>
-          <el-table-column prop="match_status" label="匹配状态" width="120" />
-          <el-table-column label="最终目标" min-width="240">
+          <el-table-column label="目标" min-width="180" show-overflow-tooltip>
             <template #default="{ row }">
-              <div>{{ row.selected_item_type || '-' }} / {{ row.selected_item_id || '-' }}</div>
-              <div class="muted-text">{{ row.selected_title || row.match_reason || '-' }}</div>
+              <span v-if="row.selected_title" class="target-title">{{ row.selected_title }}</span>
+              <span v-else class="muted-text">{{ row.match_reason || '未匹配' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="是否可创建" width="120">
+          <el-table-column label="操作" width="200" fixed="right">
             <template #default="{ row }">
-              <el-tag :type="canCreateTask(row) ? 'success' : 'warning'" effect="light" round>
-                {{ canCreateTask(row) ? '可创建' : '待补全' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="160" fixed="right">
-            <template #default="{ row }">
-              <el-button type="primary" link @click="saveItem(scan.id, row.id, row)">保存</el-button>
-              <el-button type="success" link @click="createSingleTask(scan.id, row)">加入队列</el-button>
+              <el-button type="primary" link size="small" @click="saveItem(scan.id, row.id, row)">保存</el-button>
+              <el-button
+                type="success"
+                link
+                size="small"
+                :disabled="!canCreateTask(row, scan.source)"
+                @click="createSingleTask(scan.id, row)"
+              >
+                入队
+              </el-button>
+              <el-button type="danger" link size="small" @click="deleteItem(scan.id, row)">删除</el-button>
             </template>
           </el-table-column>
           </el-table>
@@ -133,9 +164,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 
 import PageHeaderCard from '@/components/PageHeaderCard.vue'
+import StatusTag from '@/components/StatusTag.vue'
 import { useScanStore } from '@/stores/scans'
 import { useTaskStore } from '@/stores/tasks'
-import type { ScanItem } from '@/types/api'
+import type { ScanItem, MatchCandidate } from '@/types/api'
 import { formatSizeInMB } from '@/utils/format'
 
 const router = useRouter()
@@ -145,14 +177,21 @@ const taskStore = useTaskStore()
 const selectedItemIdsByScan = reactive<Record<string, string[]>>({})
 const tableRefs = reactive<Record<string, { clearSelection?: () => void } | null>>({})
 
-function canCreateTask(row: ScanItem) {
+function canCreateTask(row: ScanItem, scanSource?: string) {
+  const isLocal = scanSource === 'local'
   return Boolean(
     row.confirmed &&
       row.selected_item_type &&
       row.selected_item_id > 0 &&
-      row.raw_url &&
-      row.is_video,
+      row.is_video &&
+      (isLocal || row.raw_url),
   )
+}
+
+function applyCandidate(row: ScanItem, candidate: MatchCandidate) {
+  row.selected_item_type = candidate.item_type
+  row.selected_item_id = candidate.item_id
+  row.selected_title = candidate.title
 }
 
 function setTableRef(scanId: string, table: { clearSelection?: () => void } | null) {
@@ -197,6 +236,52 @@ async function persistItem(scanId: string, itemId: string, row: ScanItem, showTo
   }
 }
 
+async function deleteScan(scanId: string) {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除整个扫描结果吗？所有扫描项将被移除。此操作不可撤销。',
+      '删除扫描',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await scanStore.deleteScan(scanId)
+    ElMessage.success('扫描已删除')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '删除失败')
+  }
+}
+
+async function deleteItem(scanId: string, row: ScanItem) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除「${row.file_name}」吗？此操作不可撤销。`,
+      '删除扫描项',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await scanStore.deleteScanItem(scanId, row.id)
+    ElMessage.success('已删除')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '删除失败')
+  }
+}
+
 async function saveItem(scanId: string, itemId: string, row: ScanItem) {
   await persistItem(scanId, itemId, row, true)
 }
@@ -206,7 +291,8 @@ async function createSingleTask(scanId: string, row: ScanItem) {
     row.confirmed = true
   }
 
-  if (!canCreateTask(row)) {
+  const scan = scanStore.scans.find((s) => s.id === scanId)
+  if (!canCreateTask(row, scan?.source)) {
     ElMessage.warning('当前扫描项信息未补全，无法创建任务')
     return
   }
@@ -271,7 +357,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.scan-results-page {
+  width: 100%;
+}
+
 .scan-card {
+  width: 100%;
   border-radius: 20px;
 }
 
@@ -280,18 +371,21 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .scan-header p,
 .muted-text {
   margin: 6px 0 0;
   color: #6a746f;
+  font-size: 13px;
 }
 
 .scan-actions {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .selection-text {
@@ -299,42 +393,74 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.edit-grid {
-  display: grid;
-  grid-template-columns: 1fr 120px;
-  gap: 8px;
-  align-items: center;
-}
-
-.title-input {
-  grid-column: 1 / -1;
-}
-
-.candidate-list {
-  display: grid;
-  gap: 4px;
-  color: #42504a;
-}
-
 .table-scroll {
   overflow-x: auto;
 }
 
-.expand-grid {
+/* ---- expand panel ---- */
+.expand-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  padding: 8px 4px;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  padding: 12px 8px;
 }
 
 .expand-title {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   font-weight: 600;
+  font-size: 13px;
   color: #1f2a24;
 }
 
 .expand-section .muted-text {
   font-size: 12px;
+}
+
+.edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.edit-label {
+  font-size: 12px;
+  color: #8b9790;
+}
+
+.title-field {
+  grid-column: 1 / -1;
+}
+
+.candidate-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.candidate-tag {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.candidate-tag:hover {
+  opacity: 0.75;
+}
+
+.parse-info {
+  white-space: nowrap;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.target-title {
+  font-size: 13px;
 }
 
 @media (max-width: 960px) {
@@ -348,7 +474,7 @@ onMounted(() => {
     justify-content: space-between;
   }
 
-  .expand-grid {
+  .expand-panel {
     grid-template-columns: 1fr;
   }
 }

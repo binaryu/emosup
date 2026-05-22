@@ -38,22 +38,30 @@
         <el-card class="panel-card">
           <template #header>目录浏览</template>
           <el-table :data="entries" stripe>
-            <el-table-column prop="name" label="名称" />
-            <el-table-column label="类型" width="100">
+            <el-table-column prop="name" label="名称" min-width="200" />
+            <el-table-column label="类型" width="80" align="center">
               <template #default="{ row }">
-                <el-tag :type="row.is_dir ? 'success' : 'info'">
+                <el-tag :type="row.is_dir ? 'success' : ''" size="small">
                   {{ row.is_dir ? '目录' : '文件' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="size" label="大小" width="120" />
-            <el-table-column label="操作" width="120">
+            <el-table-column prop="size" label="大小" width="110" align="right" />
+            <el-table-column label="操作" width="200">
               <template #default="{ row }">
                 <el-button v-if="row.is_dir" link type="primary" @click="enterDirectory(row.path)">
                   进入
                 </el-button>
                 <el-button v-if="row.is_dir" link @click="selectDirectory(row.path)">
                   选择
+                </el-button>
+                <el-button
+                  v-if="!row.is_dir && isVideoFile(row.name)"
+                  link
+                  type="warning"
+                  @click="scanSingleFile(row)"
+                >
+                  扫描此文件
                 </el-button>
               </template>
             </el-table-column>
@@ -111,6 +119,28 @@ async function createScan() {
     const created = await scanStore.createScan(currentPath.value, tmdbId.value, videoType.value)
     if (created) {
       ElMessage.success(`扫描完成，共 ${created.total_count} 个视频文件`)
+      router.push('/scans')
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '扫描失败')
+  }
+}
+
+function isVideoFile(name: string): boolean {
+  const ext = name.split('.').pop()?.toLowerCase() || ''
+  return ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'ts', 'mpg', 'mpeg', 'webm'].includes(ext)
+}
+
+async function scanSingleFile(row: OpenListEntry) {
+  try {
+    const created = await scanStore.createScan(
+      row.path,
+      tmdbId.value,
+      videoType.value,
+      row.path,
+    )
+    if (created) {
+      ElMessage.success('单文件扫描完成')
       router.push('/scans')
     }
   } catch (error) {

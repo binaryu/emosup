@@ -21,6 +21,7 @@ const (
 
 type ScanSession struct {
 	ID             string            `json:"id"`
+	Source         string            `json:"source"`
 	Path           string            `json:"path"`
 	TMDBID         int64             `json:"tmdb_id"`
 	VideoType      string            `json:"video_type"`

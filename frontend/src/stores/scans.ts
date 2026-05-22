@@ -17,7 +17,7 @@ export const useScanStore = defineStore('scans', {
         this.loading = false
       }
     },
-    async createScan(path: string, tmdbId: number, videoType = '') {
+    async createScan(path: string, tmdbId: number, videoType = '', filePath = '', source = '') {
       this.loading = true
       try {
         const data = await parseApiResponse<ScanSession>(
@@ -28,6 +28,8 @@ export const useScanStore = defineStore('scans', {
             },
             body: JSON.stringify({
               path,
+              file_path: filePath,
+              source,
               tmdb_id: tmdbId,
               video_type: videoType,
             }),
@@ -59,6 +61,38 @@ export const useScanStore = defineStore('scans', {
             scan.items[index] = data
             scan.updated_at = data.updated_at
           }
+        }
+
+        return data
+      } finally {
+        this.loading = false
+      }
+    },
+    async deleteScan(scanId: string) {
+      this.loading = true
+      try {
+        await parseApiResponse(await fetch(`/api/scans/${scanId}`, { method: 'DELETE' }))
+        this.scans = this.scans.filter((item) => item.id !== scanId)
+      } finally {
+        this.loading = false
+      }
+    },
+    async deleteScanItem(scanId: string, itemId: string) {
+      this.loading = true
+      try {
+        const data = await parseApiResponse<ScanSession>(
+          await fetch(`/api/scans/${scanId}/items/${itemId}`, {
+            method: 'DELETE',
+          }),
+        )
+
+        const scan = this.scans.find((item) => item.id === scanId)
+        if (scan) {
+          scan.items = data.items
+          scan.total_count = data.total_count
+          scan.matched_count = data.matched_count
+          scan.unmatched_count = data.unmatched_count
+          scan.updated_at = data.updated_at
         }
 
         return data

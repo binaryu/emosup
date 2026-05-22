@@ -100,6 +100,7 @@ export interface ScanItem {
 
 export interface ScanSession {
   id: string
+  source: string
   path: string
   tmdb_id: number
   video_type: string

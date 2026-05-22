@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -37,6 +38,28 @@ func (s *OpenListService) Browse(ctx context.Context, path string) ([]client.Ope
 	}
 
 	return entries, nil
+}
+
+func (s *OpenListService) GetFileInfo(ctx context.Context, path string) ([]client.OpenListEntry, error) {
+	// List parent directory and find the matching file by name
+	parentDir := filepath.Dir(path)
+	if parentDir == "" || parentDir == "." {
+		parentDir = "/"
+	}
+
+	entries, err := s.Browse(ctx, parentDir)
+	if err != nil {
+		return nil, err
+	}
+
+	baseName := filepath.Base(path)
+	for _, entry := range entries {
+		if !entry.IsDir && (entry.Name == baseName || strings.EqualFold(entry.Path, path)) {
+			return []client.OpenListEntry{entry}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("file not found: %s", path)
 }
 
 func (s *OpenListService) ListVideoFiles(ctx context.Context, path string) ([]client.OpenListEntry, error) {

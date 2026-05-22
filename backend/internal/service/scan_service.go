@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"emosup/backend/internal/client"
 	"emosup/backend/internal/model"
 	"emosup/backend/internal/store"
 	"emosup/backend/internal/utils"
@@ -15,12 +16,15 @@ import (
 type ScanService struct {
 	store           *store.FileStore
 	openListService *OpenListService
+	localService    *LocalService
 	emosService     *EmosService
 	matchService    *MatchService
 }
 
 type CreateScanRequest struct {
 	Path      string `json:"path"`
+	FilePath  string `json:"file_path"`
+	Source    string `json:"source"`
 	TMDBID    int64  `json:"tmdb_id"`
 	VideoType string `json:"video_type"`
 }
@@ -35,29 +39,38 @@ type UpdateScanItemRequest struct {
 func NewScanService(
 	store *store.FileStore,
 	openListService *OpenListService,
+	localService *LocalService,
 	emosService *EmosService,
 	matchService *MatchService,
 ) *ScanService {
 	return &ScanService{
 		store:           store,
 		openListService: openListService,
+		localService:    localService,
 		emosService:     emosService,
 		matchService:    matchService,
 	}
 }
 
 func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (model.ScanSession, error) {
-	if strings.TrimSpace(req.Path) == "" {
-		return model.ScanSession{}, errors.New("path is required")
+	singleFile := strings.TrimSpace(req.FilePath)
+	if singleFile == "" && strings.TrimSpace(req.Path) == "" {
+		return model.ScanSession{}, errors.New("path or file_path is required")
 	}
 	if req.TMDBID <= 0 {
 		return model.ScanSession{}, errors.New("tmdb_id must be greater than 0")
 	}
 
+	scanPath := req.Path
+	if singleFile != "" && scanPath == "" {
+		scanPath = singleFile
+	}
+
 	now := time.Now()
 	scan := model.ScanSession{
 		ID:        utils.NewID("scan"),
-		Path:      req.Path,
+		Source:    req.Source,
+		Path:      scanPath,
 		TMDBID:    req.TMDBID,
 		VideoType: req.VideoType,
 		Status:    model.ScanSessionStatusProcessing,
@@ -66,20 +79,75 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 		UpdatedAt: now,
 	}
 
-	log.Printf("scan started: id=%s path=%s tmdb_id=%d", scan.ID, req.Path, req.TMDBID)
+	log.Printf("scan started: id=%s path=%s file_path=%s tmdb_id=%d", scan.ID, req.Path, singleFile, req.TMDBID)
 	if err := s.store.SaveScan(scan); err != nil {
 		return model.ScanSession{}, err
 	}
 
-	entries, err := s.openListService.ListVideoFiles(ctx, req.Path)
-	if err != nil {
-		log.Printf("openlist list failed: scan=%s err=%v", scan.ID, err)
-		scan.Status = model.ScanSessionStatusFailed
-		scan.UpdatedAt = time.Now()
-		_ = s.store.SaveScan(scan)
-		return model.ScanSession{}, err
+	var entries []client.OpenListEntry
+	var err error
+	isLocal := strings.EqualFold(req.Source, "local")
+	if isLocal && singleFile != "" {
+		// Local single file mode
+		localEntry, localErr := s.localService.GetFileInfo(ctx, singleFile)
+		if localErr != nil {
+			log.Printf("local file info failed: scan=%s file=%s err=%v", scan.ID, singleFile, localErr)
+			scan.Status = model.ScanSessionStatusFailed
+			scan.UpdatedAt = time.Now()
+			_ = s.store.SaveScan(scan)
+			return model.ScanSession{}, localErr
+		}
+		entries = []client.OpenListEntry{{
+			Name:  localEntry.Name,
+			Path:  localEntry.Path,
+			IsDir: false,
+			Size:  localEntry.Size,
+		}}
+		log.Printf("local single file: scan=%s file=%s size=%d", scan.ID, singleFile, localEntry.Size)
+	} else if isLocal {
+		// Local directory mode: list video files from download dir
+		_, localEntries, localErr := s.localService.Browse(ctx, req.Path)
+		if localErr != nil {
+			log.Printf("local browse failed: scan=%s path=%s err=%v", scan.ID, req.Path, localErr)
+			scan.Status = model.ScanSessionStatusFailed
+			scan.UpdatedAt = time.Now()
+			_ = s.store.SaveScan(scan)
+			return model.ScanSession{}, localErr
+		}
+		for _, e := range localEntries {
+			if e.IsDir || !IsVideoFile(e.Name) {
+				continue
+			}
+			entries = append(entries, client.OpenListEntry{
+				Name:  e.Name,
+				Path:  e.Path,
+				IsDir: false,
+				Size:  e.Size,
+			})
+		}
+		log.Printf("local list success: scan=%s videos=%d", scan.ID, len(entries))
+	} else if singleFile != "" {
+		// OpenList single file mode
+		entries, err = s.openListService.GetFileInfo(ctx, singleFile)
+		if err != nil {
+			log.Printf("openlist file info failed: scan=%s file=%s err=%v", scan.ID, singleFile, err)
+			scan.Status = model.ScanSessionStatusFailed
+			scan.UpdatedAt = time.Now()
+			_ = s.store.SaveScan(scan)
+			return model.ScanSession{}, err
+		}
+		log.Printf("openlist single file: scan=%s file=%s", scan.ID, singleFile)
+	} else {
+		entries, err = s.openListService.ListVideoFiles(ctx, req.Path)
+		if err != nil {
+			log.Printf("openlist list failed: scan=%s err=%v", scan.ID, err)
+			scan.Status = model.ScanSessionStatusFailed
+			scan.UpdatedAt = time.Now()
+			_ = s.store.SaveScan(scan)
+			return model.ScanSession{}, err
+		}
+		log.Printf("openlist list success: scan=%s videos=%d", scan.ID, len(entries))
 	}
-	log.Printf("openlist list success: scan=%s videos=%d", scan.ID, len(entries))
 
 	tree, err := s.emosService.GetVideoTree(ctx, req.TMDBID, req.VideoType)
 	if err != nil {
@@ -112,16 +180,20 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 			UpdatedAt:       now,
 		}
 
-		rawURL, rawErr := s.openListService.GetRawLink(ctx, entry.Path)
-		if rawErr != nil {
-			item.MatchStatus = model.MatchStatusInvalid
-			item.MatchReason = "获取 OpenList 直链失败: " + rawErr.Error()
-			items = append(items, item)
-			log.Printf("scan item raw link failed: scan=%s file=%s err=%v", scan.ID, entry.Path, rawErr)
-			continue
+		if isLocal {
+			// Local files: use the local path as raw_url, file is already downloaded
+			item.RawURL = entry.Name
+		} else {
+			rawURL, rawErr := s.openListService.GetRawLink(ctx, entry.Path)
+			if rawErr != nil {
+				item.MatchStatus = model.MatchStatusInvalid
+				item.MatchReason = "获取 OpenList 直链失败: " + rawErr.Error()
+				items = append(items, item)
+				log.Printf("scan item raw link failed: scan=%s file=%s err=%v", scan.ID, entry.Path, rawErr)
+				continue
+			}
+			item.RawURL = rawURL
 		}
-
-		item.RawURL = rawURL
 		item.Parsed = utils.ParseEpisodeInfo(entry.Name, entry.Path)
 		matchResult := s.matchService.Match(tree, item.Parsed)
 		item.MatchStatus = matchResult.Status
@@ -175,17 +247,48 @@ func (s *ScanService) GetScan(_ context.Context, id string) (model.ScanSession, 
 	return s.store.GetScan(id)
 }
 
-func (s *ScanService) UpdateScanItem(_ context.Context, scanID, itemID string, req UpdateScanItemRequest) (model.ScanSession, model.ScanItem, error) {
+func (s *ScanService) DeleteScan(_ context.Context, id string) error {
+	err := s.store.DeleteScan(id)
+	if err != nil {
+		log.Printf("scan delete failed: id=%s err=%v", id, err)
+		return err
+	}
+
+	log.Printf("scan deleted: id=%s", id)
+	return nil
+}
+
+func (s *ScanService) DeleteScanItem(_ context.Context, scanID, itemID string) (model.ScanSession, error) {
+	scan, err := s.store.DeleteScanItem(scanID, itemID)
+	if err != nil {
+		log.Printf("scan item delete failed: scan=%s item=%s err=%v", scanID, itemID, err)
+		return model.ScanSession{}, err
+	}
+
+	log.Printf("scan item deleted: scan=%s item=%s remaining=%d", scanID, itemID, scan.TotalCount)
+	return scan, nil
+}
+
+func (s *ScanService) UpdateScanItem(ctx context.Context, scanID, itemID string, req UpdateScanItemRequest) (model.ScanSession, model.ScanItem, error) {
 	updatedAt := time.Now()
+	var shouldFetchTitle bool
 	scan, err := s.store.UpdateScanItem(scanID, itemID, func(item *model.ScanItem) error {
 		if req.SelectedItemType != nil {
-			item.SelectedItemType = strings.TrimSpace(*req.SelectedItemType)
+			newType := strings.TrimSpace(*req.SelectedItemType)
+			if newType != "" && newType != item.SelectedItemType {
+				shouldFetchTitle = true
+			}
+			item.SelectedItemType = newType
 		}
 		if req.SelectedItemID != nil {
+			if *req.SelectedItemID > 0 && *req.SelectedItemID != item.SelectedItemID {
+				shouldFetchTitle = true
+			}
 			item.SelectedItemID = *req.SelectedItemID
 		}
 		if req.SelectedTitle != nil {
 			item.SelectedTitle = strings.TrimSpace(*req.SelectedTitle)
+			shouldFetchTitle = false
 		}
 		if req.Confirmed != nil {
 			item.Confirmed = *req.Confirmed
@@ -198,12 +301,39 @@ func (s *ScanService) UpdateScanItem(_ context.Context, scanID, itemID string, r
 		return model.ScanSession{}, model.ScanItem{}, err
 	}
 
+	var updatedItem model.ScanItem
 	for _, item := range scan.Items {
 		if item.ID == itemID {
-			log.Printf("scan item updated: scan=%s item=%s confirmed=%v", scanID, itemID, item.Confirmed)
-			return scan, item, nil
+			updatedItem = item
+			break
 		}
 	}
 
-	return model.ScanSession{}, model.ScanItem{}, errors.New("updated item not found")
+	// Auto-fetch title from Emos when item_type/item_id changed and title is empty
+	if shouldFetchTitle && strings.TrimSpace(updatedItem.SelectedItemType) != "" && updatedItem.SelectedItemID > 0 && strings.TrimSpace(updatedItem.SelectedTitle) == "" {
+		base, fetchErr := s.emosService.GetVideoBase(ctx, updatedItem.SelectedItemType, updatedItem.SelectedItemID)
+		if fetchErr != nil {
+			log.Printf("scan item auto-fetch title failed: scan=%s item=%s err=%v", scanID, itemID, fetchErr)
+		} else if strings.TrimSpace(base.Title) != "" {
+			scan, err = s.store.UpdateScanItem(scanID, itemID, func(item *model.ScanItem) error {
+				item.SelectedTitle = base.Title
+				item.UpdatedAt = time.Now()
+				return nil
+			})
+			if err != nil {
+				log.Printf("scan item auto-fetch title save failed: scan=%s item=%s err=%v", scanID, itemID, err)
+			} else {
+				for _, item := range scan.Items {
+					if item.ID == itemID {
+						updatedItem = item
+						break
+					}
+				}
+				log.Printf("scan item title auto-filled: scan=%s item=%s title=%s", scanID, itemID, base.Title)
+			}
+		}
+	}
+
+	log.Printf("scan item updated: scan=%s item=%s confirmed=%v", scanID, itemID, updatedItem.Confirmed)
+	return scan, updatedItem, nil
 }

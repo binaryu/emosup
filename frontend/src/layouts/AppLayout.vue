@@ -26,6 +26,7 @@
 const navItems = [
   { label: '配置页', to: '/config' },
   { label: 'OpenList 浏览', to: '/openlist' },
+  { label: '本地浏览', to: '/local' },
   { label: '扫描结果', to: '/scans' },
   { label: '任务队列', to: '/tasks' },
 ]

@@ -20,7 +20,9 @@ func (h *ScanHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/scans", h.listScans)
 	router.POST("/scans", h.createScan)
 	router.GET("/scans/:id", h.getScan)
-	router.PATCH("/scans/:scanId/items/:itemId", h.updateScanItem)
+	router.DELETE("/scans/:id", h.deleteScan)
+	router.PATCH("/scans/:id/items/:itemId", h.updateScanItem)
+	router.DELETE("/scans/:id/items/:itemId", h.deleteScanItem)
 }
 
 func (h *ScanHandler) listScans(c *gin.Context) {
@@ -59,6 +61,16 @@ func (h *ScanHandler) getScan(c *gin.Context) {
 	respondOK(c, scan)
 }
 
+func (h *ScanHandler) deleteScan(c *gin.Context) {
+	err := h.service.DeleteScan(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+
+	respondOK(c, gin.H{"deleted": true})
+}
+
 func (h *ScanHandler) updateScanItem(c *gin.Context) {
 	var req service.UpdateScanItemRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -66,11 +78,21 @@ func (h *ScanHandler) updateScanItem(c *gin.Context) {
 		return
 	}
 
-	_, item, err := h.service.UpdateScanItem(c.Request.Context(), c.Param("scanId"), c.Param("itemId"), req)
+	_, item, err := h.service.UpdateScanItem(c.Request.Context(), c.Param("id"), c.Param("itemId"), req)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	respondOK(c, item)
+}
+
+func (h *ScanHandler) deleteScanItem(c *gin.Context) {
+	scan, err := h.service.DeleteScanItem(c.Request.Context(), c.Param("id"), c.Param("itemId"))
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+
+	respondOK(c, scan)
 }

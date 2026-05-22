@@ -30,9 +30,10 @@ func New() (*App, error) {
 	openListClient := client.NewHTTPOpenListClient()
 	emosClient := client.NewHTTPEmosClient()
 	openListService := service.NewOpenListService(fileStore, openListClient)
+	localService := service.NewLocalService(fileStore)
 	emosService := service.NewEmosService(fileStore, emosClient)
 	matchService := service.NewMatchService()
-	scanService := service.NewScanService(fileStore, openListService, emosService, matchService)
+	scanService := service.NewScanService(fileStore, openListService, localService, emosService, matchService)
 
 	aria2Client := client.NewHTTPAria2Client()
 	taskService := service.NewTaskService(fileStore, aria2Client, openListClient)
@@ -56,6 +57,7 @@ func New() (*App, error) {
 		System:       handler.NewSystemHandler(manager),
 		Config:       handler.NewConfigHandler(configService),
 		OpenList:     handler.NewOpenListHandler(openListService),
+		Local:        handler.NewLocalHandler(localService),
 		Scan:         handler.NewScanHandler(scanService),
 		Task:         handler.NewTaskHandler(taskService),
 		FrontendDist: findFrontendDistDir(),

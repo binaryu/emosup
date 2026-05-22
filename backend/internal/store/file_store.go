@@ -146,6 +146,54 @@ func (s *FileStore) UpdateScanItem(scanID, itemID string, updater func(*model.Sc
 	return scan, nil
 }
 
+func (s *FileStore) DeleteScan(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := filepath.Join(s.root, "scans", "scan_"+id+".json")
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return os.ErrNotExist
+	}
+
+	return os.Remove(path)
+}
+
+func (s *FileStore) DeleteScanItem(scanID, itemID string) (model.ScanSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := filepath.Join(s.root, "scans", "scan_"+scanID+".json")
+	var scan model.ScanSession
+	if err := utils.ReadJSON(path, &scan); err != nil {
+		return model.ScanSession{}, err
+	}
+
+	found := false
+	filtered := make([]model.ScanItem, 0, len(scan.Items))
+	for _, item := range scan.Items {
+		if item.ID == itemID {
+			found = true
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+
+	if !found {
+		return model.ScanSession{}, os.ErrNotExist
+	}
+
+	scan.Items = filtered
+	scan.MatchedCount, scan.UnmatchedCount = recalculateScanCounts(scan.Items)
+	scan.TotalCount = len(scan.Items)
+	scan.UpdatedAt = time.Now()
+
+	if err := utils.AtomicWriteJSON(path, scan); err != nil {
+		return model.ScanSession{}, err
+	}
+
+	return scan, nil
+}
+
 func (s *FileStore) ListScans() ([]model.ScanSession, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
