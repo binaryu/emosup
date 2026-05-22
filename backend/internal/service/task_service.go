@@ -247,6 +247,21 @@ func (s *TaskService) GetNextRunnableTask(ctx context.Context) (model.Task, bool
 	return model.Task{}, false, nil
 }
 
+func (s *TaskService) BatchDeleteTasks(ctx context.Context, ids []string) (deleted []string, failed []string) {
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if err := s.DeleteTask(ctx, id); err != nil {
+			failed = append(failed, id)
+		} else {
+			deleted = append(deleted, id)
+		}
+	}
+	return deleted, failed
+}
+
 func (s *TaskService) DeleteTask(ctx context.Context, id string) error {
 	task, err := s.GetTask(ctx, id)
 	if err != nil {

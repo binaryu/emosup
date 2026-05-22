@@ -20,6 +20,7 @@ func NewTaskHandler(service *service.TaskService) *TaskHandler {
 
 func (h *TaskHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/tasks/batch-create", h.batchCreateTasks)
+	router.POST("/tasks/batch-delete", h.batchDeleteTasks)
 	router.GET("/tasks", h.listTasks)
 	router.GET("/tasks/stats", h.getTaskStats)
 	router.GET("/tasks/:id", h.getTask)
@@ -128,6 +129,19 @@ func (h *TaskHandler) deleteTask(c *gin.Context) {
 	}
 
 	respondOK(c, gin.H{"deleted": true})
+}
+
+func (h *TaskHandler) batchDeleteTasks(c *gin.Context) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	deleted, failed := h.service.BatchDeleteTasks(c.Request.Context(), req.IDs)
+	respondOK(c, gin.H{"deleted": deleted, "failed": failed})
 }
 
 func respondTaskError(c *gin.Context, err error) {
