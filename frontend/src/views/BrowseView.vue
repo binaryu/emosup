@@ -166,7 +166,7 @@ async function loadEntries(showLoading = true) {
   } finally { if (showLoading) loading.value = false }
 }
 
-function enterDirectory(path: string) { currentPath.value = path; selectedPath.value = ''; loadEntries() }
+function enterDirectory(path: string) { currentPath.value = path; selectedPath.value = ''; loadEntries(); autoDetectTMDB(path) }
 function goUp() {
   const parts = currentPath.value.replace(/\/$/, '').split('/')
   parts.pop()
@@ -222,8 +222,44 @@ function isVideoFile(name: string): boolean {
   return ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'ts', 'mpg', 'mpeg', 'webm'].includes(ext)
 }
 
+function extractShowName(path: string): string {
+  // Get the last meaningful directory name
+  const parts = path.replace(/\/$/, '').split('/')
+  const last = parts[parts.length - 1]
+  if (!last || last === '') return ''
+  // Strip common patterns: [group], season info, year
+  let name = last
+    .replace(/\[.*?\]/g, ' ')       // remove [bracketed tags]
+    .replace(/\(.*?\)/g, ' ')       // remove (parentheses)
+    .replace(/S\d{1,2}/gi, ' ')     // remove S01
+    .replace(/Season\s*\d+/gi, ' ') // remove Season 1
+    .replace(/\d{4}/g, ' ')         // remove years
+    .replace(/\s+/g, ' ')           // collapse whitespace
+    .trim()
+  return name || parts[parts.length - 2]?.replace(/\[.*?\]/g, ' ').trim() || ''
+}
+
+async function autoDetectTMDB(path: string) {
+  const name = extractShowName(path)
+  if (!name || name.length < 2) return
+  tmdbLoading.value = true
+  try {
+    const t = videoType.value || 'tv'
+    const resp = await fetch(`/api/tmdb/search?query=${encodeURIComponent(name)}&type=${t}`)
+    const data = await resp.json()
+    if (data.success && data.data?.length > 0) {
+      tmdbResults.value = data.data
+      // Auto-select first result if it's a good match
+      if (data.data.length === 1 || data.data[0].title?.includes(name)) {
+        tmdbId.value = data.data[0].tmdb_id
+      }
+    }
+  } catch { /* ignore */ }
+  finally { tmdbLoading.value = false }
+}
+
 watch(source, () => { currentPath.value = '/'; selectedPath.value = ''; loadEntries(false) })
-onMounted(loadEntries)
+onMounted(() => { loadEntries(); autoDetectTMDB(currentPath.value) })
 </script>
 
 <style scoped>
