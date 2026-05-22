@@ -1,16 +1,8 @@
 services:
   emosup:
-    image: ${EMOSUP_IMAGE:-emosup:latest}
-    # Build from local source when the image is not already present.
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/binaryu/emosup:latest
     container_name: emosup
     restart: unless-stopped
-    # Default to root so bind-mounted data/ dirs work without permission
-    # tweaks. For production, set EMOSUP_UID / EMOSUP_GID to a non-root user
-    # and chown the data directories accordingly.
-    user: "${EMOSUP_UID:-0}:${EMOSUP_GID:-0}"
     environment:
       - TZ=${TZ:-Asia/Shanghai}
     ports:
