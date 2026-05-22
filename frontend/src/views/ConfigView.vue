@@ -145,6 +145,9 @@
             <el-form-item label="最大重试">
               <el-input-number v-model="configStore.config.worker.save_retry_max_attempts" :min="1" :max="20" class="full-width" :controls="false" />
             </el-form-item>
+            <el-form-item label="TMDB API Key">
+              <el-input v-model="configStore.config.worker.tmdb_api_key" placeholder="api.themoviedb.org 申请" />
+            </el-form-item>
           </div>
         </el-form>
       </el-card>

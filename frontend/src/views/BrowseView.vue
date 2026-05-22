@@ -147,7 +147,7 @@ const loading = ref(false)
 const currentPath = ref('/')
 const displayPath = ref('/')
 const selectedPath = ref('')
-const tmdbId = ref<number>(0)
+const tmdbId = ref<number | ''>('')
 const videoType = ref('')
 const entries = ref<OpenListEntry[]>([])
 const selectedFiles = ref<OpenListEntry[]>([])
@@ -197,7 +197,7 @@ async function searchTMDB(query: string) {
 }
 
 async function doScan(path: string, filePath = '', filePaths: string[] = []) {
-  const created = await scanStore.createScan(path, tmdbId.value, videoType.value, filePath, source.value, filePaths)
+  const created = await scanStore.createScan(path, Number(tmdbId.value) || 0, videoType.value, filePath, source.value, filePaths)
   if (created) {
     ElMessage.success(`扫描完成，${created.total_count} 个视频文件`)
     router.push('/scans')
@@ -206,19 +206,19 @@ async function doScan(path: string, filePath = '', filePaths: string[] = []) {
 
 async function scanDir() {
   if (!selectedPath.value) return
-  if (tmdbId.value <= 0) { ElMessage.warning('请先在上方搜索影片'); return }
+  if (!tmdbId.value || Number(tmdbId.value) <= 0) { ElMessage.warning('请先在上方搜索影片'); return }
   try { await doScan(selectedPath.value) }
   catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
 }
 
 async function scanSingleFile(row: OpenListEntry) {
-  if (tmdbId.value <= 0) { ElMessage.warning('请先搜索影片或手动填写 TMDB ID'); return }
+  if (!tmdbId.value || Number(tmdbId.value) <= 0) { ElMessage.warning('请先搜索影片或手动填写 TMDB ID'); return }
   try { await doScan(row.path, row.path) }
   catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
 }
 
 async function scanSelectedFiles() {
-  if (tmdbId.value <= 0) { ElMessage.warning('请先在上方搜索影片'); return }
+  if (!tmdbId.value || Number(tmdbId.value) <= 0) { ElMessage.warning('请先在上方搜索影片'); return }
   try { await doScan(currentPath.value, '', selectedFiles.value.map(f => f.path)) }
   catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
 }

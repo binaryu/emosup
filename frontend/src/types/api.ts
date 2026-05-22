@@ -48,6 +48,7 @@ export interface WorkerConfig {
   upload_chunk_size_mb: number
   save_retry_interval_seconds: number
   save_retry_max_attempts: number
+  tmdb_api_key: string
 }
 
 export interface AppConfig {

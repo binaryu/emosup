@@ -31,6 +31,7 @@ const defaultConfig: AppConfig = {
     upload_chunk_size_mb: 8,
     save_retry_interval_seconds: 25,
     save_retry_max_attempts: 8,
+    tmdb_api_key: '',
   },
 }
 
