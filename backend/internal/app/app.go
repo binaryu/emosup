@@ -39,6 +39,7 @@ func New() (*App, error) {
 	taskService := service.NewTaskService(fileStore, aria2Client, openListClient)
 	downloadExecutor := service.NewDownloadExecutor(taskService, aria2Client)
 	uploadExecutor := service.NewUploadExecutor(taskService, emosClient)
+	eventBus := scheduler.NewEventBus()
 
 	cfg, err := configService.GetConfig(context.Background())
 	if err != nil {
@@ -51,6 +52,7 @@ func New() (*App, error) {
 		uploadExecutor,
 		time.Duration(cfg.Worker.PollIntervalSeconds)*time.Second,
 		cfg.Worker.MaxConcurrency,
+		eventBus,
 	)
 
 	router := handler.NewRouter(handler.RouterDependencies{
@@ -60,6 +62,7 @@ func New() (*App, error) {
 		OpenList:     handler.NewOpenListHandler(openListService),
 		Local:        handler.NewLocalHandler(localService),
 		Emos:         handler.NewEmosHandler(emosService),
+		Events:       handler.NewEventsHandler(eventBus),
 		Scan:         handler.NewScanHandler(scanService),
 		Task:         handler.NewTaskHandler(taskService),
 		FrontendDist: findFrontendDistDir(),

@@ -24,6 +24,7 @@ type Manager struct {
 	uploadExecutor   *service.UploadExecutor
 	pollInterval     time.Duration
 	maxConcurrency   int
+	eventBus         *EventBus
 
 	mu            sync.RWMutex
 	running       bool
@@ -38,6 +39,7 @@ func NewManager(
 	uploadExecutor *service.UploadExecutor,
 	pollInterval time.Duration,
 	maxConcurrency int,
+	eventBus *EventBus,
 ) *Manager {
 	if pollInterval <= 0 {
 		pollInterval = 5 * time.Second
@@ -52,6 +54,7 @@ func NewManager(
 		uploadExecutor:   uploadExecutor,
 		pollInterval:     pollInterval,
 		maxConcurrency:   maxConcurrency,
+		eventBus:         eventBus,
 		activeTasks:      make(map[string]string),
 	}
 }
@@ -272,6 +275,9 @@ func (m *Manager) setActiveTask(taskID string, stage string) {
 		now := time.Now()
 		m.startedAt = &now
 	}
+	if m.eventBus != nil {
+		m.eventBus.Publish(TaskEvent{TaskID: taskID, Status: stage})
+	}
 }
 
 func (m *Manager) clearActiveTask(taskID string) {
@@ -280,6 +286,9 @@ func (m *Manager) clearActiveTask(taskID string) {
 	delete(m.activeTasks, taskID)
 	if len(m.activeTasks) == 0 {
 		m.startedAt = nil
+	}
+	if m.eventBus != nil {
+		m.eventBus.Publish(TaskEvent{TaskID: taskID, Status: "done"})
 	}
 }
 

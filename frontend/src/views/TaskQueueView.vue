@@ -173,6 +173,26 @@ const runtimeDescription = computed(() => {
 })
 
 let timer: number | undefined
+let eventSource: EventSource | undefined
+
+function connectSSE() {
+  if (eventSource) return
+  eventSource = new EventSource('/api/tasks/events')
+  eventSource.onmessage = () => {
+    // Refresh data when any task event arrives
+    void Promise.all([
+      taskStore.fetchTasks({ status: filterStatus.value, page: taskStore.page }),
+      taskStore.fetchTaskStats(),
+      taskStore.fetchRuntimeStatus(),
+    ])
+  }
+  eventSource.onerror = () => {
+    eventSource?.close()
+    eventSource = undefined
+    // Fallback to polling if SSE fails
+    if (!timer) timer = window.setInterval(refreshData, 4000)
+  }
+}
 
 function canRetry(status: TaskStatus) { return ['canceled', 'download_failed', 'upload_failed'].includes(status) }
 function canCancel(status: TaskStatus) { return ['queued', 'downloading', 'upload_pending', 'uploading', 'saving', 'download_failed', 'upload_failed'].includes(status) }
@@ -260,19 +280,25 @@ async function handlePageChange(page: number) {
 
 onMounted(() => {
   reload()
-  function startPolling() {
-    if (timer) return
-    timer = window.setInterval(refreshData, 4000)
-  }
-  function stopPolling() {
-    if (timer) { window.clearInterval(timer); timer = undefined }
-  }
+  connectSSE()
+
   function onVisibilityChange() {
-    if (document.hidden) { stopPolling() } else { reload(); startPolling() }
+    if (document.hidden) {
+      eventSource?.close()
+      eventSource = undefined
+      if (timer) { window.clearInterval(timer); timer = undefined }
+    } else {
+      connectSSE()
+    }
   }
-  startPolling()
+
   document.addEventListener('visibilitychange', onVisibilityChange)
-  onUnmounted(() => { stopPolling(); document.removeEventListener('visibilitychange', onVisibilityChange) })
+  onUnmounted(() => {
+    eventSource?.close()
+    eventSource = undefined
+    if (timer) { window.clearInterval(timer); timer = undefined }
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+  })
 })
 </script>
 
