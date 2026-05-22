@@ -174,23 +174,26 @@ const runtimeDescription = computed(() => {
 
 let timer: number | undefined
 let eventSource: EventSource | undefined
+let progressTimer: number | undefined
 
 function connectSSE() {
   if (eventSource) return
   eventSource = new EventSource('/api/tasks/events')
   eventSource.onmessage = () => {
-    // Refresh data when any task event arrives
-    void Promise.all([
-      taskStore.fetchTasks({ status: filterStatus.value, page: taskStore.page }),
-      taskStore.fetchTaskStats(),
-      taskStore.fetchRuntimeStatus(),
-    ])
+    refreshData()
   }
   eventSource.onerror = () => {
     eventSource?.close()
     eventSource = undefined
-    // Fallback to polling if SSE fails
-    if (!timer) timer = window.setInterval(refreshData, 4000)
+  }
+  // Also poll every 5s for progress updates during active tasks
+  if (!progressTimer) {
+    progressTimer = window.setInterval(() => {
+      void Promise.all([
+        taskStore.fetchTasks({ status: filterStatus.value, page: taskStore.page }),
+        taskStore.fetchRuntimeStatus(),
+      ])
+    }, 5000)
   }
 }
 
@@ -286,6 +289,7 @@ onMounted(() => {
     if (document.hidden) {
       eventSource?.close()
       eventSource = undefined
+      if (progressTimer) { window.clearInterval(progressTimer); progressTimer = undefined }
       if (timer) { window.clearInterval(timer); timer = undefined }
     } else {
       connectSSE()
@@ -296,6 +300,7 @@ onMounted(() => {
   onUnmounted(() => {
     eventSource?.close()
     eventSource = undefined
+    if (progressTimer) { window.clearInterval(progressTimer); progressTimer = undefined }
     if (timer) { window.clearInterval(timer); timer = undefined }
     document.removeEventListener('visibilitychange', onVisibilityChange)
   })
