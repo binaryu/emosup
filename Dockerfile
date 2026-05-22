@@ -2,7 +2,7 @@ FROM node:20-alpine AS frontend-build
 WORKDIR /src/frontend
 
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm config set registry https://registry.npmjs.org/ && npm ci
 
 COPY frontend/ ./
 RUN npm run build
