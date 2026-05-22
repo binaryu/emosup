@@ -328,6 +328,13 @@ async function createSingleTask(scanId: string, row: ScanItem) {
     const result = await taskStore.batchCreateTasks(scanId, [row.id])
     if (result.created.length) {
       ElMessage.success('已加入任务队列')
+      // Remove from local scan data
+      if (scan) {
+        scan.items = scan.items.filter((item) => item.id !== row.id)
+        scan.total_count = scan.items.length
+        scan.matched_count = scan.items.filter((i) => i.match_status === 'matched').length
+        scan.unmatched_count = scan.total_count - scan.matched_count
+      }
     }
     if (result.failed.length) {
       await ElMessageBox.alert(
@@ -354,6 +361,16 @@ async function createTasks(scanId: string) {
     const result = await taskStore.batchCreateTasks(scanId, itemIds)
     tableRefs[scanId]?.clearSelection?.()
     selectedItemIdsByScan[scanId] = []
+
+    // Remove created items from local scan data
+    const scan = scanStore.scans.find((s) => s.id === scanId)
+    if (scan) {
+      const createdIds = new Set(result.created.map((c) => c.item_id))
+      scan.items = scan.items.filter((item) => !createdIds.has(item.id))
+      scan.total_count = scan.items.length
+      scan.matched_count = scan.items.filter((i) => i.match_status === 'matched').length
+      scan.unmatched_count = scan.total_count - scan.matched_count
+    }
 
     if (result.created.length) {
       ElMessage.success(`已创建 ${result.created.length} 个任务`)

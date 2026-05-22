@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -149,6 +150,13 @@ func (s *TaskService) BatchCreateTasks(_ context.Context, req BatchCreateTasksRe
 
 		activeTaskByItemID[itemID] = struct{}{}
 		result.Created = append(result.Created, CreatedTaskItem{TaskID: task.ID, ItemID: itemID})
+	}
+
+	// Auto-remove successfully processed items from the scan session
+	for _, created := range result.Created {
+		if _, err := s.store.DeleteScanItem(scan.ID, created.ItemID); err != nil {
+			log.Printf("auto-cleanup scan item failed: scan=%s item=%s err=%v", scan.ID, created.ItemID, err)
+		}
 	}
 
 	return result, nil
