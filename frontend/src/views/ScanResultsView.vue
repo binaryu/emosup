@@ -56,7 +56,7 @@
             :data="scan.items"
             row-key="id"
             stripe
-            @selection-change="onSelectionChange(scan.id)"
+            @selection-change="getSelectionHandler(scan.id)"
           >
             <el-table-column type="expand" width="48">
               <template #default="{ row }">
@@ -226,14 +226,19 @@ function bindTableRef(scanId: string) {
   }
 }
 
-function handleSelectionChange(scanId: string, rows: ScanItem[]) {
-  selectedItemIdsByScan[scanId] = rows.map((row) => row.id)
+const selectionHandlers: Record<string, (rows: ScanItem[]) => void> = {}
+
+function getSelectionHandler(scanId: string) {
+  if (!selectionHandlers[scanId]) {
+    selectionHandlers[scanId] = (rows: ScanItem[]) => {
+      handleSelectionChange(scanId, rows)
+    }
+  }
+  return selectionHandlers[scanId]
 }
 
-function onSelectionChange(scanId: string) {
-  return (rows: ScanItem[]) => {
-    handleSelectionChange(scanId, rows)
-  }
+function handleSelectionChange(scanId: string, rows: ScanItem[]) {
+  selectedItemIdsByScan[scanId] = rows.map((row) => row.id)
 }
 
 function getSelectedCount(scanId: string) {
