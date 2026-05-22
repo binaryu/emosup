@@ -203,16 +203,26 @@ async function doScan(path: string, filePath = '', filePaths: string[] = []) {
 
 async function scanDir() {
   if (!selectedPath.value) return
+  if (tmdbId.value <= 0) { ElMessage.warning('请先在上方搜索影片'); return }
   try { await doScan(selectedPath.value) }
   catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
 }
 
 async function scanSingleFile(row: OpenListEntry) {
+  const parentPath = row.path.substring(0, row.path.lastIndexOf('/')) || '/'
+  if (tmdbId.value <= 0) {
+    await autoDetectTMDB(parentPath)
+    if (tmdbId.value <= 0) {
+      ElMessage.warning('未能自动识别影片，请在上方搜索框中搜索')
+      return
+    }
+  }
   try { await doScan(row.path, row.path) }
   catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
 }
 
 async function scanSelectedFiles() {
+  if (tmdbId.value <= 0) { ElMessage.warning('请先在上方搜索影片'); return }
   try { await doScan(currentPath.value, '', selectedFiles.value.map(f => f.path)) }
   catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
 }
