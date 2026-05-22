@@ -36,11 +36,14 @@
               <el-input
                 v-model="tmdbQuery"
                 placeholder="输入剧名搜索，如 Ao Haru Ride"
-                @input="searchTMDB"
                 clearable
+                @keyup.enter="doSearchTMDB"
               >
                 <template #prefix>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                </template>
+                <template #append>
+                  <el-button :loading="tmdbLoading" @click="doSearchTMDB" icon="Search" />
                 </template>
               </el-input>
             </el-form-item>
@@ -196,21 +199,17 @@ function goUp() {
 function selectForScan(path: string) { selectedPath.value = path }
 function onFileSelectionChange(rows: OpenListEntry[]) { selectedFiles.value = rows }
 
-let tmdbTimer: ReturnType<typeof setTimeout> | undefined
-async function searchTMDB(query: string) {
-  tmdbQuery.value = query
+async function doSearchTMDB() {
+  const query = tmdbQuery.value.trim()
   if (!query || query.length < 2) { tmdbResults.value = []; return }
-  if (tmdbTimer) clearTimeout(tmdbTimer)
-  tmdbTimer = setTimeout(async () => {
-    tmdbLoading.value = true
-    try {
-      const t = videoType.value || 'tv'
-      const resp = await fetch(`/api/tmdb/search?query=${encodeURIComponent(query)}&type=${t}`)
-      const data = await resp.json()
-      tmdbResults.value = data.success ? data.data : []
-    } catch { tmdbResults.value = [] }
-    finally { tmdbLoading.value = false }
-  }, 400)
+  tmdbLoading.value = true
+  try {
+    const t = videoType.value || 'tv'
+    const resp = await fetch(`/api/tmdb/search?query=${encodeURIComponent(query)}&type=${t}`)
+    const data = await resp.json()
+    tmdbResults.value = data.success ? data.data : []
+  } catch { tmdbResults.value = [] }
+  finally { tmdbLoading.value = false }
 }
 
 async function doScan(path: string, filePath = '', filePaths: string[] = []) {
@@ -266,7 +265,6 @@ async function autoDetectTMDB(path: string) {
   const name = extractShowName(path)
   if (!name || name.length < 2) return
   tmdbQuery.value = name
-  await searchTMDB(name)
 }
 
 watch(source, () => { currentPath.value = '/'; selectedPath.value = ''; loadEntries(false) })
