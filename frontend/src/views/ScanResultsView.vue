@@ -29,10 +29,10 @@
             </div>
 
             <div class="scan-actions">
-              <span class="selection-text">已选 {{ getSelectedCount(scan.id) }} 项</span>
+              <span class="selection-text">已选 {{ (selectedItemIdsByScan[scan.id] || []).length }} 项</span>
               <el-button
                 type="primary"
-                :disabled="getSelectedCount(scan.id) === 0"
+                :disabled="(selectedItemIdsByScan[scan.id] || []).length === 0"
                 :loading="taskStore.loading"
                 @click="createTasks(scan.id)"
               >
@@ -52,11 +52,10 @@
 
         <div class="table-scroll">
           <el-table
-            :ref="bindTableRef(scan.id)"
             :data="scan.items"
             row-key="id"
             stripe
-            @selection-change="getSelectionHandler(scan.id)"
+            @select="(rows: ScanItem[]) => { selectedItemIdsByScan = { ...selectedItemIdsByScan, [scan.id]: rows.map(r => r.id) } }"
           >
             <el-table-column type="expand" width="48">
               <template #default="{ row }">
@@ -159,7 +158,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 
@@ -175,7 +174,6 @@ const scanStore = useScanStore()
 const taskStore = useTaskStore()
 
 const selectedItemIdsByScan = ref<Record<string, string[]>>({})
-const tableRefs = reactive<Record<string, { clearSelection?: () => void } | null>>({})
 
 function canCreateTask(row: ScanItem, scanSource?: string) {
   const isLocal = scanSource === 'local'
@@ -214,34 +212,6 @@ async function fetchTitle(row: ScanItem) {
       // ignore network errors
     }
   }, 300)
-}
-
-function setTableRef(scanId: string, table: { clearSelection?: () => void } | null) {
-  tableRefs[scanId] = table
-}
-
-function bindTableRef(scanId: string) {
-  return (table: { clearSelection?: () => void } | null) => {
-    setTableRef(scanId, table)
-  }
-}
-
-const selectionHandlers: Record<string, (rows: ScanItem[]) => void> = {}
-
-function getSelectionHandler(scanId: string) {
-  if (!selectionHandlers[scanId]) {
-    selectionHandlers[scanId] = (rows: ScanItem[]) => {
-      selectedItemIdsByScan.value = {
-        ...selectedItemIdsByScan.value,
-        [scanId]: rows.map((row) => row.id),
-      }
-    }
-  }
-  return selectionHandlers[scanId]
-}
-
-function getSelectedCount(scanId: string) {
-  return selectedItemIdsByScan.value[scanId]?.length ?? 0
 }
 
 async function persistItem(scanId: string, itemId: string, row: ScanItem, showToast = true) {
@@ -363,7 +333,6 @@ async function createTasks(scanId: string) {
 
   try {
     const result = await taskStore.batchCreateTasks(scanId, itemIds)
-    tableRefs[scanId]?.clearSelection?.()
     selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scanId]: [] }
 
     // Remove created items from local scan data
