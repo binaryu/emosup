@@ -40,6 +40,7 @@ func New() (*App, error) {
 	downloadExecutor := service.NewDownloadExecutor(taskService, aria2Client)
 	uploadExecutor := service.NewUploadExecutor(taskService, emosClient)
 	eventBus := scheduler.NewEventBus()
+	tmdbClient := client.NewTMDBClient()
 
 	cfg, err := configService.GetConfig(context.Background())
 	if err != nil {
@@ -63,6 +64,7 @@ func New() (*App, error) {
 		Local:        handler.NewLocalHandler(localService),
 		Emos:         handler.NewEmosHandler(emosService),
 		Events:       handler.NewEventsHandler(eventBus),
+		TMDB:         handler.NewTMDBHandler(tmdbClient, fileStore),
 		Scan:         handler.NewScanHandler(scanService),
 		Task:         handler.NewTaskHandler(taskService),
 		FrontendDist: findFrontendDistDir(),

@@ -1,8 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import ConfigView from '@/views/ConfigView.vue'
-import OpenListView from '@/views/OpenListView.vue'
-import LocalBrowseView from '@/views/LocalBrowseView.vue'
+import BrowseView from '@/views/BrowseView.vue'
 import ScanResultsView from '@/views/ScanResultsView.vue'
 import TaskQueueView from '@/views/TaskQueueView.vue'
 import TaskDetailView from '@/views/TaskDetailView.vue'
@@ -24,14 +23,9 @@ const router = createRouter({
           component: ConfigView,
         },
         {
-          path: 'openlist',
-          name: 'openlist',
-          component: OpenListView,
-        },
-        {
-          path: 'local',
-          name: 'local',
-          component: LocalBrowseView,
+          path: 'browse',
+          name: 'browse',
+          component: BrowseView,
         },
         {
           path: 'scans',

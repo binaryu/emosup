@@ -35,11 +35,12 @@ type EmosConfig struct {
 }
 
 type WorkerConfig struct {
-	PollIntervalSeconds      int `json:"poll_interval_seconds"`
-	MaxConcurrency           int `json:"max_concurrency"`
-	UploadChunkSizeMB        int `json:"upload_chunk_size_mb"`
-	SaveRetryIntervalSeconds int `json:"save_retry_interval_seconds"`
-	SaveRetryMaxAttempts     int `json:"save_retry_max_attempts"`
+	PollIntervalSeconds      int    `json:"poll_interval_seconds"`
+	MaxConcurrency           int    `json:"max_concurrency"`
+	UploadChunkSizeMB        int    `json:"upload_chunk_size_mb"`
+	SaveRetryIntervalSeconds int    `json:"save_retry_interval_seconds"`
+	SaveRetryMaxAttempts     int    `json:"save_retry_max_attempts"`
+	TMDBAPIKey               string `json:"tmdb_api_key"`
 }
 
 func DefaultAppConfig() AppConfig {

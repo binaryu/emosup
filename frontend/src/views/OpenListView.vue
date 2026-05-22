@@ -101,12 +101,34 @@
                 </el-input>
               </el-form-item>
               
+              <el-form-item label="搜索影片">
+                <el-select
+                  v-model="tmdbId"
+                  filterable
+                  remote
+                  reserve-keyword
+                  placeholder="输入剧名/电影名搜索 TMDB"
+                  :remote-method="searchTMDB"
+                  :loading="tmdbLoading"
+                  value-key="tmdb_id"
+                  style="width: 100%"
+                  clearable
+                >
+                  <el-option
+                    v-for="item in tmdbResults"
+                    :key="item.tmdb_id"
+                    :label="`${item.title}${item.year ? ' (' + item.year + ')' : ''}`"
+                    :value="item.tmdb_id"
+                  >
+                    <div style="display: flex; justify-content: space-between; align-items: center">
+                      <span>{{ item.title }}</span>
+                      <span style="color: var(--text-subtle); font-size: 12px; margin-left: 8px">{{ item.year || '' }}</span>
+                    </div>
+                  </el-option>
+                </el-select>
+              </el-form-item>
+
               <el-row :gutter="16">
-                <el-col :span="12">
-                  <el-form-item label="TMDB ID">
-                    <el-input-number v-model="tmdbId" :min="1" style="width: 100%" controls-position="right" />
-                  </el-form-item>
-                </el-col>
                 <el-col :span="12">
                   <el-form-item label="类型">
                     <el-select v-model="videoType" clearable placeholder="自动匹配" style="width: 100%">
@@ -151,6 +173,24 @@ const tmdbId = ref<number>(1100)
 const videoType = ref('')
 const entries = ref<OpenListEntry[]>([])
 const selectedFiles = ref<OpenListEntry[]>([])
+const tmdbLoading = ref(false)
+const tmdbResults = ref<{ tmdb_id: number; title: string; year: string; type: string }[]>([])
+
+let tmdbTimer: ReturnType<typeof setTimeout> | undefined
+async function searchTMDB(query: string) {
+  if (!query || query.length < 2) { tmdbResults.value = []; return }
+  if (tmdbTimer) clearTimeout(tmdbTimer)
+  tmdbTimer = setTimeout(async () => {
+    tmdbLoading.value = true
+    try {
+      const t = videoType.value || 'tv'
+      const resp = await fetch(`/api/tmdb/search?query=${encodeURIComponent(query)}&type=${t}`)
+      const data = await resp.json()
+      tmdbResults.value = data.success ? data.data : []
+    } catch { tmdbResults.value = [] }
+    finally { tmdbLoading.value = false }
+  }, 400)
+}
 
 const breadcrumbs = computed(() => {
   if (currentPath.value === '/') return ['']
