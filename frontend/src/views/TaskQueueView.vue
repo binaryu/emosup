@@ -285,22 +285,44 @@ async function handlePageChange(page: number) {
 
 onMounted(() => {
   reload()
-  timer = window.setInterval(() => {
-    void Promise.all([
-      taskStore.fetchTasks({
-        status: filterStatus.value,
-        page: taskStore.page,
-      }),
-      taskStore.fetchTaskStats(),
-      taskStore.fetchRuntimeStatus(),
-    ])
-  }, 4000)
-})
 
-onUnmounted(() => {
-  if (timer) {
-    window.clearInterval(timer)
+  function startPolling() {
+    if (timer) return
+    timer = window.setInterval(() => {
+      void Promise.all([
+        taskStore.fetchTasks({
+          status: filterStatus.value,
+          page: taskStore.page,
+        }),
+        taskStore.fetchTaskStats(),
+        taskStore.fetchRuntimeStatus(),
+      ])
+    }, 4000)
   }
+
+  function stopPolling() {
+    if (timer) {
+      window.clearInterval(timer)
+      timer = undefined
+    }
+  }
+
+  function onVisibilityChange() {
+    if (document.hidden) {
+      stopPolling()
+    } else {
+      reload()
+      startPolling()
+    }
+  }
+
+  startPolling()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+
+  onUnmounted(() => {
+    stopPolling()
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+  })
 })
 </script>
 
