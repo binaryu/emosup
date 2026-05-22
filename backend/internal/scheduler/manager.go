@@ -11,9 +11,10 @@ import (
 )
 
 type RuntimeStatus struct {
-	SchedulerRunning bool       `json:"scheduler_running"`
-	CurrentTaskID    string     `json:"current_task_id"`
-	CurrentStage     string     `json:"current_stage"`
+	SchedulerRunning bool     `json:"scheduler_running"`
+	CurrentTaskIDs   []string `json:"current_task_ids"`
+	CurrentStage     string   `json:"current_stage"`
+	MaxConcurrency   int      `json:"max_concurrency"`
 	StartedAt        *time.Time `json:"started_at,omitempty"`
 }
 
@@ -22,11 +23,11 @@ type Manager struct {
 	downloadExecutor *service.DownloadExecutor
 	uploadExecutor   *service.UploadExecutor
 	pollInterval     time.Duration
+	maxConcurrency   int
 
 	mu            sync.RWMutex
 	running       bool
-	currentTaskID string
-	currentStage  string
+	activeTasks   map[string]string // taskID -> stage
 	startedAt     *time.Time
 	lastRecovery  RecoverySummary
 }
@@ -36,9 +37,13 @@ func NewManager(
 	downloadExecutor *service.DownloadExecutor,
 	uploadExecutor *service.UploadExecutor,
 	pollInterval time.Duration,
+	maxConcurrency int,
 ) *Manager {
 	if pollInterval <= 0 {
 		pollInterval = 5 * time.Second
+	}
+	if maxConcurrency <= 0 {
+		maxConcurrency = 1
 	}
 
 	return &Manager{
@@ -46,6 +51,8 @@ func NewManager(
 		downloadExecutor: downloadExecutor,
 		uploadExecutor:   uploadExecutor,
 		pollInterval:     pollInterval,
+		maxConcurrency:   maxConcurrency,
+		activeTasks:      make(map[string]string),
 	}
 }
 
@@ -80,21 +87,19 @@ func (m *Manager) Start(ctx context.Context) {
 
 func (m *Manager) RuntimeStatus() RuntimeStatus {
 	m.mu.RLock()
-	runtime := RuntimeStatus{
+	defer m.mu.RUnlock()
+
+	taskIDs := make([]string, 0, len(m.activeTasks))
+	for id := range m.activeTasks {
+		taskIDs = append(taskIDs, id)
+	}
+
+	return RuntimeStatus{
 		SchedulerRunning: m.running,
-		CurrentTaskID:    m.currentTaskID,
-		CurrentStage:     m.currentStage,
+		CurrentTaskIDs:   taskIDs,
+		MaxConcurrency:   m.maxConcurrency,
 		StartedAt:        m.startedAt,
 	}
-	m.mu.RUnlock()
-
-	if runtime.CurrentTaskID != "" {
-		if task, err := m.taskService.GetTask(context.Background(), runtime.CurrentTaskID); err == nil {
-			runtime.CurrentStage = stageFromStatus(task.Status)
-		}
-	}
-
-	return runtime
 }
 
 func (m *Manager) RecoverySummary() RecoverySummary {
@@ -104,20 +109,29 @@ func (m *Manager) RecoverySummary() RecoverySummary {
 }
 
 func (m *Manager) tick(ctx context.Context) error {
-	if m.CurrentTaskID() != "" {
+	m.mu.Lock()
+	activeCount := len(m.activeTasks)
+	maxConc := m.maxConcurrency
+	m.mu.Unlock()
+
+	if activeCount >= maxConc {
 		return nil
 	}
 
-	task, found, err := m.taskService.GetNextRunnableTask(ctx)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return nil
+	// Pick up to (maxConcurrency - activeCount) tasks
+	for i := 0; i < maxConc-activeCount; i++ {
+		task, found, err := m.taskService.GetNextRunnableTask(ctx)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return nil
+		}
+
+		log.Printf("scheduler picked task: %s status=%s", task.ID, task.Status)
+		m.startTask(ctx, task)
 	}
 
-	log.Printf("scheduler picked task: %s status=%s", task.ID, task.Status)
-	m.startTask(ctx, task)
 	return nil
 }
 
@@ -196,10 +210,10 @@ func (m *Manager) recover(ctx context.Context) (RecoverySummary, error) {
 
 func (m *Manager) startTask(ctx context.Context, task model.Task) {
 	stage := stageFromStatus(task.Status)
-	m.setCurrentTask(task.ID, stage)
+	m.setActiveTask(task.ID, stage)
 
 	go func() {
-		defer m.clearCurrentTask()
+		defer m.clearActiveTask(task.ID)
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				log.Printf("task execution panic recovered: task=%s stage=%s panic=%v", task.ID, stage, recovered)
@@ -228,29 +242,27 @@ func (m *Manager) startTask(ctx context.Context, task model.Task) {
 	}()
 }
 
-func (m *Manager) CurrentTaskID() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.currentTaskID
-}
-
-func (m *Manager) setCurrentTask(taskID string, stage string) {
+func (m *Manager) setActiveTask(taskID string, stage string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	now := time.Now()
-	m.currentTaskID = taskID
-	m.currentStage = stage
-	m.startedAt = &now
+	if m.activeTasks == nil {
+		m.activeTasks = make(map[string]string)
+	}
+	m.activeTasks[taskID] = stage
+	if m.startedAt == nil {
+		now := time.Now()
+		m.startedAt = &now
+	}
 }
 
-func (m *Manager) clearCurrentTask() {
+func (m *Manager) clearActiveTask(taskID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	m.currentTaskID = ""
-	m.currentStage = ""
-	m.startedAt = nil
+	delete(m.activeTasks, taskID)
+	if len(m.activeTasks) == 0 {
+		m.startedAt = nil
+	}
 }
 
 func (m *Manager) setRecoverySummary(summary RecoverySummary) {

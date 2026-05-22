@@ -77,6 +77,9 @@
             <el-form-item label="Poll Interval">
               <el-input-number v-model="configStore.config.worker.poll_interval_seconds" :min="1" />
             </el-form-item>
+            <el-form-item label="最大并发">
+              <el-input-number v-model="configStore.config.worker.max_concurrency" :min="1" :max="20" />
+            </el-form-item>
             <el-form-item label="Chunk Size MB">
               <el-input-number v-model="configStore.config.worker.upload_chunk_size_mb" :min="1" />
             </el-form-item>

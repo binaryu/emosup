@@ -36,6 +36,7 @@ type EmosConfig struct {
 
 type WorkerConfig struct {
 	PollIntervalSeconds      int `json:"poll_interval_seconds"`
+	MaxConcurrency           int `json:"max_concurrency"`
 	UploadChunkSizeMB        int `json:"upload_chunk_size_mb"`
 	SaveRetryIntervalSeconds int `json:"save_retry_interval_seconds"`
 	SaveRetryMaxAttempts     int `json:"save_retry_max_attempts"`
@@ -59,6 +60,7 @@ func DefaultAppConfig() AppConfig {
 		},
 		Worker: WorkerConfig{
 			PollIntervalSeconds:      5,
+			MaxConcurrency:           1,
 			UploadChunkSizeMB:        8,
 			SaveRetryIntervalSeconds: 25,
 			SaveRetryMaxAttempts:     8,
@@ -107,6 +109,9 @@ func NormalizeAppConfig(cfg AppConfig) AppConfig {
 	}
 	if cfg.Worker.SaveRetryMaxAttempts <= 0 {
 		cfg.Worker.SaveRetryMaxAttempts = defaults.Worker.SaveRetryMaxAttempts
+	}
+	if cfg.Worker.MaxConcurrency <= 0 {
+		cfg.Worker.MaxConcurrency = defaults.Worker.MaxConcurrency
 	}
 
 	return cfg

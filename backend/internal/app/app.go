@@ -50,6 +50,7 @@ func New() (*App, error) {
 		downloadExecutor,
 		uploadExecutor,
 		time.Duration(cfg.Worker.PollIntervalSeconds)*time.Second,
+		cfg.Worker.MaxConcurrency,
 	)
 
 	router := handler.NewRouter(handler.RouterDependencies{

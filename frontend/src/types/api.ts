@@ -44,6 +44,7 @@ export interface EmosConfig {
 
 export interface WorkerConfig {
   poll_interval_seconds: number
+  max_concurrency: number
   upload_chunk_size_mb: number
   save_retry_interval_seconds: number
   save_retry_max_attempts: number
@@ -211,8 +212,9 @@ export interface TaskStats {
 
 export interface RuntimeStatus {
   scheduler_running: boolean
-  current_task_id: string
+  current_task_ids: string[]
   current_stage: string
+  max_concurrency: number
   started_at?: string
 }
 

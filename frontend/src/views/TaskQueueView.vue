@@ -172,13 +172,12 @@ const statuses: TaskStatus[] = [
 ]
 
 const runtimeDescription = computed(() => {
-  if (!taskStore.runtime?.current_task_id) {
-    return '当前没有正在执行的任务'
+  if (!taskStore.runtime) return ''
+  const ids = taskStore.runtime.current_task_ids
+  if (!ids?.length) {
+    return `最大并发：${taskStore.runtime.max_concurrency}，当前没有正在执行的任务`
   }
-
-  const stage = taskStore.runtime.current_stage ? `，阶段：${taskStore.runtime.current_stage}` : ''
-  const startedAt = taskStore.runtime.started_at ? `，开始于：${formatTime(taskStore.runtime.started_at)}` : ''
-  return `当前任务：${taskStore.runtime.current_task_id}${stage}${startedAt}`
+  return `最大并发：${taskStore.runtime.max_concurrency}，正在执行：${ids.join(', ')}`
 })
 
 let timer: number | undefined
