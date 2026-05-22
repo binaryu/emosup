@@ -17,7 +17,7 @@ export const useScanStore = defineStore('scans', {
         this.loading = false
       }
     },
-    async createScan(path: string, tmdbId: number, videoType = '', filePath = '', source = '') {
+    async createScan(path: string, tmdbId: number, videoType = '', filePath = '', source = '', filePaths: string[] = []) {
       this.loading = true
       try {
         const data = await parseApiResponse<ScanSession>(
@@ -28,10 +28,11 @@ export const useScanStore = defineStore('scans', {
             },
             body: JSON.stringify({
               path,
-              file_path: filePath,
-              source,
+              file_path: filePath || undefined,
+              file_paths: filePaths.length > 0 ? filePaths : undefined,
+              source: source || undefined,
               tmdb_id: tmdbId,
-              video_type: videoType,
+              video_type: videoType || undefined,
             }),
           }),
         )

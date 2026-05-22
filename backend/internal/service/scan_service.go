@@ -22,11 +22,12 @@ type ScanService struct {
 }
 
 type CreateScanRequest struct {
-	Path      string `json:"path"`
-	FilePath  string `json:"file_path"`
-	Source    string `json:"source"`
-	TMDBID    int64  `json:"tmdb_id"`
-	VideoType string `json:"video_type"`
+	Path      string   `json:"path"`
+	FilePath  string   `json:"file_path"`
+	FilePaths []string `json:"file_paths"`
+	Source    string   `json:"source"`
+	TMDBID    int64    `json:"tmdb_id"`
+	VideoType string   `json:"video_type"`
 }
 
 type UpdateScanItemRequest struct {
@@ -54,8 +55,9 @@ func NewScanService(
 
 func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (model.ScanSession, error) {
 	singleFile := strings.TrimSpace(req.FilePath)
-	if singleFile == "" && strings.TrimSpace(req.Path) == "" {
-		return model.ScanSession{}, errors.New("path or file_path is required")
+	multiFiles := req.FilePaths
+	if singleFile == "" && len(multiFiles) == 0 && strings.TrimSpace(req.Path) == "" {
+		return model.ScanSession{}, errors.New("path, file_path or file_paths is required")
 	}
 	if req.TMDBID <= 0 {
 		return model.ScanSession{}, errors.New("tmdb_id must be greater than 0")
@@ -87,7 +89,42 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 	var entries []client.OpenListEntry
 	var err error
 	isLocal := strings.EqualFold(req.Source, "local")
-	if isLocal && singleFile != "" {
+	if isLocal && len(multiFiles) > 0 {
+		// Local multi-file mode
+		for _, fp := range multiFiles {
+			fp = strings.TrimSpace(fp)
+			if fp == "" {
+				continue
+			}
+			localEntry, localErr := s.localService.GetFileInfo(ctx, fp)
+			if localErr != nil {
+				log.Printf("local file info failed: scan=%s file=%s err=%v", scan.ID, fp, localErr)
+				continue
+			}
+			entries = append(entries, client.OpenListEntry{
+				Name:  localEntry.Name,
+				Path:  localEntry.Path,
+				IsDir: false,
+				Size:  localEntry.Size,
+			})
+		}
+		log.Printf("local multi-file: scan=%s files=%d", scan.ID, len(entries))
+	} else if !isLocal && len(multiFiles) > 0 {
+		// OpenList multi-file mode
+		for _, fp := range multiFiles {
+			fp = strings.TrimSpace(fp)
+			if fp == "" {
+				continue
+			}
+			fileEntries, fileErr := s.openListService.GetFileInfo(ctx, fp)
+			if fileErr != nil {
+				log.Printf("openlist file info failed: scan=%s file=%s err=%v", scan.ID, fp, fileErr)
+				continue
+			}
+			entries = append(entries, fileEntries...)
+		}
+		log.Printf("openlist multi-file: scan=%s files=%d", scan.ID, len(entries))
+	} else if isLocal && singleFile != "" {
 		// Local single file mode
 		localEntry, localErr := s.localService.GetFileInfo(ctx, singleFile)
 		if localErr != nil {

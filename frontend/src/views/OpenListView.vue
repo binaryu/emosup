@@ -2,9 +2,17 @@
   <div>
     <PageHeaderCard
       title="OpenList 浏览"
-      subtitle="先选择目录，再结合 tmdb_id 发起扫描。扫描结果与任务队列严格分离。"
+      subtitle="先选择目录，再结合 tmdb_id 发起扫描。可勾选多个视频文件批量扫描。"
     >
       <el-button type="primary" :loading="loading" @click="loadEntries">刷新目录</el-button>
+      <el-button
+        v-if="selectedFiles.length > 0"
+        type="warning"
+        :loading="scanStore.loading"
+        @click="scanSelectedFiles"
+      >
+        扫描所选 ({{ selectedFiles.length }})
+      </el-button>
     </PageHeaderCard>
 
     <el-row :gutter="16">
@@ -37,7 +45,8 @@
       <el-col :xs="24" :lg="15">
         <el-card class="panel-card">
           <template #header>目录浏览</template>
-          <el-table :data="entries" stripe>
+          <el-table :data="entries" stripe @selection-change="onFileSelectionChange">
+            <el-table-column type="selection" width="42" :selectable="(r: OpenListEntry) => !r.is_dir && isVideoFile(r.name)" />
             <el-table-column prop="name" label="名称" min-width="200" />
             <el-table-column label="类型" width="80" align="center">
               <template #default="{ row }">
@@ -90,6 +99,11 @@ const currentPath = ref('/')
 const tmdbId = ref<number>(1100)
 const videoType = ref('')
 const entries = ref<OpenListEntry[]>([])
+const selectedFiles = ref<OpenListEntry[]>([])
+
+function onFileSelectionChange(rows: OpenListEntry[]) {
+  selectedFiles.value = rows
+}
 
 async function loadEntries() {
   loading.value = true
@@ -141,6 +155,28 @@ async function scanSingleFile(row: OpenListEntry) {
     )
     if (created) {
       ElMessage.success('单文件扫描完成')
+      router.push('/scans')
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '扫描失败')
+  }
+}
+
+async function scanSelectedFiles() {
+  const files = selectedFiles.value
+  if (!files.length) return
+
+  try {
+    const created = await scanStore.createScan(
+      currentPath.value,
+      tmdbId.value,
+      videoType.value,
+      '',
+      '',
+      files.map((f) => f.path),
+    )
+    if (created) {
+      ElMessage.success(`多文件扫描完成，共 ${created.total_count} 个视频文件`)
       router.push('/scans')
     }
   } catch (error) {

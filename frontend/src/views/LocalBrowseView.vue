@@ -44,17 +44,28 @@
           <template #header>
             <div class="browse-header">
               <span>目录浏览：{{ displayPath }}</span>
-              <el-button
-                v-if="displayPath !== '/'"
-                link
-                type="primary"
-                @click="goUp"
-              >
-                返回上级
-              </el-button>
+              <div class="browse-actions">
+                <el-button
+                  v-if="selectedFiles.length > 0"
+                  type="warning"
+                  size="small"
+                  @click="scanSelectedFiles"
+                >
+                  扫描所选 ({{ selectedFiles.length }})
+                </el-button>
+                <el-button
+                  v-if="displayPath !== '/'"
+                  link
+                  type="primary"
+                  @click="goUp"
+                >
+                  返回上级
+                </el-button>
+              </div>
             </div>
           </template>
-          <el-table :data="entries" stripe highlight-current-row @current-change="onSelectRow">
+          <el-table :data="entries" stripe highlight-current-row @current-change="onSelectRow" @selection-change="onFileSelectionChange">
+            <el-table-column type="selection" width="42" :selectable="(r: OpenListEntry) => !r.is_dir && isVideoFile(r.name)" />
             <el-table-column prop="name" label="名称" min-width="200" />
             <el-table-column label="类型" width="80" align="center">
               <template #default="{ row }">
@@ -114,6 +125,11 @@ const selectedPath = ref('')
 const tmdbId = ref<number>(1100)
 const videoType = ref('')
 const entries = ref<OpenListEntry[]>([])
+const selectedFiles = ref<OpenListEntry[]>([])
+
+function onFileSelectionChange(rows: OpenListEntry[]) {
+  selectedFiles.value = rows
+}
 
 async function loadEntries() {
   loading.value = true
@@ -184,6 +200,28 @@ async function scanSingleFile(row: OpenListEntry) {
   }
 }
 
+async function scanSelectedFiles() {
+  const files = selectedFiles.value
+  if (!files.length) return
+
+  try {
+    const created = await scanStore.createScan(
+      currentPath.value,
+      tmdbId.value,
+      videoType.value,
+      '',
+      'local',
+      files.map((f) => f.path),
+    )
+    if (created) {
+      ElMessage.success(`多文件扫描完成，共 ${created.total_count} 个视频文件`)
+      router.push('/scans')
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '扫描失败')
+  }
+}
+
 function isVideoFile(name: string): boolean {
   const ext = name.split('.').pop()?.toLowerCase() || ''
   return ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'ts', 'mpg', 'mpeg', 'webm'].includes(ext)
@@ -203,5 +241,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.browse-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>
