@@ -151,8 +151,8 @@ const tmdbResults = ref<{ tmdb_id: number; title: string; year: string; type: st
 
 const apiBase = () => source.value === 'local' ? '/api/local/list' : '/api/openlist/list'
 
-async function loadEntries() {
-  loading.value = true
+async function loadEntries(showLoading = true) {
+  if (showLoading) loading.value = true
   try {
     const data = await parseApiResponse<{ path: string; items: OpenListEntry[] }>(
       await fetch(`${apiBase()}?path=${encodeURIComponent(currentPath.value)}`),
@@ -161,7 +161,7 @@ async function loadEntries() {
     entries.value = data.items
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '加载失败')
-  } finally { loading.value = false }
+  } finally { if (showLoading) loading.value = false }
 }
 
 function enterDirectory(path: string) { currentPath.value = path; selectedPath.value = ''; loadEntries() }
@@ -220,7 +220,7 @@ function isVideoFile(name: string): boolean {
   return ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'ts', 'mpg', 'mpeg', 'webm'].includes(ext)
 }
 
-watch(source, () => { currentPath.value = '/'; selectedPath.value = ''; loadEntries() })
+watch(source, () => { currentPath.value = '/'; selectedPath.value = ''; loadEntries(false) })
 onMounted(loadEntries)
 </script>
 
