@@ -145,22 +145,17 @@
             <div class="action-group">
               <el-button link type="primary" @click="goDetail(row.id)">详情</el-button>
               <el-divider direction="vertical" />
-              <el-dropdown trigger="click" :teleported="true">
-                <el-button link>管理<el-icon class="el-icon--right"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg></el-icon></el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item :disabled="!canCancel(row.status)" @click="handleCancel(row.id)">
-                      <span class="text-danger">取消任务</span>
-                    </el-dropdown-item>
-                    <el-dropdown-item :disabled="!canRetry(row.status)" @click="handleRetry(row.id)">
-                      <span class="text-warning">重新入队</span>
-                    </el-dropdown-item>
-                    <el-dropdown-item divided :disabled="isActive(row.status)" @click="handleDelete(row.id)">
-                      <span class="text-danger">删除任务记录</span>
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
+              <el-popover placement="bottom-end" :width="160" trigger="click" :teleported="true">
+                <template #reference>
+                  <el-button link>管理<el-icon class="el-icon--right"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg></el-icon></el-button>
                 </template>
-              </el-dropdown>
+                <div class="popover-actions">
+                  <el-button link type="danger" :disabled="!canCancel(row.status)" @click="handleCancel(row.id)" size="small">取消任务</el-button>
+                  <el-button link type="warning" :disabled="!canRetry(row.status)" @click="handleRetry(row.id)" size="small">重新入队</el-button>
+                  <el-divider style="margin: 6px 0" />
+                  <el-button link type="danger" :disabled="isActive(row.status)" @click="handleDelete(row.id)" size="small">删除记录</el-button>
+                </div>
+              </el-popover>
             </div>
           </template>
         </el-table-column>
@@ -515,6 +510,17 @@ onMounted(() => {
 .action-group {
   display: flex;
   align-items: center;
+  gap: 6px;
+}
+
+.popover-actions {
+  display: flex;
+  flex-direction: column;
+}
+
+.popover-actions .el-button {
+  justify-content: flex-start;
+  padding: 8px 12px;
 }
 
 .text-danger { color: #ef4444; }
