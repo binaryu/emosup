@@ -11,10 +11,10 @@ services:
     volumes:
       - ${EMOSUP_DATA_DIR:-./data}:/app/backend/data
       - ${EMOSUP_DOWNLOADS_DIR:-./downloads}:/app/backend/data/downloads
-    command:
+    entrypoint:
       - /bin/sh
       - -ec
       - |
         [ -f /app/backend/data/config.json ] || cp /app/backend/data/config.example.json /app/backend/data/config.json
         sed -i 's/"host": "127.0.0.1"/"host": "0.0.0.0"/' /app/backend/data/config.json || true
-        exec ./emosup-server
+        exec /app/backend/emosup-server
