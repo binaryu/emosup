@@ -1,6 +1,6 @@
 <template>
   <div class="page-shell">
-    <aside class="sidebar" :class="{ 'sidebar-collapsed': !sidebarOpen && isMobile }">
+    <aside class="sidebar" :class="{ 'sidebar-open': sidebarOpen }">
       <div class="brand">
         <span class="brand-badge">EM</span>
         <div class="brand-text">
@@ -45,14 +45,12 @@ const isMobile = ref(false)
 function checkMobile() {
   isMobile.value = window.innerWidth <= 960
   if (!isMobile.value) {
-    sidebarOpen.value = true
+    sidebarOpen.value = false
   }
 }
 
 function closeSidebar() {
-  if (isMobile.value) {
-    sidebarOpen.value = false
-  }
+  sidebarOpen.value = false
 }
 
 onMounted(() => {
@@ -170,7 +168,7 @@ onUnmounted(() => {
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.3);
   }
 
-  .sidebar-collapsed {
+  .sidebar-open {
     transform: translateX(0);
     opacity: 1;
   }
