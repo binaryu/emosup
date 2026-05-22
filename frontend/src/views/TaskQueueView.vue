@@ -184,7 +184,7 @@ function canRetry(status: TaskStatus) {
 }
 
 function canCancel(status: TaskStatus) {
-  return ['queued', 'downloading', 'upload_pending', 'uploading', 'saving'].includes(status)
+  return ['queued', 'downloading', 'upload_pending', 'uploading', 'saving', 'download_failed', 'upload_failed'].includes(status)
 }
 
 async function reload() {

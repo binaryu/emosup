@@ -825,6 +825,8 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) (model.Task, er
 		return s.markTaskCanceled(task.ID, task.Download.Status, "task canceled by user")
 	case model.TaskStatusUploading, model.TaskStatusSaving:
 		return s.markTaskCanceled(task.ID, task.Download.Status, "upload cancel requested; remote partial upload may remain")
+	case model.TaskStatusDownloadFailed, model.TaskStatusUploadFailed:
+		return s.markTaskCanceled(task.ID, task.Download.Status, "failed task canceled by user")
 	default:
 		return model.Task{}, newTaskServiceError(http.StatusBadRequest, fmt.Sprintf("task status %q cannot be canceled", task.Status))
 	}
