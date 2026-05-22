@@ -303,7 +303,7 @@ onMounted(() => {
 .action-group { display: flex; align-items: center; gap: 4px; }
 .action-btn { min-width: 52px; text-align: center; }
 .popover-actions { display: flex; flex-direction: column; }
-.popover-actions .el-button { justify-content: flex-start; padding: 8px 12px; }
+.popover-actions .el-button { justify-content: flex-start; padding: 8px 12px; width: 100%; }
 
 .pagination-container { padding: 14px 20px; display: flex; justify-content: flex-end; border-top: 1px solid var(--line-soft); }
 
