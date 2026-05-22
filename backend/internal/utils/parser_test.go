@@ -21,6 +21,20 @@ func TestParseEpisodeInfo(t *testing.T) {
 			episode:  ptr(2),
 		},
 		{
+			name:     "bracket episode [01]",
+			fileName: "[VCB-Studio] Ao Haru Ride [01][Ma10p_1080p][x265_flac].mkv",
+			fullPath: "/ccs/[VCB-Studio] Ao Haru Ride [Ma10p_1080p]/[VCB-Studio] Ao Haru Ride [01][Ma10p_1080p][x265_flac].mkv",
+			season:   nil,
+			episode:  ptr(1),
+		},
+		{
+			name:     "suffix episode Name - 05.mkv",
+			fileName: "Show Name - 05.mkv",
+			fullPath: "/TV/Show/Show Name - 05.mkv",
+			season:   nil,
+			episode:  ptr(5),
+		},
+		{
 			name:     "episode from path season",
 			fileName: "Show.EP03.mkv",
 			fullPath: "/TV/Show/Season 2/Show.EP03.mkv",

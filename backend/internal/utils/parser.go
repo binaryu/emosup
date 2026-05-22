@@ -10,13 +10,15 @@ import (
 )
 
 var (
-	reSeasonEpisode = regexp.MustCompile(`(?i)\bS(\d{1,2})\s*E(\d{1,3})\b`)
-	reXEpisode      = regexp.MustCompile(`(?i)\b(\d{1,2})x(\d{1,3})\b`)
-	reEpisodeOnly   = regexp.MustCompile(`(?i)\bEP?(\d{1,3})\b`)
-	reCnEpisode     = regexp.MustCompile(`第\s*(\d{1,3})\s*集`)
-	reSeasonText    = regexp.MustCompile(`(?i)season[\s._-]*(\d{1,2})`)
-	reSeasonShort   = regexp.MustCompile(`(?i)\bS(\d{1,2})\b`)
-	reCnSeason      = regexp.MustCompile(`第\s*(\d{1,2})\s*季`)
+	reSeasonEpisode   = regexp.MustCompile(`(?i)\bS(\d{1,2})\s*E(\d{1,3})\b`)
+	reXEpisode        = regexp.MustCompile(`(?i)\b(\d{1,2})x(\d{1,3})\b`)
+	reBracketEpisode  = regexp.MustCompile(`\[(\d{1,3})\]`)
+	reEpisodeSuffix   = regexp.MustCompile(`(?i)[\s_.\-]+(\d{1,3})\s*\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
+	reEpisodeOnly     = regexp.MustCompile(`(?i)\bEP?(\d{1,3})\b`)
+	reCnEpisode       = regexp.MustCompile(`第\s*(\d{1,3})\s*集`)
+	reSeasonText      = regexp.MustCompile(`(?i)season[\s._-]*(\d{1,2})`)
+	reSeasonShort     = regexp.MustCompile(`(?i)\bS(\d{1,2})\b`)
+	reCnSeason        = regexp.MustCompile(`第\s*(\d{1,2})\s*季`)
 )
 
 func ParseEpisodeInfo(fileName, fullPath string) model.ParsedEpisodeInfo {
@@ -41,6 +43,28 @@ func ParseEpisodeInfo(fileName, fullPath string) model.ParsedEpisodeInfo {
 	info.IsSpecial = isSpecialPath(full)
 	if info.IsSpecial {
 		info.Season = intPtr(0)
+	}
+
+	// [01] square bracket episode (most common in anime releases)
+	if info.Episode == nil {
+		if matched := reBracketEpisode.FindStringSubmatch(name); len(matched) == 2 {
+			ep := mustAtoi(matched[1])
+			if ep > 0 && ep <= 200 {
+				info.Episode = intPtr(ep)
+				info.RawText = matched[0]
+			}
+		}
+	}
+
+	// Name - 01.mkv or Name_01.mkv (episode just before extension)
+	if info.Episode == nil {
+		if matched := reEpisodeSuffix.FindStringSubmatch(name); len(matched) >= 3 {
+			ep := mustAtoi(matched[1])
+			if ep > 0 && ep <= 200 {
+				info.Episode = intPtr(ep)
+				info.RawText = matched[0]
+			}
+		}
 	}
 
 	if matched := reEpisodeOnly.FindStringSubmatch(name); len(matched) == 2 {
