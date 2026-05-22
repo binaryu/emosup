@@ -118,10 +118,10 @@
                   <el-button link size="small" class="action-btn">管理</el-button>
                 </template>
                 <div class="popover-actions">
-                  <el-button link size="small" type="danger" :disabled="!canCancel(row.status)" @click="handleCancel(row.id)">取消任务</el-button>
-                  <el-button link size="small" type="warning" :disabled="!canRetry(row.status)" @click="handleRetry(row.id)">重新入队</el-button>
-                  <el-divider style="margin: 4px 0" />
-                  <el-button link size="small" type="danger" :disabled="isActive(row.status)" @click="handleDelete(row.id)">删除记录</el-button>
+                  <div class="popover-item danger" :class="{ disabled: !canCancel(row.status) }" @click="canCancel(row.status) && handleCancel(row.id)">取消任务</div>
+                  <div class="popover-item warning" :class="{ disabled: !canRetry(row.status) }" @click="canRetry(row.status) && handleRetry(row.id)">重新入队</div>
+                  <div class="popover-divider"></div>
+                  <div class="popover-item danger" :class="{ disabled: isActive(row.status) }" @click="!isActive(row.status) && handleDelete(row.id)">删除记录</div>
                 </div>
               </el-popover>
             </div>
@@ -302,8 +302,13 @@ onMounted(() => {
 
 .action-group { display: flex; align-items: center; gap: 4px; }
 .action-btn { min-width: 52px; text-align: center; }
-.popover-actions { display: flex; flex-direction: column; }
-.popover-actions .el-button { justify-content: flex-start; padding: 8px 12px; width: 100%; }
+.popover-actions { display: flex; flex-direction: column; min-width: 120px; }
+.popover-item { padding: 8px 12px; font-size: 13px; cursor: pointer; border-radius: 6px; transition: background 0.15s; white-space: nowrap; }
+.popover-item:hover:not(.disabled) { background: rgba(0,0,0,0.04); }
+.popover-item.danger { color: #ef4444; }
+.popover-item.warning { color: #eab308; }
+.popover-item.disabled { opacity: 0.35; cursor: not-allowed; }
+.popover-divider { height: 1px; background: var(--line-soft); margin: 4px 0; }
 
 .pagination-container { padding: 14px 20px; display: flex; justify-content: flex-end; border-top: 1px solid var(--line-soft); }
 
