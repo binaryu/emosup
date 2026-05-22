@@ -56,6 +56,7 @@
             row-key="id"
             stripe
             @select="(rows: ScanItem[]) => { selectedItemIdsByScan = { ...selectedItemIdsByScan, [scan.id]: rows.map(r => r.id) } }"
+            @select-all="(rows: ScanItem[]) => { selectedItemIdsByScan = { ...selectedItemIdsByScan, [scan.id]: rows.map(r => r.id) } }"
           >
             <el-table-column type="expand" width="48">
               <template #default="{ row }">
