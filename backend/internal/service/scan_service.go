@@ -288,7 +288,10 @@ func (s *ScanService) UpdateScanItem(ctx context.Context, scanID, itemID string,
 		}
 		if req.SelectedTitle != nil {
 			item.SelectedTitle = strings.TrimSpace(*req.SelectedTitle)
-			shouldFetchTitle = false
+			// Only suppress auto-fetch if user explicitly provided a non-empty title
+			if strings.TrimSpace(*req.SelectedTitle) != "" {
+				shouldFetchTitle = false
+			}
 		}
 		if req.Confirmed != nil {
 			item.Confirmed = *req.Confirmed
@@ -309,8 +312,9 @@ func (s *ScanService) UpdateScanItem(ctx context.Context, scanID, itemID string,
 		}
 	}
 
-	// Auto-fetch title from Emos when item_type/item_id changed and title is empty
-	if shouldFetchTitle && strings.TrimSpace(updatedItem.SelectedItemType) != "" && updatedItem.SelectedItemID > 0 && strings.TrimSpace(updatedItem.SelectedTitle) == "" {
+	// Auto-fetch title from Emos when item_type/item_id changed OR title is still empty
+	autoFetch := shouldFetchTitle || strings.TrimSpace(updatedItem.SelectedTitle) == ""
+	if autoFetch && strings.TrimSpace(updatedItem.SelectedItemType) != "" && updatedItem.SelectedItemID > 0 {
 		base, fetchErr := s.emosService.GetVideoBase(ctx, updatedItem.SelectedItemType, updatedItem.SelectedItemID)
 		if fetchErr != nil {
 			log.Printf("scan item auto-fetch title failed: scan=%s item=%s err=%v", scanID, itemID, fetchErr)

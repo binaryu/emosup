@@ -66,11 +66,11 @@
                     <div class="edit-grid">
                       <div class="edit-field">
                         <span class="edit-label">item_type</span>
-                        <el-input v-model="row.selected_item_type" placeholder="vl / ve" size="small" @change="() => fetchTitle(row, scan.id)" />
+                        <el-input v-model="row.selected_item_type" placeholder="vl / ve" size="small" @blur="() => fetchTitle(row)" />
                       </div>
                       <div class="edit-field">
                         <span class="edit-label">item_id</span>
-                        <el-input-number v-model="row.selected_item_id" :min="0" size="small" controls-position="right" @change="() => fetchTitle(row, scan.id)" />
+                        <el-input-number v-model="row.selected_item_id" :min="0" size="small" controls-position="right" @change="() => fetchTitle(row)" />
                       </div>
                       <div class="edit-field title-field">
                         <span class="edit-label">title</span>
@@ -195,24 +195,25 @@ function applyCandidate(row: ScanItem, candidate: MatchCandidate) {
 }
 
 let fetchTitleTimer: ReturnType<typeof setTimeout> | null = null
-async function fetchTitle(row: ScanItem, scanId: string) {
-  if (!row.selected_item_type || !row.selected_item_id || row.selected_item_id <= 0) return
+async function fetchTitle(row: ScanItem) {
+  const itemType = row.selected_item_type?.trim()
+  const itemId = row.selected_item_id
+  if (!itemType || !itemId || itemId <= 0) return
 
-  // Debounce to avoid spamming on each keystroke
   if (fetchTitleTimer) clearTimeout(fetchTitleTimer)
   fetchTitleTimer = setTimeout(async () => {
     try {
       const resp = await fetch(
-        `/api/emos/video/base?item_type=${encodeURIComponent(row.selected_item_type)}&item_id=${row.selected_item_id}`,
+        `/api/emos/video/base?item_type=${encodeURIComponent(itemType)}&item_id=${itemId}`,
       )
       const data = await resp.json()
       if (data.success && data.data?.title) {
         row.selected_title = data.data.title
       }
     } catch {
-      // Silently ignore fetch errors
+      // ignore network errors
     }
-  }, 400)
+  }, 300)
 }
 
 function setTableRef(scanId: string, table: { clearSelection?: () => void } | null) {
