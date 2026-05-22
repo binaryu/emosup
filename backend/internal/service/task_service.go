@@ -239,6 +239,30 @@ func (s *TaskService) GetNextRunnableTask(ctx context.Context) (model.Task, bool
 	return model.Task{}, false, nil
 }
 
+func (s *TaskService) DeleteTask(ctx context.Context, id string) error {
+	task, err := s.GetTask(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	// Don't allow deleting active tasks (safety)
+	if task.Status == model.TaskStatusDownloading || task.Status == model.TaskStatusUploading || task.Status == model.TaskStatusSaving {
+		return newTaskServiceError(http.StatusBadRequest, "cannot delete an active task, cancel it first")
+	}
+
+	err = s.store.DeleteTask(task.ID)
+	if err != nil {
+		return err
+	}
+
+	if err := s.appendTaskLog(task.ID, "info", "task deleted"); err != nil {
+		// log file already removed, ignore
+		_ = err
+	}
+
+	return nil
+}
+
 func (s *TaskService) GetTask(_ context.Context, id string) (model.Task, error) {
 	task, err := s.store.GetTask(strings.TrimSpace(id))
 	if err != nil {

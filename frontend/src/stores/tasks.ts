@@ -127,6 +127,16 @@ export const useTaskStore = defineStore('tasks', {
         this.loading = false
       }
     },
+    async deleteTask(taskId: string) {
+      this.loading = true
+      try {
+        await parseApiResponse(await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' }))
+        this.tasks = this.tasks.filter((item) => item.id !== taskId)
+        this.total = Math.max(0, this.total - 1)
+      } finally {
+        this.loading = false
+      }
+    },
     syncTask(task: Task) {
       const index = this.tasks.findIndex((item) => item.id === task.id)
       if (index >= 0) {

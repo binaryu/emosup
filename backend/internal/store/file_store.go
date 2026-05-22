@@ -220,6 +220,22 @@ func (s *FileStore) ListScans() ([]model.ScanSession, error) {
 	return scans, nil
 }
 
+func (s *FileStore) DeleteTask(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	taskPath := filepath.Join(s.root, "tasks", "task_"+id+".json")
+	if _, err := os.Stat(taskPath); errors.Is(err, os.ErrNotExist) {
+		return os.ErrNotExist
+	}
+
+	// Remove log file if exists (best-effort)
+	logPath := filepath.Join(s.root, "logs", "task_"+id+".json")
+	_ = os.Remove(logPath)
+
+	return os.Remove(taskPath)
+}
+
 func (s *FileStore) SaveTask(task model.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

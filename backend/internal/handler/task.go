@@ -23,6 +23,7 @@ func (h *TaskHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/tasks", h.listTasks)
 	router.GET("/tasks/stats", h.getTaskStats)
 	router.GET("/tasks/:id", h.getTask)
+	router.DELETE("/tasks/:id", h.deleteTask)
 	router.GET("/tasks/:id/logs", h.getTaskLogs)
 	router.POST("/tasks/:id/retry", h.retryTask)
 	router.POST("/tasks/:id/cancel", h.cancelTask)
@@ -117,6 +118,16 @@ func (h *TaskHandler) cancelTask(c *gin.Context) {
 	}
 
 	respondOK(c, task)
+}
+
+func (h *TaskHandler) deleteTask(c *gin.Context) {
+	err := h.service.DeleteTask(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondTaskError(c, err)
+		return
+	}
+
+	respondOK(c, gin.H{"deleted": true})
 }
 
 func respondTaskError(c *gin.Context, err error) {

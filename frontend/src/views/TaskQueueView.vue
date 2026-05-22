@@ -101,7 +101,7 @@
             {{ formatTime(row.updated_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <div class="action-group">
               <el-button link type="primary" @click="goDetail(row.id)">详情</el-button>
@@ -115,6 +115,14 @@
               </el-button>
               <el-button link type="warning" :disabled="!canRetry(row.status)" @click="handleRetry(row.id)">
                 重试
+              </el-button>
+              <el-button
+                link
+                type="danger"
+                :disabled="isActive(row.status)"
+                @click="handleDelete(row.id)"
+              >
+                删除
               </el-button>
             </div>
           </template>
@@ -137,7 +145,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 
 import PageHeaderCard from '@/components/PageHeaderCard.vue'
@@ -187,6 +195,10 @@ function canCancel(status: TaskStatus) {
   return ['queued', 'downloading', 'upload_pending', 'uploading', 'saving', 'download_failed', 'upload_failed'].includes(status)
 }
 
+function isActive(status: TaskStatus) {
+  return ['downloading', 'uploading', 'saving'].includes(status)
+}
+
 async function reload() {
   try {
     await Promise.all([
@@ -220,6 +232,26 @@ async function handleCancel(taskId: string) {
     ElMessage.success('任务已取消')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '取消任务失败')
+  }
+}
+
+async function handleDelete(taskId: string) {
+  try {
+    await ElMessageBox.confirm('确定要删除此任务吗？任务记录和日志将被永久移除。', '删除任务', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+
+  try {
+    await taskStore.deleteTask(taskId)
+    await taskStore.fetchTaskStats()
+    ElMessage.success('任务已删除')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '删除任务失败')
   }
 }
 
