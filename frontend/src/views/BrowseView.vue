@@ -38,13 +38,12 @@
                 filterable
                 remote
                 reserve-keyword
-                placeholder="输入剧名/电影名搜索"
+                placeholder="输入剧名搜索，或下方手动填 ID"
                 :remote-method="searchTMDB"
                 :loading="tmdbLoading"
                 value-key="tmdb_id"
                 style="width: 100%"
                 clearable
-                popper-class="tmdb-search-dropdown"
               >
                 <el-option
                   v-for="item in tmdbResults"
@@ -58,6 +57,10 @@
                   </div>
                 </el-option>
               </el-select>
+            </el-form-item>
+
+            <el-form-item label="或手动输入 TMDB ID">
+              <el-input-number v-model="tmdbId" :min="0" style="width: 100%" controls-position="right" placeholder="搜不到时直接填数字 ID" />
             </el-form-item>
 
             <el-form-item label="类型">
@@ -209,14 +212,7 @@ async function scanDir() {
 }
 
 async function scanSingleFile(row: OpenListEntry) {
-  const parentPath = row.path.substring(0, row.path.lastIndexOf('/')) || '/'
-  if (tmdbId.value <= 0) {
-    await autoDetectTMDB(parentPath)
-    if (tmdbId.value <= 0) {
-      ElMessage.warning('未能自动识别影片，请在上方搜索框中搜索')
-      return
-    }
-  }
+  if (tmdbId.value <= 0) { ElMessage.warning('请先搜索影片或手动填写 TMDB ID'); return }
   try { await doScan(row.path, row.path) }
   catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
 }
@@ -259,10 +255,6 @@ async function autoDetectTMDB(path: string) {
     const data = await resp.json()
     if (data.success && data.data?.length > 0) {
       tmdbResults.value = data.data
-      // Auto-select first result if it's a good match
-      if (data.data.length === 1 || data.data[0].title?.includes(name)) {
-        tmdbId.value = data.data[0].tmdb_id
-      }
     }
   } catch { /* ignore */ }
   finally { tmdbLoading.value = false }
