@@ -12,10 +12,16 @@
           <template #header>扫描设置</template>
           <el-form label-position="top">
             <el-form-item label="文件来源">
-              <el-radio-group v-model="source" style="width: 100%">
-                <el-radio-button value="openlist" style="flex: 1">OpenList</el-radio-button>
-                <el-radio-button value="local" style="flex: 1">本地目录</el-radio-button>
-              </el-radio-group>
+              <div style="display: flex; gap: 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--el-border-color)">
+                <div
+                  :style="{ flex: 1, padding: '8px 0', textAlign: 'center', cursor: 'pointer', fontSize: '13px', background: source === 'openlist' ? 'var(--el-color-primary)' : '', color: source === 'openlist' ? '#fff' : '' }"
+                  @click="source = 'openlist'"
+                >OpenList</div>
+                <div
+                  :style="{ flex: 1, padding: '8px 0', textAlign: 'center', cursor: 'pointer', fontSize: '13px', background: source === 'local' ? 'var(--el-color-primary)' : '', color: source === 'local' ? '#fff' : '' }"
+                  @click="source = 'local'"
+                >本地目录</div>
+              </div>
             </el-form-item>
 
             <el-form-item label="搜索影片">
