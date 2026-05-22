@@ -49,10 +49,11 @@ func (h *TMDBHandler) search(c *gin.Context) {
 	}
 
 	type searchItem struct {
-		TMDBID int64  `json:"tmdb_id"`
-		Title  string `json:"title"`
-		Year   string `json:"year"`
-		Type   string `json:"type"`
+		TMDBID     int64  `json:"tmdb_id"`
+		Title      string `json:"title"`
+		Year       string `json:"year"`
+		Type       string `json:"type"`
+		PosterPath string `json:"poster_path"`
 	}
 
 	items := make([]searchItem, 0, len(results))
@@ -66,10 +67,11 @@ func (h *TMDBHandler) search(c *gin.Context) {
 			name = r.Name
 		}
 		items = append(items, searchItem{
-			TMDBID: r.ID,
-			Title:  name,
-			Year:   year,
-			Type:   mediaType,
+			TMDBID:     r.ID,
+			Title:      name,
+			Year:       year,
+			Type:       mediaType,
+			PosterPath: r.PosterPath,
 		})
 	}
 

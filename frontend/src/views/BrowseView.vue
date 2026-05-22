@@ -33,31 +33,46 @@
             </el-form-item>
 
             <el-form-item label="搜索影片">
-              <el-select
-                v-model="tmdbId"
-                filterable
-                remote
-                reserve-keyword
-                placeholder="输入剧名搜索，或下方手动填 ID"
-                :remote-method="searchTMDB"
-                :loading="tmdbLoading"
-                value-key="tmdb_id"
-                style="width: 100%"
+              <el-input
+                v-model="tmdbQuery"
+                placeholder="输入剧名搜索，如 Ao Haru Ride"
+                @input="searchTMDB"
                 clearable
               >
-                <el-option
-                  v-for="item in tmdbResults"
-                  :key="item.tmdb_id"
-                  :label="`${item.title}${item.year ? ' (' + item.year + ')' : ''}`"
-                  :value="item.tmdb_id"
-                >
-                  <div style="display: flex; justify-content: space-between">
-                    <span>{{ item.title }}</span>
-                    <span style="color: var(--text-subtle); font-size: 12px">{{ item.year || '' }}</span>
-                  </div>
-                </el-option>
-              </el-select>
+                <template #prefix>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                </template>
+              </el-input>
             </el-form-item>
+
+            <div v-if="tmdbResults.length > 0" class="tmdb-results">
+              <div
+                v-for="item in tmdbResults"
+                :key="item.tmdb_id"
+                :class="['tmdb-card', { selected: tmdbId === item.tmdb_id }]"
+                @click="tmdbId = item.tmdb_id"
+              >
+                <div class="tmdb-poster">
+                  <img
+                    v-if="item.poster_path"
+                    :src="'https://image.tmdb.org/t/p/w92' + item.poster_path"
+                    :alt="item.title"
+                  />
+                  <div v-else class="tmdb-no-poster">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line><line x1="17" y1="17" x2="22" y2="17"></line></svg>
+                  </div>
+                </div>
+                <div class="tmdb-info">
+                  <div class="tmdb-title">{{ item.title }}</div>
+                  <div class="tmdb-meta">
+                    <span>{{ item.year || '未知' }}</span>
+                    <el-tag size="small" effect="plain">{{ item.type === 'movie' ? '电影' : '剧集' }}</el-tag>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="tmdbLoading" style="text-align: center; padding: 12px; color: var(--text-subtle); font-size: 12px">搜索中...</div>
 
             <el-form-item label="或手动输入 TMDB ID">
               <el-input-number v-model="tmdbId" :min="0" style="width: 100%" controls-position="right" placeholder="搜不到时直接填数字 ID" />
@@ -148,11 +163,12 @@ const currentPath = ref('/')
 const displayPath = ref('/')
 const selectedPath = ref('')
 const tmdbId = ref<number | ''>('')
+const tmdbQuery = ref('')
 const videoType = ref('')
 const entries = ref<OpenListEntry[]>([])
 const selectedFiles = ref<OpenListEntry[]>([])
 const tmdbLoading = ref(false)
-const tmdbResults = ref<{ tmdb_id: number; title: string; year: string; type: string }[]>([])
+const tmdbResults = ref<{ tmdb_id: number; title: string; year: string; type: string; poster_path: string }[]>([])
 
 const apiBase = () => source.value === 'local' ? '/api/local/list' : '/api/openlist/list'
 
@@ -182,6 +198,7 @@ function onFileSelectionChange(rows: OpenListEntry[]) { selectedFiles.value = ro
 
 let tmdbTimer: ReturnType<typeof setTimeout> | undefined
 async function searchTMDB(query: string) {
+  tmdbQuery.value = query
   if (!query || query.length < 2) { tmdbResults.value = []; return }
   if (tmdbTimer) clearTimeout(tmdbTimer)
   tmdbTimer = setTimeout(async () => {
@@ -248,16 +265,8 @@ function extractShowName(path: string): string {
 async function autoDetectTMDB(path: string) {
   const name = extractShowName(path)
   if (!name || name.length < 2) return
-  tmdbLoading.value = true
-  try {
-    const t = videoType.value || 'tv'
-    const resp = await fetch(`/api/tmdb/search?query=${encodeURIComponent(name)}&type=${t}`)
-    const data = await resp.json()
-    if (data.success && data.data?.length > 0) {
-      tmdbResults.value = data.data
-    }
-  } catch { /* ignore */ }
-  finally { tmdbLoading.value = false }
+  tmdbQuery.value = name
+  await searchTMDB(name)
 }
 
 watch(source, () => { currentPath.value = '/'; selectedPath.value = ''; loadEntries(false) })
@@ -308,4 +317,52 @@ onMounted(() => { loadEntries(); autoDetectTMDB(currentPath.value) })
   box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
   font-weight: 600;
 }
+
+.tmdb-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-top: -8px;
+  margin-bottom: 8px;
+}
+
+.tmdb-card {
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border: 2px solid transparent;
+}
+
+.tmdb-card:hover { background: rgba(0,0,0,0.03); }
+.tmdb-card.selected { border-color: var(--el-color-primary); background: rgba(64,158,255,0.06); }
+
+.tmdb-poster {
+  width: 40px;
+  height: 56px;
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: rgba(0,0,0,0.05);
+}
+
+.tmdb-poster img { width: 100%; height: 100%; object-fit: cover; }
+
+.tmdb-no-poster {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-subtle);
+  opacity: 0.3;
+}
+
+.tmdb-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+.tmdb-title { font-size: 13px; font-weight: 600; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tmdb-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-subtle); }
 </style>

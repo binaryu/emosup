@@ -19,11 +19,12 @@ func NewTMDBClient() *TMDBClient {
 }
 
 type TMDBSearchResult struct {
-	ID       int64  `json:"id"`
-	Title    string `json:"title"`
-	Name     string `json:"name"`
-	Year     string `json:"release_date"`
-	Overview string `json:"overview"`
+	ID         int64  `json:"id"`
+	Title      string `json:"title"`
+	Name       string `json:"name"`
+	Year       string `json:"release_date"`
+	Overview   string `json:"overview"`
+	PosterPath string `json:"poster_path"`
 }
 
 func (r TMDBSearchResult) DisplayTitle() string {
