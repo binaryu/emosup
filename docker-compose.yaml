@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       - TZ=${TZ:-Asia/Shanghai}
+      - EMOSUP_FRONTEND_DIST=/app/frontend
     ports:
       - "${EMOSUP_PORT:-8080}:8080"
     volumes:
