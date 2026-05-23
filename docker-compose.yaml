@@ -3,6 +3,7 @@ services:
     image: ghcr.io/binaryu/emosup:latest
     container_name: emosup
     restart: unless-stopped
+    user: "0:0"
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - EMOSUP_FRONTEND_DIST=/app/frontend
