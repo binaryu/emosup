@@ -3,45 +3,31 @@ package service
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/url"
+	"io"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"emosup/backend/internal/client"
-	"emosup/backend/internal/model"
 	"emosup/backend/internal/eventbus"
+	"emosup/backend/internal/model"
 )
 
-var proxyBaseURL string
-
-func getProxyBaseURL() string {
-	if proxyBaseURL != "" {
-		return proxyBaseURL
-	}
-	// Resolve host.docker.internal to a real IP aria2 can reach
-	ips, err := net.LookupHost("host.docker.internal")
-	if err == nil && len(ips) > 0 {
-		proxyBaseURL = "http://" + ips[0] + ":8080"
-		return proxyBaseURL
-	}
-	// Fallback
-	proxyBaseURL = "http://172.17.0.1:8080"
-	return proxyBaseURL
-}
-
 type DownloadExecutor struct {
-	taskService *TaskService
-	aria2Client client.Aria2Client
-	eventBus    *eventbus.Bus
+	taskService    *TaskService
+	aria2Client    client.Aria2Client
+	openListClient client.OpenListClient
+	eventBus       *eventbus.Bus
 }
 
-func NewDownloadExecutor(taskService *TaskService, aria2Client client.Aria2Client, eventBus *eventbus.Bus) *DownloadExecutor {
+func NewDownloadExecutor(taskService *TaskService, aria2Client client.Aria2Client, openListClient client.OpenListClient, eventBus *eventbus.Bus) *DownloadExecutor {
 	return &DownloadExecutor{
-		taskService: taskService,
-		aria2Client: aria2Client,
-		eventBus:    eventBus,
+		taskService:    taskService,
+		aria2Client:    aria2Client,
+		openListClient: openListClient,
+		eventBus:       eventBus,
 	}
 }
 
@@ -52,6 +38,12 @@ func (e *DownloadExecutor) Execute(ctx context.Context, taskID string) error {
 	task, err := e.taskService.GetTask(ctx, taskID)
 	if err != nil {
 		return err
+	}
+
+	// For OpenList sources, download directly (no aria2 needed).
+	// This avoids cross-container networking issues with proxy URLs.
+	if task.Source.Type == "openlist" {
+		return e.downloadDirect(ctx, task)
 	}
 
 	access, cfg, err := e.taskService.GetAria2Access(ctx)
@@ -245,15 +237,7 @@ func (e *DownloadExecutor) RecoverTask(ctx context.Context, task model.Task) (bo
 }
 
 func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access client.Aria2Access, task model.Task) (string, error) {
-	downloadURL := task.Source.RawURL
-	// Route ALL OpenList downloads through the built-in proxy.
-	// The proxy handles auth, redirects, and backend-specific headers uniformly.
-	// Works for Quark, 115, Baidu, Aliyun, and any other OpenList storage.
-	if task.Source.Type == "openlist" && task.Source.Path != "" {
-		downloadURL = fmt.Sprintf("%s/api/proxy/download?path=%s", getProxyBaseURL(), url.QueryEscape(task.Source.Path))
-	}
-
-	gid, err := e.aria2Client.AddURI(ctx, access, downloadURL, client.Aria2AddURIOptions{
+	gid, err := e.aria2Client.AddURI(ctx, access, task.Source.RawURL, client.Aria2AddURIOptions{
 		Dir:              task.Download.SaveDir,
 		Out:              filepath.Base(task.Download.LocalPath),
 		ContinueDownload: true,
@@ -278,9 +262,6 @@ func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access cl
 	}
 
 	retryURL := refreshedTask.Source.RawURL
-	if refreshedTask.Source.Type == "openlist" && refreshedTask.Source.Path != "" {
-		retryURL = fmt.Sprintf("%s/api/proxy/download?path=%s", getProxyBaseURL(), url.QueryEscape(refreshedTask.Source.Path))
-	}
 	gid, retryErr := e.aria2Client.AddURI(ctx, access, retryURL, client.Aria2AddURIOptions{
 		Dir:              refreshedTask.Download.SaveDir,
 		Out:              filepath.Base(refreshedTask.Download.LocalPath),
@@ -293,4 +274,125 @@ func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access cl
 	}
 
 	return gid, nil
+}
+
+func (e *DownloadExecutor) downloadDirect(ctx context.Context, task model.Task) error {
+	// Prepare download
+	task, err := e.taskService.PrepareTaskDownload(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+
+	// Get OpenList access
+	cfg, err := e.taskService.LoadConfig(ctx)
+	if err != nil {
+		return err
+	}
+	access := client.OpenListAccess{
+		BaseURL:  cfg.OpenList.BaseURL,
+		Username: cfg.OpenList.Username,
+		Password: cfg.OpenList.Password,
+		Token:    cfg.OpenList.Token,
+	}
+
+	// Login if needed
+	if access.Token == "" && access.Username != "" {
+		if token, loginErr := e.openListClient.Login(ctx, access); loginErr == nil {
+			access.Token = token
+		}
+	}
+
+	// Get the actual download URL from OpenList
+	rawURL, err := e.openListClient.GetRawLink(ctx, access, task.Source.Path)
+	if err != nil {
+		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "failed to get download link: "+err.Error())
+		return err
+	}
+	rawURL = client.ResolveMaybeRelativeURL(cfg.OpenList.BaseURL, rawURL)
+
+	// Stream download to local file
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Referer", strings.TrimRight(cfg.OpenList.BaseURL, "/")+"/")
+	if access.Token != "" {
+		req.Header.Set("Authorization", access.Token)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "download request failed: "+err.Error())
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, fmt.Sprintf("upstream returned %d", resp.StatusCode))
+		return fmt.Errorf("upstream returned %d", resp.StatusCode)
+	}
+
+	localPath := task.Download.LocalPath
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		return err
+	}
+
+	file, err := os.Create(localPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	totalBytes := resp.ContentLength
+	var doneBytes int64
+	buf := make([]byte, 32*1024)
+
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := file.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			doneBytes += int64(n)
+			progress := float64(0)
+			if totalBytes > 0 {
+				progress = float64(doneBytes) * 100 / float64(totalBytes)
+			}
+			if _, syncErr := e.taskService.SyncDownloadStatus(ctx, task.ID, client.Aria2Status{
+				Status:          "active",
+				TotalLength:     totalBytes,
+				CompletedLength: doneBytes,
+			}); syncErr == nil && e.eventBus != nil {
+				e.eventBus.Publish(eventbus.TaskEvent{
+					TaskID: task.ID, Status: "downloading",
+					DlProg: progress, DlDone: doneBytes, DlTotal: totalBytes,
+				})
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "download error: "+readErr.Error())
+			return readErr
+		}
+	}
+
+	info, err := os.Stat(localPath)
+	if err != nil || info.Size() <= 0 {
+		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "downloaded file is empty or missing")
+		return fmt.Errorf("downloaded file is empty")
+	}
+
+	_, err = e.taskService.MarkDownloadCompleted(ctx, task.ID, client.Aria2Status{
+		Status:          "complete",
+		TotalLength:     info.Size(),
+		CompletedLength: info.Size(),
+		Files:           []client.Aria2File{{Path: localPath}},
+	})
+	return err
 }

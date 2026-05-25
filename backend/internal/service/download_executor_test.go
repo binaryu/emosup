@@ -16,7 +16,7 @@ func TestDownloadExecutorExecuteQueuedTask(t *testing.T) {
 	fileStore := newTaskTestStore(t)
 	aria2Client := &sequenceAria2Client{}
 	taskService := NewTaskService(fileStore, aria2Client)
-	executor := NewDownloadExecutor(taskService, aria2Client, nil)
+	executor := NewDownloadExecutor(taskService, aria2Client, nil, nil)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
@@ -87,7 +87,7 @@ func TestDownloadExecutorRecoverDownloadingTaskWithoutGIDUsesLocalFile(t *testin
 	fileStore := newTaskTestStore(t)
 	aria2Client := &sequenceAria2Client{}
 	taskService := NewTaskService(fileStore, aria2Client)
-	executor := NewDownloadExecutor(taskService, aria2Client, nil)
+	executor := NewDownloadExecutor(taskService, aria2Client, nil, nil)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{

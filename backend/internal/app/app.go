@@ -39,7 +39,7 @@ func New() (*App, error) {
 	aria2Client := client.NewHTTPAria2Client()
 	taskService := service.NewTaskService(fileStore, aria2Client, openListClient)
 	eventBus := eventbus.New()
-	downloadExecutor := service.NewDownloadExecutor(taskService, aria2Client, eventBus)
+	downloadExecutor := service.NewDownloadExecutor(taskService, aria2Client, openListClient, eventBus)
 	uploadExecutor := service.NewUploadExecutor(taskService, emosClient, eventBus)
 	tmdbClient := client.NewTMDBClient()
 
