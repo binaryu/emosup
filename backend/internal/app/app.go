@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"emosup/backend/internal/client"
@@ -72,8 +74,15 @@ func New() (*App, error) {
 		FrontendDist: findFrontendDistDir(),
 	})
 
+	port := cfg.Server.Port
+	if envPort := os.Getenv("EMOSUP_PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil && p > 0 {
+			port = p
+		}
+	}
+
 	server := &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Addr:              fmt.Sprintf("%s:%d", cfg.Server.Host, port),
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
