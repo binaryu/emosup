@@ -53,7 +53,7 @@
                 v-for="item in tmdbResults"
                 :key="item.tmdb_id"
                 :class="['tmdb-card', { selected: tmdbId === item.tmdb_id }]"
-                @click="tmdbId = item.tmdb_id"
+                @click="selectTMDB(item)"
               >
                 <div class="tmdb-poster">
                   <img
@@ -172,6 +172,14 @@ const entries = ref<OpenListEntry[]>([])
 const selectedFiles = ref<OpenListEntry[]>([])
 const tmdbLoading = ref(false)
 const tmdbResults = ref<{ tmdb_id: number; title: string; year: string; type: string; poster_path: string }[]>([])
+
+function selectTMDB(item: { tmdb_id: number; title: string; year: string; type: string; poster_path: string }) {
+  tmdbId.value = item.tmdb_id
+  // Auto-set video type based on search result
+  if (item.type === 'tv' || item.type === 'movie') {
+    videoType.value = item.type
+  }
+}
 
 const apiBase = () => source.value === 'local' ? '/api/local/list' : '/api/openlist/list'
 
