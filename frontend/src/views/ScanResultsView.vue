@@ -54,6 +54,15 @@
               >
                 删除扫描
               </el-button>
+              <el-button
+                type="primary"
+                plain
+                size="small"
+                :loading="scanStore.loading"
+                @click="rescan(scan)"
+              >
+                重新扫描
+              </el-button>
             </div>
           </div>
         </template>
@@ -200,6 +209,13 @@ function canCreateTask(row: ScanItem, scanSource?: string) {
       row.is_video &&
       (isLocal || row.raw_url),
   )
+}
+
+async function rescan(scan: ScanSession) {
+  try {
+    const created = await scanStore.createScan(scan.path, scan.tmdb_id, scan.video_type, '', scan.source || '')
+    if (created) ElMessage.success(`重新扫描完成，${created.total_count} 个视频文件`)
+  } catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
 }
 
 async function selectEmptyMedia(scan: ScanSession) {
