@@ -946,8 +946,9 @@ func (s *TaskService) GetOpenListAccess(_ context.Context) (client.OpenListAcces
 	}
 
 	return client.OpenListAccess{
-		BaseURL: cfg.OpenList.BaseURL,
-		Token:   cfg.OpenList.Token,
+		BaseURL:  cfg.OpenList.BaseURL,
+		Token:    cfg.OpenList.Token,
+		Password: cfg.OpenList.Password,
 	}, cfg, nil
 }
 

@@ -13,8 +13,10 @@ import (
 )
 
 type OpenListAccess struct {
-	BaseURL string
-	Token   string
+	BaseURL  string
+	Username string
+	Password string
+	Token    string
 }
 
 type OpenListEntry struct {
@@ -53,7 +55,7 @@ func (c *HTTPOpenListClient) List(ctx context.Context, access OpenListAccess, pa
 
 	if err := c.post(ctx, access, "/api/fs/list", map[string]any{
 		"path":     path,
-		"password": "",
+		"password": access.Password,
 		"page":     1,
 		"per_page": 0,
 		"refresh":  false,
@@ -89,7 +91,7 @@ func (c *HTTPOpenListClient) GetRawLink(ctx context.Context, access OpenListAcce
 
 	if err := c.post(ctx, access, "/api/fs/get", map[string]any{
 		"path":     path,
-		"password": "",
+		"password": access.Password,
 	}, &responseData); err != nil {
 		return "", err
 	}

@@ -30,8 +30,9 @@ func (s *OpenListService) Browse(ctx context.Context, path string) ([]client.Ope
 	}
 
 	entries, err := s.client.List(ctx, client.OpenListAccess{
-		BaseURL: cfg.OpenList.BaseURL,
-		Token:   cfg.OpenList.Token,
+		BaseURL:  cfg.OpenList.BaseURL,
+		Token:    cfg.OpenList.Token,
+		Password: cfg.OpenList.Password,
 	}, path)
 	if err != nil {
 		return nil, err
@@ -86,8 +87,9 @@ func (s *OpenListService) GetRawLink(ctx context.Context, path string) (string, 
 	}
 
 	rawURL, err := s.client.GetRawLink(ctx, client.OpenListAccess{
-		BaseURL: cfg.OpenList.BaseURL,
-		Token:   cfg.OpenList.Token,
+		BaseURL:  cfg.OpenList.BaseURL,
+		Token:    cfg.OpenList.Token,
+		Password: cfg.OpenList.Password,
 	}, path)
 	if err != nil {
 		return "", err
