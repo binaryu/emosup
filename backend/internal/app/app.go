@@ -66,6 +66,7 @@ func New() (*App, error) {
 		Emos:         handler.NewEmosHandler(emosService),
 		Events:       handler.NewEventsHandler(eventBus),
 		TMDB:         handler.NewTMDBHandler(tmdbClient, fileStore),
+		Proxy:        handler.NewProxyHandler(fileStore, openListClient),
 		Scan:         handler.NewScanHandler(scanService),
 		Task:         handler.NewTaskHandler(taskService),
 		FrontendDist: findFrontendDistDir(),

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -222,7 +223,13 @@ func (e *DownloadExecutor) RecoverTask(ctx context.Context, task model.Task) (bo
 }
 
 func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access client.Aria2Access, task model.Task) (string, error) {
-	gid, err := e.aria2Client.AddURI(ctx, access, task.Source.RawURL, client.Aria2AddURIOptions{
+	downloadURL := task.Source.RawURL
+	// For OpenList sources, route through proxy to handle 302-unfriendly backends (Quark etc)
+	if task.Source.Type == "openlist" && task.Source.Path != "" {
+		downloadURL = "http://127.0.0.1:8080/api/proxy/download?path=" + url.QueryEscape(task.Source.Path)
+	}
+
+	gid, err := e.aria2Client.AddURI(ctx, access, downloadURL, client.Aria2AddURIOptions{
 		Dir:              task.Download.SaveDir,
 		Out:              filepath.Base(task.Download.LocalPath),
 		ContinueDownload: true,
@@ -246,7 +253,11 @@ func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access cl
 		return "", err
 	}
 
-	gid, retryErr := e.aria2Client.AddURI(ctx, access, refreshedTask.Source.RawURL, client.Aria2AddURIOptions{
+	retryURL := refreshedTask.Source.RawURL
+	if refreshedTask.Source.Type == "openlist" && refreshedTask.Source.Path != "" {
+		retryURL = "http://127.0.0.1:8080/api/proxy/download?path=" + url.QueryEscape(refreshedTask.Source.Path)
+	}
+	gid, retryErr := e.aria2Client.AddURI(ctx, access, retryURL, client.Aria2AddURIOptions{
 		Dir:              refreshedTask.Download.SaveDir,
 		Out:              filepath.Base(refreshedTask.Download.LocalPath),
 		ContinueDownload: true,
