@@ -35,6 +35,20 @@ func TestParseEpisodeInfo(t *testing.T) {
 			episode:  ptr(5),
 		},
 		{
+			name:     "pure numeric file 01.mp4 with cn season dir",
+			fileName: "01.mp4",
+			fullPath: "/quark/D 盾牌/第一季（2002）全13集/01.mp4",
+			season:   ptr(1),
+			episode:  ptr(1),
+		},
+		{
+			name:     "pure numeric file 02.mp4",
+			fileName: "02.mp4",
+			fullPath: "/TV/Show/Season 2/02.mp4",
+			season:   ptr(2),
+			episode:  ptr(2),
+		},
+		{
 			name:     "episode from path season",
 			fileName: "Show.EP03.mkv",
 			fullPath: "/TV/Show/Season 2/Show.EP03.mkv",

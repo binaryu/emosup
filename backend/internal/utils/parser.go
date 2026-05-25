@@ -13,12 +13,14 @@ var (
 	reSeasonEpisode   = regexp.MustCompile(`(?i)\bS(\d{1,2})\s*E(\d{1,3})\b`)
 	reXEpisode        = regexp.MustCompile(`(?i)\b(\d{1,2})x(\d{1,3})\b`)
 	reBracketEpisode  = regexp.MustCompile(`\[(\d{1,3})\]`)
+	reNumericFile     = regexp.MustCompile(`(?i)^(\d{1,3})\s*\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
 	reEpisodeSuffix   = regexp.MustCompile(`(?i)[\s_.\-]+(\d{1,3})\s*\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
 	reEpisodeOnly     = regexp.MustCompile(`(?i)\bEP?(\d{1,3})\b`)
 	reCnEpisode       = regexp.MustCompile(`第\s*(\d{1,3})\s*集`)
 	reSeasonText      = regexp.MustCompile(`(?i)season[\s._-]*(\d{1,2})`)
 	reSeasonShort     = regexp.MustCompile(`(?i)\bS(\d{1,2})\b`)
-	reCnSeason        = regexp.MustCompile(`第\s*(\d{1,2})\s*季`)
+	reCnSeasonDigit   = regexp.MustCompile(`第\s*(\d{1,2})\s*季`)
+	reCnSeasonWord    = regexp.MustCompile(`第([一二三四五六七八九十]+)季`)
 )
 
 func ParseEpisodeInfo(fileName, fullPath string) model.ParsedEpisodeInfo {
@@ -43,6 +45,17 @@ func ParseEpisodeInfo(fileName, fullPath string) model.ParsedEpisodeInfo {
 	info.IsSpecial = isSpecialPath(full)
 	if info.IsSpecial {
 		info.Season = intPtr(0)
+	}
+
+	// Pure numeric filename: 01.mp4, 02.mp4
+	if info.Episode == nil {
+		if matched := reNumericFile.FindStringSubmatch(name); len(matched) >= 3 {
+			ep := mustAtoi(matched[1])
+			if ep > 0 && ep <= 200 {
+				info.Episode = intPtr(ep)
+				info.RawText = matched[0]
+			}
+		}
 	}
 
 	// [01] square bracket episode (most common in anime releases)
@@ -102,11 +115,19 @@ func parseSeasonFromPath(fullPath string) *int {
 			return intPtr(0)
 		}
 
-		if matched := reSeasonText.FindStringSubmatch(segment); len(matched) == 2 {
+		// Chinese number word: 第一季, 第二季...
+		if matched := reCnSeasonWord.FindStringSubmatch(segment); len(matched) == 2 {
+			if n := cnNumToInt(matched[1]); n > 0 {
+				return intPtr(n)
+			}
+		}
+
+		// Digit season: 第1季, Season 1, S1
+		if matched := reCnSeasonDigit.FindStringSubmatch(segment); len(matched) == 2 {
 			return intPtr(mustAtoi(matched[1]))
 		}
 
-		if matched := reCnSeason.FindStringSubmatch(segment); len(matched) == 2 {
+		if matched := reSeasonText.FindStringSubmatch(segment); len(matched) == 2 {
 			return intPtr(mustAtoi(matched[1]))
 		}
 
@@ -116,6 +137,28 @@ func parseSeasonFromPath(fullPath string) *int {
 	}
 
 	return nil
+}
+
+func cnNumToInt(s string) int {
+	cnMap := map[rune]int{
+		'一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+		'六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+	}
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return 0
+	}
+	if len(runes) == 1 {
+		return cnMap[runes[0]]
+	}
+	// Handle 十一, 十二, 二十 etc.
+	if runes[0] == '十' {
+		return 10 + cnMap[runes[1]]
+	}
+	if len(runes) == 2 && runes[1] == '十' {
+		return cnMap[runes[0]] * 10
+	}
+	return 0
 }
 
 func isSpecialPath(value string) bool {
