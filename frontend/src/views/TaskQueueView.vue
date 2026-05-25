@@ -67,6 +67,9 @@
       <div class="stat-widget danger">
         <div class="stat-content"><span class="stat-label">失败异常</span><strong>{{ taskStore.stats.failed }}</strong></div>
       </div>
+      <div class="stat-widget success">
+        <div class="stat-content"><span class="stat-label">已完成</span><strong>{{ taskStore.stats.completed }}</strong></div>
+      </div>
     </div>
 
     <el-card class="queue-card" :body-style="{ padding: '0' }">
@@ -81,7 +84,10 @@
           <template #default="{ row }">
             <div class="task-target">
               <span class="file-name">{{ row.source.file_name }}</span>
-              <span class="task-id">{{ row.id }}</span>
+              <span class="task-meta">
+                <span class="task-id">{{ row.id }}</span>
+                <span v-if="row.parsed.season != null || row.parsed.episode != null" class="task-ep">S{{ row.parsed.season ?? '?' }}E{{ row.parsed.episode ?? '?' }}</span>
+              </span>
             </div>
           </template>
         </el-table-column>
@@ -405,18 +411,21 @@ onMounted(() => {
 .toolbar { display: flex; gap: 12px; align-items: center; }
 .runtime-alert { margin-bottom: 0; }
 
-.stats-dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.stats-dashboard { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
 .stat-widget { background: var(--bg-panel); border: 1px solid var(--line-soft); border-radius: 12px; padding: 16px 20px; text-align: center; }
 .stat-widget.primary { border-left: 3px solid var(--brand); }
 .stat-widget.warning { border-left: 3px solid #eab308; }
 .stat-widget.muted { border-left: 3px solid #9ca3af; }
 .stat-widget.danger { border-left: 3px solid #ef4444; }
+.stat-widget.success { border-left: 3px solid #22c55e; }
 .stat-label { display: block; color: var(--text-subtle); font-size: 12px; margin-bottom: 4px; }
 .stat-content strong { font-size: 22px; color: var(--text-main); }
 
 .task-target { display: flex; flex-direction: column; gap: 2px; }
 .file-name { font-weight: 600; color: var(--text-main); }
 .task-id { font-size: 11px; color: var(--text-muted); font-family: monospace; }
+.task-meta { display: flex; gap: 8px; align-items: center; }
+.task-ep { font-size: 11px; color: var(--brand); font-weight: 600; font-family: monospace; }
 
 .status-progress-cell { display: flex; flex-direction: column; gap: 8px; }
 .status-row { display: flex; align-items: center; gap: 6px; }
