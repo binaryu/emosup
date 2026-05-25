@@ -40,9 +40,9 @@ func (e *DownloadExecutor) Execute(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	// For OpenList sources, download directly (no aria2 needed).
-	// This avoids cross-container networking issues with proxy URLs.
-	if task.Source.Type == "openlist" {
+	// For OpenList sources on 302-unfriendly backends (Quark etc), download directly.
+	// Check if the first path component matches the configured proxy backend list.
+	if task.Source.Type == "openlist" && e.needsDirectDownload(ctx, task) {
 		return e.downloadDirect(ctx, task)
 	}
 
@@ -274,6 +274,31 @@ func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access cl
 	}
 
 	return gid, nil
+}
+
+func (e *DownloadExecutor) needsDirectDownload(ctx context.Context, task model.Task) bool {
+	path := strings.TrimPrefix(task.Source.Path, "/")
+	firstDir := strings.SplitN(path, "/", 2)[0]
+	if firstDir == "" {
+		return false
+	}
+
+	cfg, err := e.taskService.LoadConfig(ctx)
+	if err != nil {
+		return false
+	}
+
+	backends := strings.TrimSpace(cfg.Worker.ProxyBackends)
+	if backends == "" {
+		return false
+	}
+
+	for _, name := range strings.Split(backends, ",") {
+		if strings.EqualFold(strings.TrimSpace(name), firstDir) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *DownloadExecutor) downloadDirect(ctx context.Context, task model.Task) error {

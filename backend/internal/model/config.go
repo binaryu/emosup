@@ -41,6 +41,7 @@ type WorkerConfig struct {
 	SaveRetryIntervalSeconds int    `json:"save_retry_interval_seconds"`
 	SaveRetryMaxAttempts     int    `json:"save_retry_max_attempts"`
 	TMDBAPIKey               string `json:"tmdb_api_key"`
+	ProxyBackends            string `json:"proxy_backends"`
 }
 
 func DefaultAppConfig() AppConfig {
@@ -65,6 +66,7 @@ func DefaultAppConfig() AppConfig {
 			UploadChunkSizeMB:        8,
 			SaveRetryIntervalSeconds: 25,
 			SaveRetryMaxAttempts:     8,
+			ProxyBackends:            "quark,夸克",
 		},
 	}
 }

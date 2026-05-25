@@ -148,6 +148,10 @@
             <el-form-item label="TMDB API Key">
               <el-input v-model="configStore.config.worker.tmdb_api_key" placeholder="api.themoviedb.org 申请" />
             </el-form-item>
+            <el-form-item label="代理下载目录名">
+              <el-input v-model="configStore.config.worker.proxy_backends" placeholder="quark,夸克,115" />
+              <span style="font-size: 11px; color: var(--text-subtle)">逗号分隔的根目录名，匹配到的走本地代理下载（用于夸克等 302 不兼容的网盘）</span>
+            </el-form-item>
           </div>
         </el-form>
       </el-card>

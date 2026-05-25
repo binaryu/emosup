@@ -49,6 +49,7 @@ export interface WorkerConfig {
   save_retry_interval_seconds: number
   save_retry_max_attempts: number
   tmdb_api_key: string
+  proxy_backends: string
 }
 
 export interface AppConfig {

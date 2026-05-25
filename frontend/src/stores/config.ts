@@ -32,6 +32,7 @@ const defaultConfig: AppConfig = {
     save_retry_interval_seconds: 25,
     save_retry_max_attempts: 8,
     tmdb_api_key: '',
+    proxy_backends: 'quark,夸克',
   },
 }
 
