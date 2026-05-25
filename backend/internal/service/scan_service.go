@@ -225,6 +225,10 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 			item.SelectedItemID > 0 &&
 			strings.TrimSpace(item.SelectedItemType) != ""
 
+		// Look up has_media from tree for matched episodes
+		if item.SelectedItemID > 0 && tree.VideoType == "tv" {
+		item.HasMedia = lookupHasMedia(&tree, item.SelectedItemID)
+		}
 		log.Printf(
 			"scan item parsed and matched: scan=%s file=%s season=%v episode=%v status=%s",
 			scan.ID,
@@ -386,4 +390,16 @@ func (s *ScanService) UpdateScanItem(ctx context.Context, scanID, itemID string,
 
 	log.Printf("scan item updated: scan=%s item=%s confirmed=%v", scanID, itemID, updatedItem.Confirmed)
 	return scan, updatedItem, nil
+}
+
+func lookupHasMedia(tree *client.EmosVideoTree, itemID int64) *bool {
+	for _, season := range tree.Seasons {
+		for _, episode := range season.Episodes {
+			if episode.ItemID == itemID {
+				hasMedia := episode.HasMedia
+				return &hasMedia
+			}
+		}
+	}
+	return nil
 }

@@ -89,6 +89,7 @@ export interface ScanItem {
   file_size: number
   raw_url: string
   is_video: boolean
+  has_media?: boolean
   parsed: ParsedEpisodeInfo
   match_status: string
   match_reason: string

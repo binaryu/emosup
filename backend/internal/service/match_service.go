@@ -16,6 +16,7 @@ type MatchResult struct {
 	SelectedItemType string
 	SelectedItemID   int64
 	SelectedTitle    string
+	HasMedia         *bool
 }
 
 func NewMatchService() *MatchService {
@@ -55,6 +56,11 @@ func (s *MatchService) Match(tree client.EmosVideoTree, parsed model.ParsedEpiso
 			continue
 		}
 
+	for _, season := range tree.Seasons {
+		if season.SeasonNumber != seasonNumber {
+			continue
+		}
+
 		for _, episode := range season.Episodes {
 			if episode.EpisodeNumber != *parsed.Episode {
 				continue
@@ -66,6 +72,7 @@ func (s *MatchService) Match(tree client.EmosVideoTree, parsed model.ParsedEpiso
 				Title:    buildEpisodeTitle(tree.Title, season.SeasonNumber, episode.EpisodeNumber, episode.EpisodeTitle),
 			})
 		}
+	}
 	}
 
 	switch len(candidates) {

@@ -55,6 +55,7 @@ type ScanItem struct {
 	FileSize         int64             `json:"file_size"`
 	RawURL           string            `json:"raw_url"`
 	IsVideo          bool              `json:"is_video"`
+	HasMedia         *bool             `json:"has_media,omitempty"`
 	Parsed           ParsedEpisodeInfo `json:"parsed"`
 	MatchStatus      MatchStatus       `json:"match_status"`
 	MatchReason      string            `json:"match_reason"`

@@ -39,6 +39,14 @@
                 创建任务
               </el-button>
               <el-button
+                type="warning"
+                plain
+                size="small"
+                @click="selectEmptyMedia(scan)"
+              >
+                全选空资源
+              </el-button>
+              <el-button
                 type="danger"
                 plain
                 size="small"
@@ -130,6 +138,13 @@
               <StatusTag :status="row.match_status" />
             </template>
           </el-table-column>
+          <el-table-column label="资源" width="70" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.has_media === false" type="danger" size="small" effect="plain">空</el-tag>
+              <el-tag v-else-if="row.has_media === true" type="success" size="small" effect="plain">有</el-tag>
+              <span v-else class="muted-text">-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="目标" min-width="180" show-overflow-tooltip>
             <template #default="{ row }">
               <span v-if="row.selected_title" class="target-title">{{ row.selected_title }}</span>
@@ -167,7 +182,7 @@ import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { useScanStore } from '@/stores/scans'
 import { useTaskStore } from '@/stores/tasks'
-import type { ScanItem, MatchCandidate } from '@/types/api'
+import type { ScanItem, ScanSession, MatchCandidate } from '@/types/api'
 import { formatSizeInMB } from '@/utils/format'
 
 const router = useRouter()
@@ -185,6 +200,11 @@ function canCreateTask(row: ScanItem, scanSource?: string) {
       row.is_video &&
       (isLocal || row.raw_url),
   )
+}
+
+async function selectEmptyMedia(scan: ScanSession) {
+  const ids = scan.items.filter(i => i.has_media === false && canCreateTask(i, scan.source)).map(i => i.id)
+  selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scan.id]: ids }
 }
 
 function applyCandidate(row: ScanItem, candidate: MatchCandidate) {
