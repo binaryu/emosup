@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -230,7 +231,12 @@ func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access cl
 	downloadURL := task.Source.RawURL
 	// For OpenList sources, route through proxy to handle 302-unfriendly backends (Quark etc)
 	if task.Source.Type == "openlist" && task.Source.Path != "" {
-		downloadURL = "http://127.0.0.1:8080/api/proxy/download?path=" + url.QueryEscape(task.Source.Path)
+		// Use container service name or env var so aria2 (in another container) can reach us
+		proxyHost := os.Getenv("EMOSUP_PROXY_HOST")
+		if proxyHost == "" {
+			proxyHost = "host.docker.internal"
+		}
+		downloadURL = fmt.Sprintf("http://%s:8080/api/proxy/download?path=%s", proxyHost, url.QueryEscape(task.Source.Path))
 	}
 
 	gid, err := e.aria2Client.AddURI(ctx, access, downloadURL, client.Aria2AddURIOptions{
@@ -259,7 +265,11 @@ func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access cl
 
 	retryURL := refreshedTask.Source.RawURL
 	if refreshedTask.Source.Type == "openlist" && refreshedTask.Source.Path != "" {
-		retryURL = "http://127.0.0.1:8080/api/proxy/download?path=" + url.QueryEscape(refreshedTask.Source.Path)
+		proxyHost := os.Getenv("EMOSUP_PROXY_HOST")
+		if proxyHost == "" {
+			proxyHost = "host.docker.internal"
+		}
+		retryURL = fmt.Sprintf("http://%s:8080/api/proxy/download?path=%s", proxyHost, url.QueryEscape(refreshedTask.Source.Path))
 	}
 	gid, retryErr := e.aria2Client.AddURI(ctx, access, retryURL, client.Aria2AddURIOptions{
 		Dir:              refreshedTask.Download.SaveDir,
