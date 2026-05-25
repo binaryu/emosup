@@ -187,14 +187,25 @@ func (s *TaskService) ListTasks(_ context.Context, req ListTasksRequest) (model.
 		filtered = append(filtered, task)
 	}
 
-	// Sort: active tasks first, then by created time
+	// Sort: active tasks first, then by season/episode, then filename
 	sort.Slice(filtered, func(i, j int) bool {
 		pi := statusPriority(filtered[i].Status)
 		pj := statusPriority(filtered[j].Status)
 		if pi != pj {
 			return pi < pj
 		}
-		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+		// Same priority: sort by season then episode
+		si := taskSeason(filtered[i])
+		sj := taskSeason(filtered[j])
+		if si != sj {
+			return si < sj
+		}
+		ei := taskEpisode(filtered[i])
+		ej := taskEpisode(filtered[j])
+		if ei != ej {
+			return ei < ej
+		}
+		return filtered[i].Source.FileName < filtered[j].Source.FileName
 	})
 
 	page := req.Page
@@ -1286,6 +1297,20 @@ func maxInt64(a, b int64) int64 {
 
 func newTaskServiceError(code int, message string) error {
 	return &TaskServiceError{Code: code, Message: message}
+}
+
+func taskSeason(task model.Task) int {
+	if task.Parsed.Season != nil {
+		return *task.Parsed.Season
+	}
+	return 999
+}
+
+func taskEpisode(task model.Task) int {
+	if task.Parsed.Episode != nil {
+		return *task.Parsed.Episode
+	}
+	return 999
 }
 
 func statusPriority(status model.TaskStatus) int {
