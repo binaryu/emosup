@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -285,6 +286,7 @@ func (e *DownloadExecutor) needsDirectDownload(ctx context.Context, task model.T
 
 	cfg, err := e.taskService.LoadConfig(ctx)
 	if err != nil {
+		log.Printf("needsDirectDownload: failed to load config: %v", err)
 		return false
 	}
 
@@ -295,9 +297,11 @@ func (e *DownloadExecutor) needsDirectDownload(ctx context.Context, task model.T
 
 	for _, name := range strings.Split(backends, ",") {
 		if strings.EqualFold(strings.TrimSpace(name), firstDir) {
+			log.Printf("needsDirectDownload: matched %s", firstDir)
 			return true
 		}
 	}
+	log.Printf("needsDirectDownload: no match for %s (backends=%s)", firstDir, backends)
 	return false
 }
 
