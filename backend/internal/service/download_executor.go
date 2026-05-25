@@ -292,7 +292,7 @@ func (e *DownloadExecutor) needsDirectDownload(ctx context.Context, task model.T
 
 	backends := strings.TrimSpace(cfg.Worker.ProxyBackends)
 	if backends == "" {
-		return false
+		backends = "quark,夸克" // default for existing configs
 	}
 
 	for _, name := range strings.Split(backends, ",") {

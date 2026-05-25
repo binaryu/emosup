@@ -18,6 +18,5 @@ services:
       - /bin/sh
       - -ec
       - |
-        [ -f /app/backend/data/config.json ] || cp /app/defaults/config.example.json /app/backend/data/config.json || true
-        sed -i 's/"host": "127.0.0.1"/"host": "0.0.0.0"/' /app/backend/data/config.json 2>/dev/null || true
+        [ -f /app/backend/data/config.json ] || cp /app/defaults/config.example.json /app/backend/data/config.json
         exec /app/backend/emosup-server
