@@ -11,6 +11,22 @@
         <el-button :loading="taskStore.loading" @click="reload">刷新</el-button>
         <el-button
           v-if="selectedTaskIds.length > 0"
+          type="warning"
+          plain
+          @click="handleBatchPause"
+        >
+          暂停所选 ({{ selectedTaskIds.length }})
+        </el-button>
+        <el-button
+          v-if="selectedTaskIds.length > 0"
+          type="success"
+          plain
+          @click="handleBatchResume"
+        >
+          恢复所选 ({{ selectedTaskIds.length }})
+        </el-button>
+        <el-button
+          v-if="selectedTaskIds.length > 0"
           type="danger"
           plain
           @click="handleBatchDelete"
@@ -285,6 +301,26 @@ async function handleDelete(taskId: string) {
     await taskStore.fetchTaskStats()
     ElMessage.success('任务已删除')
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '删除任务失败') }
+}
+
+async function handleBatchPause() {
+  const ids = selectedTaskIds.value
+  if (!ids.length) return
+  try {
+    const resp = await fetch('/api/tasks/batch-pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
+    const d = await resp.json()
+    if (d.success) { selectedTaskIds.value = []; refreshData(); ElMessage.success('已暂停 ' + (d.data.paused?.length || 0) + ' 个任务') }
+  } catch { ElMessage.error('操作失败') }
+}
+
+async function handleBatchResume() {
+  const ids = selectedTaskIds.value
+  if (!ids.length) return
+  try {
+    const resp = await fetch('/api/tasks/batch-resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
+    const d = await resp.json()
+    if (d.success) { selectedTaskIds.value = []; refreshData(); ElMessage.success('已恢复 ' + (d.data.resumed?.length || 0) + ' 个任务') }
+  } catch { ElMessage.error('操作失败') }
 }
 
 async function handleBatchDelete() {

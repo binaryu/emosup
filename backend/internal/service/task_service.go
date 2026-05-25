@@ -301,6 +301,28 @@ func (s *TaskService) GetNextRunnableTask(ctx context.Context, excludeIDs map[st
 	return model.Task{}, false, nil
 }
 
+func (s *TaskService) BatchPauseTasks(ctx context.Context, ids []string) (paused, failed []string) {
+	for _, id := range ids {
+		if _, err := s.PauseTask(ctx, strings.TrimSpace(id)); err != nil {
+			failed = append(failed, id)
+		} else {
+			paused = append(paused, id)
+		}
+	}
+	return
+}
+
+func (s *TaskService) BatchResumeTasks(ctx context.Context, ids []string) (resumed, failed []string) {
+	for _, id := range ids {
+		if _, err := s.ResumeTask(ctx, strings.TrimSpace(id)); err != nil {
+			failed = append(failed, id)
+		} else {
+			resumed = append(resumed, id)
+		}
+	}
+	return
+}
+
 func (s *TaskService) PauseTask(ctx context.Context, id string) (model.Task, error) {
 	now := time.Now()
 	task, err := s.store.UpdateTask(id, func(task *model.Task) error {

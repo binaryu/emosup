@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
 	"mime"
 	"os"
 	"path/filepath"
@@ -164,6 +165,14 @@ func (e *UploadExecutor) saveWithRetry(ctx context.Context, task model.Task, acc
 			FileID:   task.Upload.FileID,
 		})
 		if err == nil {
+			// Delete local file after successful upload to save disk space
+			if localPath := strings.TrimSpace(task.Download.LocalPath); localPath != "" {
+				if rmErr := os.Remove(localPath); rmErr != nil {
+					log.Printf("failed to remove local file after upload: %s err=%v", localPath, rmErr)
+				} else {
+					log.Printf("local file removed after upload: %s", localPath)
+				}
+			}
 			_, completeErr := e.taskService.MarkUploadCompleted(ctx, task.ID, result.MediaID)
 			return completeErr
 		}

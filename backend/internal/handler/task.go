@@ -21,6 +21,8 @@ func NewTaskHandler(service *service.TaskService) *TaskHandler {
 func (h *TaskHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/tasks/batch-create", h.batchCreateTasks)
 	router.POST("/tasks/batch-delete", h.batchDeleteTasks)
+	router.POST("/tasks/batch-pause", h.batchPauseTasks)
+	router.POST("/tasks/batch-resume", h.batchResumeTasks)
 	router.GET("/tasks", h.listTasks)
 	router.GET("/tasks/ids", h.listTaskIDs)
 	router.GET("/tasks/stats", h.getTaskStats)
@@ -173,6 +175,30 @@ func (h *TaskHandler) batchDeleteTasks(c *gin.Context) {
 
 	deleted, failed := h.service.BatchDeleteTasks(c.Request.Context(), req.IDs)
 	respondOK(c, gin.H{"deleted": deleted, "failed": failed})
+}
+
+func (h *TaskHandler) batchPauseTasks(c *gin.Context) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	paused, failed := h.service.BatchPauseTasks(c.Request.Context(), req.IDs)
+	respondOK(c, gin.H{"paused": paused, "failed": failed})
+}
+
+func (h *TaskHandler) batchResumeTasks(c *gin.Context) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resumed, failed := h.service.BatchResumeTasks(c.Request.Context(), req.IDs)
+	respondOK(c, gin.H{"resumed": resumed, "failed": failed})
 }
 
 func respondTaskError(c *gin.Context, err error) {
