@@ -119,11 +119,6 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 		return model.Task{}, err
 	}
 
-	// Background goroutine: push upload progress via SSE every 2s
-	uploadCtx, uploadCancel := context.WithCancel(ctx)
-	defer uploadCancel()
-	go e.pushUploadProgress(uploadCtx, task.ID)
-
 	err = e.emosClient.UploadFile(ctx, task.Upload.UploadURL, localPath, chunkSize, func(progress client.EmosUploadProgress) error {
 		if canceled, cancelErr := e.taskService.IsTaskCanceled(ctx, task.ID); cancelErr != nil {
 			return cancelErr
@@ -147,29 +142,6 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 		return model.Task{}, err
 	}
 	return task, nil
-}
-
-func (e *UploadExecutor) pushUploadProgress(ctx context.Context, taskID string) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			t, err := e.taskService.GetTask(context.Background(), taskID)
-			if err != nil || t.Status != model.TaskStatusUploading {
-				return
-			}
-			if e.eventBus != nil {
-				e.eventBus.Publish(eventbus.TaskEvent{
-					TaskID: t.ID, Status: "uploading",
-					UlProg: t.Upload.Progress, UlSpeed: t.Upload.Speed,
-					UlDone: t.Upload.UploadedBytes, UlTotal: t.Upload.TotalBytes,
-				})
-			}
-		}
-	}
 }
 
 func (e *UploadExecutor) saveWithRetry(ctx context.Context, task model.Task, access client.EmosAccess, interval time.Duration, maxAttempts int) error {

@@ -254,7 +254,25 @@ func (s *TaskService) ListTasks(_ context.Context, req ListTasksRequest) (model.
 }
 
 func (s *TaskService) ListAllTasks(_ context.Context) ([]model.Task, error) {
-	return s.store.ListTasks()
+	tasks, err := s.store.ListTasks()
+	if err != nil {
+		return nil, err
+	}
+	// Sort by season/episode so scheduler picks in order
+	sort.Slice(tasks, func(i, j int) bool {
+		si := taskSeason(tasks[i])
+		sj := taskSeason(tasks[j])
+		if si != sj {
+			return si < sj
+		}
+		ei := taskEpisode(tasks[i])
+		ej := taskEpisode(tasks[j])
+		if ei != ej {
+			return ei < ej
+		}
+		return tasks[i].Source.FileName < tasks[j].Source.FileName
+	})
+	return tasks, nil
 }
 
 func (s *TaskService) GetNextQueuedTask(ctx context.Context) (model.Task, bool, error) {
