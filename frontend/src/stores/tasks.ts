@@ -41,7 +41,12 @@ export const useTaskStore = defineStore('tasks', {
         params.set('page_size', String(pageSize))
 
         const data = await parseApiResponse<TaskListResponse>(await fetch(`/api/tasks?${params.toString()}`))
-        this.tasks = data.items
+        // Merge instead of replace to avoid table re-render
+        if (this.tasks.length === 0 || page !== this.page || status !== this.statusFilter) {
+          this.tasks = data.items
+        } else {
+          this.mergeTasks(data.items)
+        }
         this.total = data.total
         this.page = data.page
         this.pageSize = data.page_size
@@ -49,6 +54,21 @@ export const useTaskStore = defineStore('tasks', {
       } finally {
         this.loading = false
       }
+    },
+    mergeTasks(items: Task[]) {
+      const newMap = new Map(items.map(t => [t.id, t]))
+      const existingIds = new Set(this.tasks.map(t => t.id))
+      // Update existing rows in-place
+      for (const t of this.tasks) {
+        const updated = newMap.get(t.id)
+        if (updated) Object.assign(t, updated)
+      }
+      // Add new rows at the beginning
+      for (const t of items) {
+        if (!existingIds.has(t.id)) this.tasks.unshift(t)
+      }
+      // Remove rows no longer in list
+      this.tasks = this.tasks.filter(t => newMap.has(t.id))
     },
     async fetchTask(taskId: string) {
       this.loading = true
@@ -136,6 +156,16 @@ export const useTaskStore = defineStore('tasks', {
       } finally {
         this.loading = false
       }
+    },
+    async pauseTask(taskId: string) {
+      const task = await parseApiResponse<Task>(await fetch(`/api/tasks/${taskId}/pause`, { method: 'POST' }))
+      this.syncTask(task)
+      return task
+    },
+    async resumeTask(taskId: string) {
+      const task = await parseApiResponse<Task>(await fetch(`/api/tasks/${taskId}/resume`, { method: 'POST' }))
+      this.syncTask(task)
+      return task
     },
     syncTask(task: Task) {
       const index = this.tasks.findIndex((item) => item.id === task.id)

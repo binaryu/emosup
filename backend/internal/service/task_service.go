@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -186,6 +187,16 @@ func (s *TaskService) ListTasks(_ context.Context, req ListTasksRequest) (model.
 		filtered = append(filtered, task)
 	}
 
+	// Sort: active tasks first, then by created time
+	sort.Slice(filtered, func(i, j int) bool {
+		pi := statusPriority(filtered[i].Status)
+		pj := statusPriority(filtered[j].Status)
+		if pi != pj {
+			return pi < pj
+		}
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
 	page := req.Page
 	if page <= 0 {
 		page = 1
@@ -254,11 +265,40 @@ func (s *TaskService) GetNextRunnableTask(ctx context.Context, excludeIDs map[st
 			if _, excluded := excludeIDs[task.ID]; excluded {
 				continue
 			}
+			if task.Paused {
+				continue
+			}
 			return task, true, nil
 		}
 	}
 
 	return model.Task{}, false, nil
+}
+
+func (s *TaskService) PauseTask(ctx context.Context, id string) (model.Task, error) {
+	now := time.Now()
+	task, err := s.store.UpdateTask(id, func(task *model.Task) error {
+		task.Paused = true
+		task.UpdatedAt = now
+		return nil
+	})
+	if err == nil {
+		_ = s.appendTaskLog(id, "info", "task paused")
+	}
+	return task, err
+}
+
+func (s *TaskService) ResumeTask(ctx context.Context, id string) (model.Task, error) {
+	now := time.Now()
+	task, err := s.store.UpdateTask(id, func(task *model.Task) error {
+		task.Paused = false
+		task.UpdatedAt = now
+		return nil
+	})
+	if err == nil {
+		_ = s.appendTaskLog(id, "info", "task resumed")
+	}
+	return task, err
 }
 
 func (s *TaskService) BatchDeleteTasks(ctx context.Context, ids []string) (deleted []string, failed []string) {
@@ -1246,4 +1286,23 @@ func maxInt64(a, b int64) int64 {
 
 func newTaskServiceError(code int, message string) error {
 	return &TaskServiceError{Code: code, Message: message}
+}
+
+func statusPriority(status model.TaskStatus) int {
+	switch status {
+	case model.TaskStatusUploading, model.TaskStatusSaving:
+		return 1
+	case model.TaskStatusDownloading:
+		return 2
+	case model.TaskStatusQueued, model.TaskStatusUploadPending, model.TaskStatusDownloadCompleted:
+		return 3
+	case model.TaskStatusDownloadFailed, model.TaskStatusUploadFailed:
+		return 4
+	case model.TaskStatusCompleted:
+		return 5
+	case model.TaskStatusCanceled:
+		return 6
+	default:
+		return 10
+	}
 }

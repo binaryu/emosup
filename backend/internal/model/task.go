@@ -22,6 +22,7 @@ type Task struct {
 	ScanSessionID string       `json:"scan_session_id"`
 	ScanItemID    string       `json:"scan_item_id"`
 	Status        TaskStatus   `json:"status"`
+	Paused        bool         `json:"paused"`
 	RetryCount    int          `json:"retry_count"`
 	Source        TaskSource   `json:"source"`
 	Parsed        TaskParsed   `json:"parsed"`

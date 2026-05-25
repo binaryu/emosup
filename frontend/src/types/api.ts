@@ -121,6 +121,7 @@ export interface Task {
   scan_item_id: string
   status: TaskStatus
   retry_count: number
+  paused: boolean
   created_at: string
   updated_at: string
   finished_at?: string

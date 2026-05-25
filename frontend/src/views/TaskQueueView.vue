@@ -118,6 +118,8 @@
                   <el-button link size="small" class="action-btn">管理</el-button>
                 </template>
                 <div class="popover-actions">
+                  <div v-if="!row.paused && canCancel(row.status)" class="popover-item primary" @click="handlePause(row.id)">暂停</div>
+                  <div v-if="row.paused" class="popover-item success" @click="handleResume(row.id)">恢复</div>
                   <div class="popover-item danger" :class="{ disabled: !canCancel(row.status) }" @click="canCancel(row.status) && handleCancel(row.id)">取消任务</div>
                   <div class="popover-item warning" :class="{ disabled: !canRetry(row.status) }" @click="canRetry(row.status) && handleRetry(row.id)">重新入队</div>
                   <div class="popover-divider"></div>
@@ -214,12 +216,19 @@ async function reload() {
 
 function goDetail(taskId: string) { router.push(`/tasks/${taskId}`) }
 
+async function handlePause(taskId: string) {
+  try { await taskStore.pauseTask(taskId); ElMessage.success('已暂停') }
+  catch (e) { ElMessage.error(e instanceof Error ? e.message : '操作失败') }
+}
+
+async function handleResume(taskId: string) {
+  try { await taskStore.resumeTask(taskId); ElMessage.success('已恢复') }
+  catch (e) { ElMessage.error(e instanceof Error ? e.message : '操作失败') }
+}
+
 async function handleCancel(taskId: string) {
-  try {
-    await taskStore.cancelTask(taskId)
-    await refreshData()
-    ElMessage.success('任务已取消')
-  } catch (error) { ElMessage.error(error instanceof Error ? error.message : '取消任务失败') }
+  try { await taskStore.cancelTask(taskId); await refreshData(); ElMessage.success('任务已取消') }
+  catch (e) { ElMessage.error(e instanceof Error ? e.message : '取消失败') }
 }
 
 async function handleDelete(taskId: string) {
@@ -333,6 +342,8 @@ onMounted(() => {
 .popover-item:hover:not(.disabled) { background: rgba(0,0,0,0.04); }
 .popover-item.danger { color: #ef4444; }
 .popover-item.warning { color: #eab308; }
+.popover-item.primary { color: var(--el-color-primary); }
+.popover-item.success { color: var(--el-color-success); }
 .popover-item.disabled { opacity: 0.35; cursor: not-allowed; }
 .popover-divider { height: 1px; background: var(--line-soft); margin: 4px 0; }
 

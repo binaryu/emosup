@@ -28,6 +28,8 @@ func (h *TaskHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/tasks/:id/logs", h.getTaskLogs)
 	router.POST("/tasks/:id/retry", h.retryTask)
 	router.POST("/tasks/:id/cancel", h.cancelTask)
+	router.POST("/tasks/:id/pause", h.pauseTask)
+	router.POST("/tasks/:id/resume", h.resumeTask)
 }
 
 func (h *TaskHandler) batchCreateTasks(c *gin.Context) {
@@ -118,6 +120,24 @@ func (h *TaskHandler) cancelTask(c *gin.Context) {
 		return
 	}
 
+	respondOK(c, task)
+}
+
+func (h *TaskHandler) pauseTask(c *gin.Context) {
+	task, err := h.service.PauseTask(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondTaskError(c, err)
+		return
+	}
+	respondOK(c, task)
+}
+
+func (h *TaskHandler) resumeTask(c *gin.Context) {
+	task, err := h.service.ResumeTask(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondTaskError(c, err)
+		return
+	}
 	respondOK(c, task)
 }
 
