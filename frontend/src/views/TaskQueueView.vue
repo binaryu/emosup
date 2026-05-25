@@ -201,44 +201,52 @@ const runtimeDescription = computed(() => {
 
 let timer: number | undefined
 let eventSource: EventSource | undefined
-let progressTimer: number | undefined
+let pendingEvents: any[] = []
+let flushTimer: number | undefined
 
 function connectSSE() {
   if (eventSource) return
   eventSource = new EventSource('/api/tasks/events')
   eventSource.onmessage = (e) => {
     try {
-      const evt = JSON.parse(e.data)
-      // In-place update the matching task row
-      const task = taskStore.tasks.find(t => t.id === evt.task_id)
-      if (task) {
-        if (evt.status === 'done') {
-          // Task completed/finished - do a full reload to get final state
-          refreshData()
-        } else {
-          // Update progress in-place without HTTP requests
-          if (evt.status) task.status = evt.status as TaskStatus
-          if (evt.dl_prog !== undefined) {
-            task.download.progress = evt.dl_prog
-            task.download.speed = evt.dl_speed
-            task.download.completed_bytes = evt.dl_done
-            task.download.total_bytes = evt.dl_total
-          }
-          if (evt.ul_prog !== undefined) {
-            task.upload.progress = evt.ul_prog
-            task.upload.speed = evt.ul_speed
-            task.upload.uploaded_bytes = evt.ul_done
-            task.upload.total_bytes = evt.ul_total
-          }
-        }
-      }
-    } catch { /* ignore parse errors */ }
+      pendingEvents.push(JSON.parse(e.data))
+      scheduleFlush()
+    } catch { /* ignore */ }
   }
   eventSource.onerror = () => {
     eventSource?.close()
     eventSource = undefined
     setTimeout(connectSSE, 3000)
   }
+}
+
+function scheduleFlush() {
+  if (flushTimer) return
+  flushTimer = window.setTimeout(() => {
+    flushTimer = undefined
+    const events = pendingEvents.splice(0)
+    // Deduplicate: keep only latest per task
+    const latest = new Map<string, any>()
+    for (const evt of events) latest.set(evt.task_id, evt)
+    // Update active tasks only
+    for (const evt of latest.values()) {
+      if (evt.status === 'done') { refreshData(); return }
+      const task = taskStore.tasks.find(t => t.id === evt.task_id)
+      if (!task || !isActive(task.status as TaskStatus)) continue
+      if (evt.dl_prog !== undefined) {
+        task.download.progress = evt.dl_prog
+        task.download.speed = evt.dl_speed
+        task.download.completed_bytes = evt.dl_done
+        task.download.total_bytes = evt.dl_total
+      }
+      if (evt.ul_prog !== undefined) {
+        task.upload.progress = evt.ul_prog
+        task.upload.speed = evt.ul_speed
+        task.upload.uploaded_bytes = evt.ul_done
+        task.upload.total_bytes = evt.ul_total
+      }
+    }
+  }, 500)
 }
 
 function canRetry(status: TaskStatus) { return ['canceled', 'download_failed', 'upload_failed'].includes(status) }
@@ -374,7 +382,7 @@ onMounted(() => {
     if (document.hidden) {
       eventSource?.close()
       eventSource = undefined
-      if (progressTimer) { window.clearInterval(progressTimer); progressTimer = undefined }
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined }
       if (timer) { window.clearInterval(timer); timer = undefined }
     } else {
       connectSSE()
@@ -385,7 +393,7 @@ onMounted(() => {
   onUnmounted(() => {
     eventSource?.close()
     eventSource = undefined
-    if (progressTimer) { window.clearInterval(progressTimer); progressTimer = undefined }
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined }
     if (timer) { window.clearInterval(timer); timer = undefined }
     document.removeEventListener('visibilitychange', onVisibilityChange)
   })

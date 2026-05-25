@@ -127,13 +127,6 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 		}
 
 		_, syncErr := e.taskService.SyncUploadProgress(ctx, task.ID, progress)
-		if e.eventBus != nil {
-			e.eventBus.Publish(eventbus.TaskEvent{
-				TaskID: task.ID, Status: "uploading",
-				UlProg: float64(progress.UploadedBytes) * 100 / float64(progress.TotalBytes), UlSpeed: progress.Speed,
-				UlDone: progress.UploadedBytes, UlTotal: progress.TotalBytes,
-			})
-		}
 		return syncErr
 	})
 	if err != nil {
