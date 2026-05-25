@@ -91,17 +91,28 @@ func (s *OpenListService) GetFileInfo(ctx context.Context, path string) ([]clien
 }
 
 func (s *OpenListService) ListVideoFiles(ctx context.Context, path string) ([]client.OpenListEntry, error) {
+	return s.listVideoFilesRecursive(ctx, path)
+}
+
+func (s *OpenListService) listVideoFilesRecursive(ctx context.Context, path string) ([]client.OpenListEntry, error) {
 	entries, err := s.Browse(ctx, path)
 	if err != nil {
 		return nil, err
 	}
 
-	videos := make([]client.OpenListEntry, 0, len(entries))
+	videos := make([]client.OpenListEntry, 0)
 	for _, entry := range entries {
-		if entry.IsDir || !IsVideoFile(entry.Name) {
+		if entry.IsDir {
+			subVideos, subErr := s.listVideoFilesRecursive(ctx, entry.Path)
+			if subErr != nil {
+				continue // skip inaccessible subdirs
+			}
+			videos = append(videos, subVideos...)
 			continue
 		}
-		videos = append(videos, entry)
+		if IsVideoFile(entry.Name) {
+			videos = append(videos, entry)
+		}
 	}
 
 	return videos, nil

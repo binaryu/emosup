@@ -142,26 +142,8 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 		}}
 		log.Printf("local single file: scan=%s file=%s size=%d", scan.ID, singleFile, localEntry.Size)
 	} else if isLocal {
-		// Local directory mode: list video files from download dir
-		_, localEntries, localErr := s.localService.Browse(ctx, req.Path)
-		if localErr != nil {
-			log.Printf("local browse failed: scan=%s path=%s err=%v", scan.ID, req.Path, localErr)
-			scan.Status = model.ScanSessionStatusFailed
-			scan.UpdatedAt = time.Now()
-			_ = s.store.SaveScan(scan)
-			return model.ScanSession{}, localErr
-		}
-		for _, e := range localEntries {
-			if e.IsDir || !IsVideoFile(e.Name) {
-				continue
-			}
-			entries = append(entries, client.OpenListEntry{
-				Name:  e.Name,
-				Path:  e.Path,
-				IsDir: false,
-				Size:  e.Size,
-			})
-		}
+		// Local directory mode: list video files recursively from download dir
+		entries = s.listLocalVideosRecursive(ctx, req.Path)
 		log.Printf("local list success: scan=%s videos=%d", scan.ID, len(entries))
 	} else if singleFile != "" {
 		// OpenList single file mode
@@ -282,6 +264,33 @@ func (s *ScanService) ListScans(_ context.Context) ([]model.ScanSession, error) 
 
 func (s *ScanService) GetScan(_ context.Context, id string) (model.ScanSession, error) {
 	return s.store.GetScan(id)
+}
+
+func (s *ScanService) listLocalVideosRecursive(ctx context.Context, path string) []client.OpenListEntry {
+	var result []client.OpenListEntry
+	s.localListRecursive(ctx, path, &result)
+	return result
+}
+
+func (s *ScanService) localListRecursive(ctx context.Context, path string, result *[]client.OpenListEntry) {
+	_, entries, err := s.localService.Browse(ctx, path)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir {
+			s.localListRecursive(ctx, e.Path, result)
+			continue
+		}
+		if IsVideoFile(e.Name) {
+			*result = append(*result, client.OpenListEntry{
+				Name:  e.Name,
+				Path:  e.Path,
+				IsDir: false,
+				Size:  e.Size,
+			})
+		}
+	}
 }
 
 func (s *ScanService) DeleteScan(_ context.Context, id string) error {
