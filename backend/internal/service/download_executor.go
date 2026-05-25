@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,23 @@ import (
 	"emosup/backend/internal/model"
 	"emosup/backend/internal/eventbus"
 )
+
+var proxyBaseURL string
+
+func getProxyBaseURL() string {
+	if proxyBaseURL != "" {
+		return proxyBaseURL
+	}
+	// Resolve host.docker.internal to a real IP aria2 can reach
+	ips, err := net.LookupHost("host.docker.internal")
+	if err == nil && len(ips) > 0 {
+		proxyBaseURL = "http://" + ips[0] + ":8080"
+		return proxyBaseURL
+	}
+	// Fallback
+	proxyBaseURL = "http://172.17.0.1:8080"
+	return proxyBaseURL
+}
 
 type DownloadExecutor struct {
 	taskService *TaskService
@@ -232,7 +250,7 @@ func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access cl
 	// The proxy handles auth, redirects, and backend-specific headers uniformly.
 	// Works for Quark, 115, Baidu, Aliyun, and any other OpenList storage.
 	if task.Source.Type == "openlist" && task.Source.Path != "" {
-		downloadURL = fmt.Sprintf("http://host.docker.internal:8080/api/proxy/download?path=%s", url.QueryEscape(task.Source.Path))
+		downloadURL = fmt.Sprintf("%s/api/proxy/download?path=%s", getProxyBaseURL(), url.QueryEscape(task.Source.Path))
 	}
 
 	gid, err := e.aria2Client.AddURI(ctx, access, downloadURL, client.Aria2AddURIOptions{
@@ -261,7 +279,7 @@ func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access cl
 
 	retryURL := refreshedTask.Source.RawURL
 	if refreshedTask.Source.Type == "openlist" && refreshedTask.Source.Path != "" {
-		retryURL = fmt.Sprintf("http://host.docker.internal:8080/api/proxy/download?path=%s", url.QueryEscape(refreshedTask.Source.Path))
+		retryURL = fmt.Sprintf("%s/api/proxy/download?path=%s", getProxyBaseURL(), url.QueryEscape(refreshedTask.Source.Path))
 	}
 	gid, retryErr := e.aria2Client.AddURI(ctx, access, retryURL, client.Aria2AddURIOptions{
 		Dir:              refreshedTask.Download.SaveDir,
