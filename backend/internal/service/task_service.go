@@ -296,6 +296,15 @@ func (s *TaskService) GetNextRunnableTask(ctx context.Context, excludeIDs map[st
 		return model.Task{}, false, err
 	}
 
+	// Safety: if any upload is active, don't start new downloads (disk space protection)
+	hasUploading := false
+	for _, t := range tasks {
+		if t.Status == model.TaskStatusUploading || t.Status == model.TaskStatusSaving {
+			hasUploading = true
+			break
+		}
+	}
+
 	priorities := []model.TaskStatus{
 		model.TaskStatusSaving,
 		model.TaskStatusUploadPending,
@@ -310,6 +319,10 @@ func (s *TaskService) GetNextRunnableTask(ctx context.Context, excludeIDs map[st
 				continue
 			}
 			if task.Paused {
+				continue
+			}
+			// Don't start new downloads while uploading (disk space protection)
+			if hasUploading && status == model.TaskStatusQueued {
 				continue
 			}
 			return task, true, nil
@@ -898,7 +911,7 @@ func (s *TaskService) RetryTask(ctx context.Context, id string) (model.Task, err
 	previousStatus := task.Status
 
 	switch task.Status {
-	case model.TaskStatusCanceled, model.TaskStatusDownloadFailed, model.TaskStatusUploadFailed:
+	case model.TaskStatusCanceled, model.TaskStatusDownloadFailed, model.TaskStatusUploadFailed, model.TaskStatusCompleted:
 	default:
 		return model.Task{}, newTaskServiceError(http.StatusBadRequest, fmt.Sprintf("task status %q cannot be retried", task.Status))
 	}

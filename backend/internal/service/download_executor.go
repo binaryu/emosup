@@ -9,12 +9,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"emosup/backend/internal/client"
 	"emosup/backend/internal/eventbus"
 	"emosup/backend/internal/model"
 )
+
+func getFreeDiskSpace(dir string) (int64, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(dir, &stat); err != nil {
+		return 0, err
+	}
+	return int64(stat.Bavail) * int64(stat.Bsize), nil
+}
 
 type DownloadExecutor struct {
 	taskService    *TaskService
@@ -310,6 +319,15 @@ func (e *DownloadExecutor) downloadDirect(ctx context.Context, task model.Task) 
 	task, err := e.taskService.PrepareTaskDownload(ctx, task.ID)
 	if err != nil {
 		return err
+	}
+
+	// Check disk space: require at least file size + 500MB buffer
+	freeBytes, _ := getFreeDiskSpace(task.Download.SaveDir)
+	if task.Download.TotalBytes > 0 && freeBytes > 0 && freeBytes < task.Download.TotalBytes+500*1024*1024 {
+		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID,
+			fmt.Sprintf("磁盘空间不足: 需要 %.1fGB, 可用 %.1fGB",
+				float64(task.Download.TotalBytes)/1073741824, float64(freeBytes)/1073741824))
+		return fmt.Errorf("insufficient disk space")
 	}
 
 	// Get OpenList access

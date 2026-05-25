@@ -255,7 +255,7 @@ function scheduleFlush() {
   }, 500)
 }
 
-function canRetry(status: TaskStatus) { return ['canceled', 'download_failed', 'upload_failed'].includes(status) }
+function canRetry(status: TaskStatus) { return ['canceled', 'download_failed', 'upload_failed', 'completed'].includes(status) }
 function canCancel(status: TaskStatus) { return ['queued', 'downloading', 'upload_pending', 'uploading', 'saving', 'download_failed', 'upload_failed'].includes(status) }
 function isActive(status: TaskStatus) { return ['downloading', 'uploading', 'saving'].includes(status) }
 
