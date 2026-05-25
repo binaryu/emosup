@@ -65,6 +65,7 @@ func (e *UploadExecutor) Execute(ctx context.Context, taskID string) error {
 
 	switch task.Status {
 	case model.TaskStatusUploadPending:
+		// For retried uploads with existing upload context, resume from where we left off
 		task, err = e.uploadFile(ctx, task, access, chunkSize)
 		if err != nil {
 			if errors.Is(err, errTaskCanceled) {
@@ -97,29 +98,45 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 		return model.Task{}, firstNonNil(markErr, err)
 	}
 
-	task, err = e.taskService.PrepareTaskUpload(ctx, task.ID, info.Size())
-	if err != nil {
-		return model.Task{}, err
+	resuming := task.Upload.FileID != "" && task.Upload.UploadURL != ""
+	if !resuming {
+		task, err = e.taskService.PrepareTaskUpload(ctx, task.ID, info.Size())
+		if err != nil {
+			return model.Task{}, err
+		}
+
+		tokenResult, tokenErr := e.emosClient.GetUploadToken(ctx, access, client.EmosUploadTokenRequest{
+			ResourceType: "video",
+			FileType:     detectUploadMimeType(localPath),
+			FileName:     filepath.Base(localPath),
+			FileSize:     info.Size(),
+			FileStorage:  task.Upload.Storage,
+		})
+		if tokenErr != nil {
+			_, markErr := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "upload_token_failed", "upload token failed: "+tokenErr.Error())
+			return model.Task{}, firstNonNil(markErr, tokenErr)
+		}
+
+		task, err = e.taskService.SetUploadContext(ctx, task.ID, tokenResult)
+		if err != nil {
+			return model.Task{}, err
+		}
+	} else {
+		// Resume: just update total bytes and set status
+		task, err = e.taskService.PrepareTaskUpload(ctx, task.ID, info.Size())
+		if err != nil {
+			return model.Task{}, err
+		}
 	}
 
-	tokenResult, err := e.emosClient.GetUploadToken(ctx, access, client.EmosUploadTokenRequest{
-		ResourceType: "video",
-		FileType:     detectUploadMimeType(localPath),
-		FileName:     filepath.Base(localPath),
-		FileSize:     info.Size(),
-		FileStorage:  task.Upload.Storage,
-	})
-	if err != nil {
-		_, markErr := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "upload_token_failed", "upload token failed: "+err.Error())
-		return model.Task{}, firstNonNil(markErr, err)
+	// Resume from existing progress if we have upload context and bytes already sent
+	effectiveUploadURL := task.Upload.UploadURL
+	offset := task.Upload.UploadedBytes
+	if offset > 0 && offset < info.Size() {
+		log.Printf("upload resuming: task=%s from byte %d/%d", task.ID, offset, info.Size())
 	}
 
-	task, err = e.taskService.SetUploadContext(ctx, task.ID, tokenResult)
-	if err != nil {
-		return model.Task{}, err
-	}
-
-	err = e.emosClient.UploadFile(ctx, task.Upload.UploadURL, localPath, chunkSize, func(progress client.EmosUploadProgress) error {
+	err = e.emosClient.UploadFile(ctx, effectiveUploadURL, localPath, chunkSize, offset, func(progress client.EmosUploadProgress) error {
 		if canceled, cancelErr := e.taskService.IsTaskCanceled(ctx, task.ID); cancelErr != nil {
 			return cancelErr
 		} else if canceled {

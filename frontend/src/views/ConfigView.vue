@@ -137,7 +137,7 @@
               <el-input-number v-model="configStore.config.worker.max_concurrency" :min="1" :max="20" class="full-width" :controls="false" />
             </el-form-item>
             <el-form-item label="分片(MB)">
-              <el-input-number v-model="configStore.config.worker.upload_chunk_size_mb" :min="1" :max="64" class="full-width" :controls="false" />
+              <el-input-number v-model="configStore.config.worker.upload_chunk_size_mb" :min="1" :max="512" class="full-width" :controls="false" />
             </el-form-item>
             <el-form-item label="重试间隔(s)">
               <el-input-number v-model="configStore.config.worker.save_retry_interval_seconds" :min="5" class="full-width" :controls="false" />

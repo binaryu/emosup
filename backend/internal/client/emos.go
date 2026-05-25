@@ -136,7 +136,7 @@ type EmosClient interface {
 	GetVideoTree(ctx context.Context, access EmosAccess, tmdbID int64, videoType string) (EmosVideoTree, error)
 	GetVideoBase(ctx context.Context, access EmosAccess, itemType string, itemID int64) (EmosVideoBase, error)
 	GetUploadToken(ctx context.Context, access EmosAccess, req EmosUploadTokenRequest) (EmosUploadTokenResult, error)
-	UploadFile(ctx context.Context, uploadURL, filePath string, chunkSize int64, onProgress func(EmosUploadProgress) error) error
+	UploadFile(ctx context.Context, uploadURL, filePath string, chunkSize int64, offset int64, onProgress func(EmosUploadProgress) error) error
 	SaveVideo(ctx context.Context, access EmosAccess, req EmosSaveVideoRequest) (EmosSaveVideoResult, error)
 }
 
@@ -309,7 +309,7 @@ func (c *HTTPEmosClient) GetUploadToken(ctx context.Context, access EmosAccess, 
 	return result, nil
 }
 
-func (c *HTTPEmosClient) UploadFile(ctx context.Context, uploadURL, filePath string, chunkSize int64, onProgress func(EmosUploadProgress) error) error {
+func (c *HTTPEmosClient) UploadFile(ctx context.Context, uploadURL, filePath string, chunkSize int64, offset int64, onProgress func(EmosUploadProgress) error) error {
 	if strings.TrimSpace(uploadURL) == "" {
 		return errors.New("upload url is required")
 	}
@@ -337,7 +337,7 @@ func (c *HTTPEmosClient) UploadFile(ctx context.Context, uploadURL, filePath str
 	totalBytes := info.Size()
 	contentType := detectContentType(filePath)
 
-	var uploadedBytes int64
+	var uploadedBytes int64 = offset
 	for uploadedBytes < totalBytes {
 		if err := ctx.Err(); err != nil {
 			return err

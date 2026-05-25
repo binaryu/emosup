@@ -209,7 +209,7 @@ func (c *stubEmosUploadClient) GetUploadToken(context.Context, client.EmosAccess
 	return c.tokenResult, c.tokenErr
 }
 
-func (c *stubEmosUploadClient) UploadFile(_ context.Context, _ string, _ string, _ int64, onProgress func(client.EmosUploadProgress) error) error {
+func (c *stubEmosUploadClient) UploadFile(_ context.Context, _ string, _ string, _ int64, _ int64, onProgress func(client.EmosUploadProgress) error) error {
 	for _, progress := range c.uploadProgress {
 		if onProgress != nil {
 			if err := onProgress(progress); err != nil {
