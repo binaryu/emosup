@@ -30,6 +30,7 @@ type OpenListEntry struct {
 type OpenListClient interface {
 	List(ctx context.Context, access OpenListAccess, path string) ([]OpenListEntry, error)
 	GetRawLink(ctx context.Context, access OpenListAccess, path string) (string, error)
+	Login(ctx context.Context, access OpenListAccess) (string, error)
 }
 
 type HTTPOpenListClient struct {
@@ -40,6 +41,29 @@ func NewHTTPOpenListClient() *HTTPOpenListClient {
 	return &HTTPOpenListClient{
 		httpClient: &http.Client{Timeout: 20 * time.Second},
 	}
+}
+
+func (c *HTTPOpenListClient) Login(ctx context.Context, access OpenListAccess) (string, error) {
+	if strings.TrimSpace(access.Username) == "" || strings.TrimSpace(access.Password) == "" {
+		return "", errors.New("openlist username and password are required for login")
+	}
+
+	var result struct {
+		Token string `json:"token"`
+	}
+
+	if err := c.post(ctx, access, "/api/auth/login", map[string]any{
+		"username": access.Username,
+		"password": access.Password,
+	}, &result); err != nil {
+		return "", err
+	}
+
+	if strings.TrimSpace(result.Token) == "" {
+		return "", errors.New("openlist login returned empty token")
+	}
+
+	return result.Token, nil
 }
 
 func (c *HTTPOpenListClient) List(ctx context.Context, access OpenListAccess, path string) ([]OpenListEntry, error) {

@@ -336,3 +336,7 @@ func (c *stubOpenListClient) List(context.Context, client.OpenListAccess, string
 func (c *stubOpenListClient) GetRawLink(context.Context, client.OpenListAccess, string) (string, error) {
 	return c.rawURL, nil
 }
+
+func (c *stubOpenListClient) Login(context.Context, client.OpenListAccess) (string, error) {
+	return "", nil
+}

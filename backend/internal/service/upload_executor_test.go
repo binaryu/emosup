@@ -52,7 +52,7 @@ func TestUploadExecutorExecuteUploadPendingTaskWithSaveRetry(t *testing.T) {
 			},
 		},
 	}
-	executor := NewUploadExecutor(taskService, emosClient)
+	executor := NewUploadExecutor(taskService, emosClient, nil)
 	taskID := seedUploadPendingTask(t, taskService, fileStore)
 
 	if err := executor.Execute(context.Background(), taskID); err != nil {

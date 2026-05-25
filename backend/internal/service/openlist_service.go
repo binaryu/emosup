@@ -23,17 +23,44 @@ func NewOpenListService(store *store.FileStore, openListClient client.OpenListCl
 	}
 }
 
+func (s *OpenListService) buildAccess(cfg model.AppConfig) client.OpenListAccess {
+	return client.OpenListAccess{
+		BaseURL:  cfg.OpenList.BaseURL,
+		Username: cfg.OpenList.Username,
+		Password: cfg.OpenList.Password,
+		Token:    cfg.OpenList.Token,
+	}
+}
+
+func (s *OpenListService) ensureToken(ctx context.Context, access *client.OpenListAccess) error {
+	if access.Token != "" {
+		return nil
+	}
+	if access.Username == "" || access.Password == "" {
+		return nil // No credentials to try
+	}
+
+	token, err := s.client.Login(ctx, *access)
+	if err != nil {
+		return err
+	}
+	access.Token = token
+	return nil
+}
+
 func (s *OpenListService) Browse(ctx context.Context, path string) ([]client.OpenListEntry, error) {
 	cfg, err := s.store.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	entries, err := s.client.List(ctx, client.OpenListAccess{
-		BaseURL:  cfg.OpenList.BaseURL,
-		Token:    cfg.OpenList.Token,
-		Password: cfg.OpenList.Password,
-	}, path)
+	access := s.buildAccess(cfg)
+	// Auto-login if username/password provided but no token
+	if err := s.ensureToken(ctx, &access); err != nil {
+		return nil, err
+	}
+
+	entries, err := s.client.List(ctx, access, path)
 	if err != nil {
 		return nil, err
 	}
@@ -86,11 +113,12 @@ func (s *OpenListService) GetRawLink(ctx context.Context, path string) (string, 
 		return "", err
 	}
 
-	rawURL, err := s.client.GetRawLink(ctx, client.OpenListAccess{
-		BaseURL:  cfg.OpenList.BaseURL,
-		Token:    cfg.OpenList.Token,
-		Password: cfg.OpenList.Password,
-	}, path)
+	access := s.buildAccess(cfg)
+	if err := s.ensureToken(ctx, &access); err != nil {
+		return "", err
+	}
+
+	rawURL, err := s.client.GetRawLink(ctx, access, path)
 	if err != nil {
 		return "", err
 	}

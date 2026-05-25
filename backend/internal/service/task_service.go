@@ -947,8 +947,9 @@ func (s *TaskService) GetOpenListAccess(_ context.Context) (client.OpenListAcces
 
 	return client.OpenListAccess{
 		BaseURL:  cfg.OpenList.BaseURL,
-		Token:    cfg.OpenList.Token,
+		Username: cfg.OpenList.Username,
 		Password: cfg.OpenList.Password,
+		Token:    cfg.OpenList.Token,
 	}, cfg, nil
 }
 
@@ -973,6 +974,14 @@ func (s *TaskService) RefreshTaskRawURL(ctx context.Context, taskID string) (mod
 	access, cfg, err := s.GetOpenListAccess(ctx)
 	if err != nil {
 		return model.Task{}, false, err
+	}
+
+	// Auto-login if username/password provided but no token
+	if access.Token == "" && s.openListClient != nil {
+		token, loginErr := s.openListClient.Login(ctx, access)
+		if loginErr == nil {
+			access.Token = token
+		}
 	}
 
 	rawURL, err := s.openListClient.GetRawLink(ctx, access, task.Source.Path)

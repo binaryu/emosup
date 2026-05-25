@@ -85,7 +85,7 @@ func TestCreateScan(t *testing.T) {
 	openListService := NewOpenListService(fileStore, client.NewHTTPOpenListClient())
 	emosService := NewEmosService(fileStore, client.NewHTTPEmosClient())
 	matchService := NewMatchService()
-	scanService := NewScanService(fileStore, openListService, emosService, matchService)
+	scanService := NewScanService(fileStore, openListService, nil, emosService, matchService)
 
 	scan, err := scanService.CreateScan(context.Background(), CreateScanRequest{
 		Path:      "/TV/Demo/Season 1",
