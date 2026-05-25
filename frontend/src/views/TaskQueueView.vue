@@ -17,6 +17,14 @@
         >
           批量删除 ({{ selectedTaskIds.length }})
         </el-button>
+        <el-button
+          v-if="taskStore.total > 0"
+          link
+          type="primary"
+          @click="selectAllTasks"
+        >
+          {{ allSelected ? '取消全选' : '全选所有' }}
+        </el-button>
       </div>
     </PageHeaderCard>
 
@@ -162,6 +170,7 @@ const taskStore = useTaskStore()
 
 const filterStatus = ref<TaskStatus | ''>('')
 const selectedTaskIds = ref<string[]>([])
+const allSelected = ref(false)
 const statuses: TaskStatus[] = [
   'queued', 'downloading', 'download_failed', 'download_completed',
   'upload_pending', 'uploading', 'saving', 'upload_failed', 'completed', 'canceled',
@@ -181,16 +190,38 @@ let progressTimer: number | undefined
 function connectSSE() {
   if (eventSource) return
   eventSource = new EventSource('/api/tasks/events')
-  eventSource.onmessage = () => {
-    void Promise.all([
-      taskStore.fetchTasks({ status: filterStatus.value, page: taskStore.page }),
-      taskStore.fetchTaskStats(),
-      taskStore.fetchRuntimeStatus(),
-    ])
+  eventSource.onmessage = (e) => {
+    try {
+      const evt = JSON.parse(e.data)
+      // In-place update the matching task row
+      const task = taskStore.tasks.find(t => t.id === evt.task_id)
+      if (task) {
+        if (evt.status === 'done') {
+          // Task completed/finished - do a full reload to get final state
+          refreshData()
+        } else {
+          // Update progress in-place without HTTP requests
+          if (evt.status) task.status = evt.status as TaskStatus
+          if (evt.dl_prog !== undefined) {
+            task.download.progress = evt.dl_prog
+            task.download.speed = evt.dl_speed
+            task.download.completed_bytes = evt.dl_done
+            task.download.total_bytes = evt.dl_total
+          }
+          if (evt.ul_prog !== undefined) {
+            task.upload.progress = evt.ul_prog
+            task.upload.speed = evt.ul_speed
+            task.upload.uploaded_bytes = evt.ul_done
+            task.upload.total_bytes = evt.ul_total
+          }
+        }
+      }
+    } catch { /* ignore parse errors */ }
   }
   eventSource.onerror = () => {
     eventSource?.close()
     eventSource = undefined
+    setTimeout(connectSSE, 3000)
   }
 }
 
@@ -200,6 +231,20 @@ function isActive(status: TaskStatus) { return ['downloading', 'uploading', 'sav
 
 function onSelectionChange(rows: Task[]) {
   selectedTaskIds.value = rows.map(r => r.id)
+  allSelected.value = false
+}
+
+async function selectAllTasks() {
+  if (allSelected.value) {
+    allSelected.value = false
+    selectedTaskIds.value = []
+    return
+  }
+  try {
+    const resp = await fetch(`/api/tasks/ids?status=${filterStatus.value}`)
+    const d = await resp.json()
+    if (d.success) { selectedTaskIds.value = d.data; allSelected.value = true }
+  } catch { /* ignore */ }
 }
 
 async function reload() {

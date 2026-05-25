@@ -112,7 +112,11 @@ func (e *DownloadExecutor) Execute(ctx context.Context, taskID string) error {
 			return err
 		}
 		if e.eventBus != nil {
-			e.eventBus.Publish(eventbus.TaskEvent{TaskID: task.ID, Status: "downloading"})
+			e.eventBus.Publish(eventbus.TaskEvent{
+				TaskID: task.ID, Status: "downloading",
+				DlProg: task.Download.Progress, DlSpeed: task.Download.Speed,
+				DlDone: task.Download.CompletedBytes, DlTotal: task.Download.TotalBytes,
+			})
 		}
 
 		switch status.Status {

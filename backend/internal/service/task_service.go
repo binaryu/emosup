@@ -173,6 +173,21 @@ func (s *TaskService) BatchCreateTasks(_ context.Context, req BatchCreateTasksRe
 	return result, nil
 }
 
+func (s *TaskService) ListAllTaskIDs(_ context.Context, statusFilter string) ([]string, error) {
+	tasks, err := s.store.ListTasks()
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if statusFilter != "" && string(task.Status) != statusFilter {
+			continue
+		}
+		ids = append(ids, task.ID)
+	}
+	return ids, nil
+}
+
 func (s *TaskService) ListTasks(_ context.Context, req ListTasksRequest) (model.TaskListResult, error) {
 	tasks, err := s.store.ListTasks()
 	if err != nil {

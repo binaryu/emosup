@@ -3,8 +3,16 @@ package eventbus
 import "sync"
 
 type TaskEvent struct {
-	TaskID string `json:"task_id"`
-	Status string `json:"status"`
+	TaskID   string  `json:"task_id"`
+	Status   string  `json:"status"`
+	DlProg   float64 `json:"dl_prog,omitempty"`
+	DlSpeed  int64   `json:"dl_speed,omitempty"`
+	DlDone   int64   `json:"dl_done,omitempty"`
+	DlTotal  int64   `json:"dl_total,omitempty"`
+	UlProg   float64 `json:"ul_prog,omitempty"`
+	UlSpeed  int64   `json:"ul_speed,omitempty"`
+	UlDone   int64   `json:"ul_done,omitempty"`
+	UlTotal  int64   `json:"ul_total,omitempty"`
 }
 
 type Bus struct {

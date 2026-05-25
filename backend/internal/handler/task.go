@@ -22,6 +22,7 @@ func (h *TaskHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/tasks/batch-create", h.batchCreateTasks)
 	router.POST("/tasks/batch-delete", h.batchDeleteTasks)
 	router.GET("/tasks", h.listTasks)
+	router.GET("/tasks/ids", h.listTaskIDs)
 	router.GET("/tasks/stats", h.getTaskStats)
 	router.GET("/tasks/:id", h.getTask)
 	router.DELETE("/tasks/:id", h.deleteTask)
@@ -149,6 +150,16 @@ func (h *TaskHandler) deleteTask(c *gin.Context) {
 	}
 
 	respondOK(c, gin.H{"deleted": true})
+}
+
+func (h *TaskHandler) listTaskIDs(c *gin.Context) {
+	status := c.Query("status")
+	ids, err := h.service.ListAllTaskIDs(c.Request.Context(), status)
+	if err != nil {
+		respondTaskError(c, err)
+		return
+	}
+	respondOK(c, ids)
 }
 
 func (h *TaskHandler) batchDeleteTasks(c *gin.Context) {
