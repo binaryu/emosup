@@ -11,6 +11,7 @@ services:
       - EMOSUP_FRONTEND_DIST=/app/frontend
       - EMOSUP_PORT=${EMOSUP_PORT:-8080}
       - EMOSUP_LOCAL_ROOT=${EMOSUP_LOCAL_ROOT:-/app/backend/data/downloads}
+      - EMOSUP_DOWNLOADS_DIR=${EMOSUP_DOWNLOADS_DIR:-/app/backend/data/downloads}
     ports:
       - "${EMOSUP_PORT:-8080}:${EMOSUP_PORT:-8080}"
     volumes:
