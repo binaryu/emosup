@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -64,6 +65,26 @@ func getFreeDiskSpace(dir string) (int64, error) {
 		return 0, err
 	}
 	return int64(stat.Bavail) * int64(stat.Bsize), nil
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func formatBytes(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%dB", n)
+	}
+	if n < 1024*1024 {
+		return fmt.Sprintf("%.1fKB", float64(n)/1024)
+	}
+	if n < 1024*1024*1024 {
+		return fmt.Sprintf("%.1fMB", float64(n)/(1024*1024))
+	}
+	return fmt.Sprintf("%.2fGB", float64(n)/(1024*1024*1024))
 }
 
 func (e *DownloadExecutor) Execute(ctx context.Context, taskID string) error {
@@ -337,20 +358,22 @@ func (e *DownloadExecutor) needsDirectDownload(ctx context.Context, task model.T
 }
 
 func (e *DownloadExecutor) downloadDirect(ctx context.Context, task model.Task) error {
+	log.Printf("[download] start: task=%s path=%s", task.ID, task.Source.Path)
+
 	// Prepare download
 	task, err := e.taskService.PrepareTaskDownload(ctx, task.ID)
 	if err != nil {
 		return err
 	}
 
-	// Check disk space: require at least file size + 500MB buffer
+	// Check disk space
 	freeBytes, _ := getFreeDiskSpace(task.Download.SaveDir)
 	if task.Download.TotalBytes > 0 && freeBytes > 0 && freeBytes < task.Download.TotalBytes+500*1024*1024 {
 		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID,
-			fmt.Sprintf("磁盘空间不足: 需要 %.1fGB, 可用 %.1fGB",
-				float64(task.Download.TotalBytes)/1073741824, float64(freeBytes)/1073741824))
+			fmt.Sprintf("磁盘不足: 需%.1fG 可用%.1fG", float64(task.Download.TotalBytes)/1e9, float64(freeBytes)/1e9))
 		return fmt.Errorf("insufficient disk space")
 	}
+	log.Printf("[download] disk ok: task=%s free=%.1fG", task.ID, float64(freeBytes)/1e9)
 
 	// Get OpenList access
 	cfg, err := e.taskService.LoadConfig(ctx)
@@ -368,18 +391,69 @@ func (e *DownloadExecutor) downloadDirect(ctx context.Context, task model.Task) 
 	if access.Token == "" && access.Username != "" {
 		if token, loginErr := e.openListClient.Login(ctx, access); loginErr == nil {
 			access.Token = token
+			log.Printf("[download] login ok: task=%s", task.ID)
+		} else {
+			log.Printf("[download] login failed: task=%s err=%v", task.ID, loginErr)
 		}
 	}
 
-	// Get the actual download URL from OpenList
+	// Resolve actual download URL
 	rawURL, err := e.openListClient.GetRawLink(ctx, access, task.Source.Path)
 	if err != nil {
-		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "failed to get download link: "+err.Error())
+		log.Printf("[download] get link failed: task=%s err=%v", task.ID, err)
+		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "获取下载链接失败: "+err.Error())
 		return err
 	}
 	rawURL = client.ResolveMaybeRelativeURL(cfg.OpenList.BaseURL, rawURL)
+	log.Printf("[download] resolved url: task=%s url=%s", task.ID, rawURL[:minInt(len(rawURL), 80)])
 
-	// Stream download to local file
+	// Download with retry
+	localPath := toContainerPath(task.Download.LocalPath)
+	return e.downloadWithResume(ctx, task, access, cfg, rawURL, localPath)
+}
+
+func (e *DownloadExecutor) downloadWithResume(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string) error {
+	maxRetries := 3
+	for retry := 0; retry < maxRetries; retry++ {
+		if retry > 0 {
+			log.Printf("[download] retry %d/%d: task=%s", retry+1, maxRetries, task.ID)
+			time.Sleep(time.Duration(retry*retry) * time.Second) // 1s, 4s backoff
+		}
+
+		err := e.downloadOnce(ctx, task, access, cfg, rawURL, localPath)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		log.Printf("[download] failed: task=%s retry=%d err=%v", task.ID, retry+1, err)
+
+		// Refresh the raw URL for retries (link may have expired)
+		if retry < maxRetries-1 {
+			newURL, urlErr := e.openListClient.GetRawLink(ctx, access, task.Source.Path)
+			if urlErr == nil {
+				rawURL = client.ResolveMaybeRelativeURL(cfg.OpenList.BaseURL, newURL)
+				log.Printf("[download] refreshed url: task=%s", task.ID)
+			}
+		}
+	}
+	_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "下载失败：已重试3次")
+	return fmt.Errorf("download failed after %d retries", maxRetries)
+}
+
+func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string) error {
+	// Check for partial file for resume
+	var offset int64
+	if info, err := os.Stat(localPath); err == nil && info.Size() > 0 {
+		offset = info.Size()
+		log.Printf("[download] resume: task=%s offset=%d", task.ID, offset)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		return err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return err
@@ -389,74 +463,96 @@ func (e *DownloadExecutor) downloadDirect(ctx context.Context, task model.Task) 
 	if access.Token != "" {
 		req.Header.Set("Authorization", access.Token)
 	}
+	if offset > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "download request failed: "+err.Error())
-		return err
+		return fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, fmt.Sprintf("upstream returned %d", resp.StatusCode))
+	if resp.StatusCode >= 400 && resp.StatusCode != 416 {
 		return fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 
-	localPath := toContainerPath(task.Download.LocalPath)
-	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
-		return err
+	// If server doesn't support Range, start over
+	var file *os.File
+	if offset > 0 && resp.StatusCode == 206 {
+		file, err = os.OpenFile(localPath, os.O_APPEND|os.O_WRONLY, 0644)
+	} else {
+		offset = 0
+		file, err = os.Create(localPath)
 	}
-
-	file, err := os.Create(localPath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	totalBytes := resp.ContentLength
-	var doneBytes int64
-	buf := make([]byte, 32*1024)
+	totalBytes := resp.ContentLength + offset
+	if totalBytes < offset {
+		totalBytes = task.Source.FileSize
+	}
+	var doneBytes int64 = offset
+	buf := make([]byte, 256*1024)
+	lastLog := time.Now()
 
 	for {
-		if ctx.Err() != nil {
+		select {
+		case <-ctx.Done():
 			return ctx.Err()
+		default:
 		}
+
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
 			if _, writeErr := file.Write(buf[:n]); writeErr != nil {
 				return writeErr
 			}
 			doneBytes += int64(n)
-			progress := float64(0)
-			if totalBytes > 0 {
-				progress = float64(doneBytes) * 100 / float64(totalBytes)
-			}
-			if _, syncErr := e.taskService.SyncDownloadStatus(ctx, task.ID, client.Aria2Status{
-				Status:          "active",
-				TotalLength:     totalBytes,
-				CompletedLength: doneBytes,
-			}); syncErr == nil && e.eventBus != nil {
-				e.eventBus.Publish(eventbus.TaskEvent{
-					TaskID: task.ID, Status: "downloading",
-					DlProg: progress, DlDone: doneBytes, DlTotal: totalBytes,
-				})
+
+			// Push progress every 3 seconds
+			now := time.Now()
+			if now.Sub(lastLog) > 3*time.Second || doneBytes >= totalBytes {
+				lastLog = now
+				progress := float64(0)
+				if totalBytes > 0 {
+					progress = float64(doneBytes) * 100 / float64(totalBytes)
+				}
+				speed := int64(0)
+				log.Printf("[download] progress: task=%s %.1f%% %s/%s", task.ID, progress, formatBytes(doneBytes), formatBytes(totalBytes))
+				if _, syncErr := e.taskService.SyncDownloadStatus(ctx, task.ID, client.Aria2Status{
+					Status:          "active",
+					TotalLength:     totalBytes,
+					CompletedLength: doneBytes,
+					DownloadSpeed:   speed,
+				}); syncErr == nil && e.eventBus != nil {
+					e.eventBus.Publish(eventbus.TaskEvent{
+						TaskID: task.ID, Status: "downloading",
+						DlProg: progress, DlDone: doneBytes, DlTotal: totalBytes,
+					})
+				}
 			}
 		}
 		if readErr == io.EOF {
 			break
 		}
 		if readErr != nil {
-			_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "download error: "+readErr.Error())
-			return readErr
+			return fmt.Errorf("read error: %w", readErr)
 		}
 	}
 
+	// Validate
 	info, err := os.Stat(localPath)
 	if err != nil || info.Size() <= 0 {
-		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "downloaded file is empty or missing")
-		return fmt.Errorf("downloaded file is empty")
+		return fmt.Errorf("file empty after download")
+	}
+	if task.Source.FileSize > 0 && info.Size() < task.Source.FileSize {
+		log.Printf("[download] size mismatch: task=%s expected=%d got=%d", task.ID, task.Source.FileSize, info.Size())
 	}
 
+	log.Printf("[download] complete: task=%s size=%s", task.ID, formatBytes(info.Size()))
 	_, err = e.taskService.MarkDownloadCompleted(ctx, task.ID, client.Aria2Status{
 		Status:          "complete",
 		TotalLength:     info.Size(),
