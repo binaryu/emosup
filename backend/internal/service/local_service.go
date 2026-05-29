@@ -26,8 +26,15 @@ func NewLocalService(store *store.FileStore) *LocalService {
 	return &LocalService{store: store}
 }
 
+func (s *LocalService) browseRoot() string {
+	if root := strings.TrimSpace(os.Getenv("EMOSUP_LOCAL_ROOT")); root != "" {
+		return root
+	}
+	return "/app/backend/data/downloads"
+}
+
 func (s *LocalService) GetFileInfo(_ context.Context, relPath string) (LocalEntry, error) {
-	downloadDir := "/app/backend/data/downloads"
+	downloadDir := s.browseRoot()
 
 	absBase, err := filepath.Abs(downloadDir)
 	if err != nil {
@@ -60,7 +67,7 @@ func (s *LocalService) GetFileInfo(_ context.Context, relPath string) (LocalEntr
 }
 
 func (s *LocalService) Browse(_ context.Context, relPath string) (string, []LocalEntry, error) {
-	downloadDir := "/app/backend/data/downloads"
+	downloadDir := s.browseRoot()
 
 	absBase, err := filepath.Abs(downloadDir)
 	if err != nil {
