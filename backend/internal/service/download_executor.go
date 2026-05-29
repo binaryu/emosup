@@ -221,16 +221,8 @@ func (e *DownloadExecutor) RecoverTask(ctx context.Context, task model.Task) (bo
 	switch task.Status {
 	case model.TaskStatusDownloading:
 		if strings.TrimSpace(task.Download.Aria2GID) == "" {
-			if ok, size := hasReusableLocalFile(task); ok {
-				_, err := e.taskService.MarkDownloadCompleted(ctx, task.ID, client.Aria2Status{
-					Status:          "complete",
-					TotalLength:     size,
-					CompletedLength: size,
-					Files:           []client.Aria2File{{Path: task.Download.LocalPath}},
-				})
-				return false, err
-			}
-			_, err := e.taskService.MarkDownloadFailedWithDetails(ctx, task.ID, "recovery", "aria2_gid_not_found", "aria2 gid missing during recovery")
+			// Direct download task — skip aria2 recovery, just re-queue
+			_, err := e.taskService.MarkDownloadFailedWithDetails(ctx, task.ID, "recovery", "download_interrupted", "direct download interrupted during recovery; retry to restart")
 			return false, err
 		}
 
@@ -590,8 +582,10 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string, threads int) error {
 	log.Printf("[download] multi-thread start: task=%s threads=%d", task.ID, threads)
 
-	// Check file size
-	headReq, _ := http.NewRequestWithContext(ctx, "HEAD", rawURL, nil)
+	// Check file size with timeout
+	headCtx, headCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer headCancel()
+	headReq, _ := http.NewRequestWithContext(headCtx, "HEAD", rawURL, nil)
 	headReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	if access.Token != "" {
 		headReq.Header.Set("Authorization", access.Token)
