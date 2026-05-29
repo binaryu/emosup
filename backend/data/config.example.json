@@ -12,7 +12,7 @@
   "aria2": {
     "rpc_url": "http://host.docker.internal:6800/jsonrpc",
     "secret": "",
-    "download_dir": "/app/backend/data/downloads",
+    "download_dir": "./downloads",
     "poll_interval_seconds": 3,
     "connect_timeout_seconds": 10
   },
