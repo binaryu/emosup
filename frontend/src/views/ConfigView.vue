@@ -63,33 +63,6 @@
         </el-form>
       </el-card>
 
-      <!-- aria2 下载器 -->
-      <el-card class="setting-card">
-        <template #header>
-          <div class="card-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-            Aria2 下载器
-          </div>
-        </template>
-        <el-form label-position="top" class="compact-form">
-          <el-form-item label="RPC 地址">
-            <el-input v-model="configStore.config.aria2.rpc_url" placeholder="http://127.0.0.1:6800/jsonrpc" />
-          </el-form-item>
-          <el-row :gutter="12">
-            <el-col :span="10">
-              <el-form-item label="密钥">
-                <el-input v-model="configStore.config.aria2.secret" type="password" show-password />
-              </el-form-item>
-            </el-col>
-            <el-col :span="14">
-              <el-form-item label="下载目录">
-                <el-input v-model="configStore.config.aria2.download_dir" placeholder="./data/downloads" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-        </el-form>
-      </el-card>
-
       <!-- OpenList 挂载 -->
       <el-card class="setting-card">
         <template #header>
