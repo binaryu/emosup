@@ -49,10 +49,16 @@
       class="runtime-alert"
       :title="taskStore.runtime.scheduler_running ? 'Scheduler 运行中' : 'Scheduler 未运行'"
       :type="taskStore.runtime.scheduler_running ? 'success' : 'warning'"
-      :description="runtimeDescription"
       :closable="false"
       show-icon
-    />
+    >
+      <template #default>
+        <div>{{ runtimeDescription }}</div>
+        <div v-if="diskInfo" style="margin-top: 4px; font-size: 12px; color: var(--text-subtle)">
+          磁盘：已用 {{ formatBytes(diskInfo.used_bytes) }} / 共 {{ formatBytes(diskInfo.total_bytes) }} · 剩余 {{ formatBytes(diskInfo.free_bytes) }}
+        </div>
+      </template>
+    </el-alert>
 
     <div v-if="taskStore.stats" class="stats-dashboard">
       <div class="stat-widget primary">
@@ -193,6 +199,7 @@ const taskStore = useTaskStore()
 const filterStatus = ref<TaskStatus | ''>('')
 const selectedTaskIds = ref<string[]>([])
 const allSelected = ref(false)
+const diskInfo = ref<{ total_bytes: number; used_bytes: number; free_bytes: number } | null>(null)
 const statuses: TaskStatus[] = [
   'queued', 'downloading', 'download_failed', 'download_completed',
   'upload_pending', 'uploading', 'saving', 'upload_failed', 'completed', 'canceled',
@@ -277,12 +284,21 @@ async function selectAllTasks() {
   } catch { /* ignore */ }
 }
 
+async function fetchDiskInfo() {
+  try {
+    const resp = await fetch('/api/system/disk')
+    const d = await resp.json()
+    if (d.success) diskInfo.value = d.data
+  } catch { /* ignore */ }
+}
+
 async function reload() {
   try {
     await Promise.all([
       taskStore.fetchTasks({ status: filterStatus.value, page: 1 }),
       taskStore.fetchTaskStats(),
       taskStore.fetchRuntimeStatus(),
+      fetchDiskInfo(),
     ])
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '加载任务失败')
@@ -372,6 +388,7 @@ async function refreshData() {
     taskStore.fetchTasks({ status: filterStatus.value, page: taskStore.page }),
     taskStore.fetchTaskStats(),
     taskStore.fetchRuntimeStatus(),
+    fetchDiskInfo(),
   ])
 }
 

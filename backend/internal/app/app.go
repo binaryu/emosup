@@ -61,7 +61,7 @@ func New() (*App, error) {
 
 	router := handler.NewRouter(handler.RouterDependencies{
 		Health:       handler.NewHealthHandler(),
-		System:       handler.NewSystemHandler(manager),
+		System:       handler.NewSystemHandler(manager, fileStore),
 		Config:       handler.NewConfigHandler(configService),
 		OpenList:     handler.NewOpenListHandler(openListService),
 		Local:        handler.NewLocalHandler(localService),
