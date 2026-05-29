@@ -69,7 +69,7 @@
                   <div class="tmdb-title">{{ item.title }}</div>
                   <div class="tmdb-meta">
                     <span>{{ item.year || '未知' }}</span>
-                    <el-tag size="small" effect="plain">{{ item.type === 'movie' ? '电影' : '剧集' }}</el-tag>
+                    <el-tag size="small" effect="plain" :type="item.media_type === 'movie' ? 'warning' : ''">{{ item.media_type === 'movie' ? '电影' : '剧集' }}</el-tag>
                   </div>
                 </div>
               </div>
@@ -171,13 +171,13 @@ const videoType = ref('')
 const entries = ref<OpenListEntry[]>([])
 const selectedFiles = ref<OpenListEntry[]>([])
 const tmdbLoading = ref(false)
-const tmdbResults = ref<{ tmdb_id: number; title: string; year: string; type: string; poster_path: string }[]>([])
+const tmdbResults = ref<{ tmdb_id: number; title: string; year: string; type: string; media_type?: string; poster_path: string }[]>([])
 
-function selectTMDB(item: { tmdb_id: number; title: string; year: string; type: string; poster_path: string }) {
+function selectTMDB(item: { tmdb_id: number; title: string; year: string; type?: string; media_type?: string; poster_path: string }) {
   tmdbId.value = item.tmdb_id
-  // Auto-set video type based on search result
-  if (item.type === 'tv' || item.type === 'movie') {
-    videoType.value = item.type
+  const mtype = item.media_type || item.type || ''
+  if (mtype === 'tv' || mtype === 'movie') {
+    videoType.value = mtype
   }
 }
 
@@ -212,10 +212,16 @@ async function doSearchTMDB() {
   if (!query || query.length < 2) { tmdbResults.value = []; return }
   tmdbLoading.value = true
   try {
-    const t = videoType.value || 'tv'
-    const resp = await fetch(`/api/tmdb/search?query=${encodeURIComponent(query)}&type=${t}`)
-    const data = await resp.json()
-    tmdbResults.value = data.success ? data.data : []
+    // Search both TV and movie simultaneously
+    const [tvResp, mvResp] = await Promise.all([
+      fetch(`/api/tmdb/search?query=${encodeURIComponent(query)}&type=tv`),
+      fetch(`/api/tmdb/search?query=${encodeURIComponent(query)}&type=movie`),
+    ])
+    const [tvData, mvData] = await Promise.all([tvResp.json(), mvResp.json()])
+    const tvResults = (tvData.success ? tvData.data : []).map((r: any) => ({ ...r, media_type: 'tv' }))
+    const mvResults = (mvData.success ? mvData.data : []).map((r: any) => ({ ...r, media_type: 'movie' }))
+    // TV first, then movies
+    tmdbResults.value = [...tvResults, ...mvResults]
   } catch { tmdbResults.value = [] }
   finally { tmdbLoading.value = false }
 }
