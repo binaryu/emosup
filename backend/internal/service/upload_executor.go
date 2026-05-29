@@ -82,7 +82,7 @@ func (e *UploadExecutor) Execute(ctx context.Context, taskID string) error {
 }
 
 func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access client.EmosAccess, chunkSize int64) (model.Task, error) {
-	localPath := strings.TrimSpace(task.Download.LocalPath)
+	localPath := toContainerPath(strings.TrimSpace(task.Download.LocalPath))
 	if localPath == "" {
 		_, err := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "local_file_missing", "local file path is empty")
 		return model.Task{}, err

@@ -606,7 +606,8 @@ func (s *TaskService) MarkDownloadCompleted(ctx context.Context, taskID string, 
 	if strings.TrimSpace(task.Download.LocalPath) == "" {
 		return s.MarkDownloadFailedWithDetails(ctx, taskID, "download", "download_file_missing", "download completed but local file path is empty")
 	}
-	info, err := os.Stat(task.Download.LocalPath)
+	localPath := toContainerPath(task.Download.LocalPath)
+	info, err := os.Stat(localPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return s.MarkDownloadFailedWithDetails(ctx, taskID, "download", "download_file_missing", "download completed but local file does not exist")
@@ -1335,7 +1336,7 @@ func applyTaskError(task *model.Task, at time.Time, stage, code, message string)
 }
 
 func hasReusableLocalFile(task model.Task) (bool, int64) {
-	localPath := strings.TrimSpace(task.Download.LocalPath)
+	localPath := toContainerPath(strings.TrimSpace(task.Download.LocalPath))
 	if localPath == "" {
 		return false, 0
 	}

@@ -17,12 +17,28 @@ import (
 	"emosup/backend/internal/model"
 )
 
-func getFreeDiskSpace(dir string) (int64, error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(dir, &stat); err != nil {
-		return 0, err
+var (
+	downloadHostPath string
+	downloadContainerPath string
+)
+
+func initDownloadPaths() {
+	downloadHostPath = os.Getenv("EMOSUP_DOWNLOADS_DIR")
+	downloadContainerPath = os.Getenv("EMOSUP_LOCAL_ROOT")
+	if downloadContainerPath == "" {
+		downloadContainerPath = "/app/backend/data/downloads"
 	}
-	return int64(stat.Bavail) * int64(stat.Bsize), nil
+}
+
+// toContainerPath converts a host download path to the container's view
+func toContainerPath(hostPath string) string {
+	if downloadHostPath == "" || downloadContainerPath == "" || downloadHostPath == downloadContainerPath {
+		return hostPath
+	}
+	if strings.HasPrefix(hostPath, downloadHostPath) {
+		return downloadContainerPath + strings.TrimPrefix(hostPath, downloadHostPath)
+	}
+	return hostPath
 }
 
 type DownloadExecutor struct {
@@ -33,12 +49,21 @@ type DownloadExecutor struct {
 }
 
 func NewDownloadExecutor(taskService *TaskService, aria2Client client.Aria2Client, openListClient client.OpenListClient, eventBus *eventbus.Bus) *DownloadExecutor {
+	initDownloadPaths()
 	return &DownloadExecutor{
 		taskService:    taskService,
 		aria2Client:    aria2Client,
 		openListClient: openListClient,
 		eventBus:       eventBus,
 	}
+}
+
+func getFreeDiskSpace(dir string) (int64, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(dir, &stat); err != nil {
+		return 0, err
+	}
+	return int64(stat.Bavail) * int64(stat.Bsize), nil
 }
 
 func (e *DownloadExecutor) Execute(ctx context.Context, taskID string) error {
