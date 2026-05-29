@@ -397,22 +397,24 @@ func (e *DownloadExecutor) downloadDirect(ctx context.Context, task model.Task) 
 		}
 	}
 
-	// Resolve actual download URL
-	rawURL, err := e.openListClient.GetRawLink(ctx, access, task.Source.Path)
+	// Verify OpenList access works by fetching raw link (for auth check)
+	_, err = e.openListClient.GetRawLink(ctx, access, task.Source.Path)
 	if err != nil {
 		log.Printf("[download] get link failed: task=%s err=%v", task.ID, err)
 		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "获取下载链接失败: "+err.Error())
 		return err
 	}
-	rawURL = client.ResolveMaybeRelativeURL(cfg.OpenList.BaseURL, rawURL)
-	log.Printf("[download] resolved url: task=%s url=%s", task.ID, rawURL[:minInt(len(rawURL), 80)])
+	// Build proxy URL: download through OpenList directly (handles auth internally)
+	// This is more reliable than raw CDN URLs which may have short TTLs
+	proxyURL := strings.TrimRight(cfg.OpenList.BaseURL, "/") + "/d" + task.Source.Path
+	log.Printf("[download] using proxy: %s", proxyURL[:minInt(len(proxyURL), 80)])
 
-	// Download with retry
+	// Download with retry using OpenList proxy (handles auth + CDN internally)
 	localPath := toContainerPath(task.Download.LocalPath)
-	return e.downloadWithResume(ctx, task, access, cfg, rawURL, localPath)
+	return e.downloadWithResume(ctx, task, access, cfg, proxyURL, localPath)
 }
 
-func (e *DownloadExecutor) downloadWithResume(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string) error {
+func (e *DownloadExecutor) downloadWithResume(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, downloadURL, localPath string) error {
 	maxRetries := 3
 	for retry := 0; retry < maxRetries; retry++ {
 		if retry > 0 {
@@ -420,7 +422,7 @@ func (e *DownloadExecutor) downloadWithResume(ctx context.Context, task model.Ta
 			time.Sleep(time.Duration(retry*retry) * time.Second) // 1s, 4s backoff
 		}
 
-		err := e.downloadOnce(ctx, task, access, cfg, rawURL, localPath)
+		err := e.downloadOnce(ctx, task, access, cfg, downloadURL, localPath)
 		if err == nil {
 			return nil
 		}
@@ -429,14 +431,8 @@ func (e *DownloadExecutor) downloadWithResume(ctx context.Context, task model.Ta
 		}
 		log.Printf("[download] failed: task=%s retry=%d err=%v", task.ID, retry+1, err)
 
-		// Refresh the raw URL for retries (link may have expired)
-		if retry < maxRetries-1 {
-			newURL, urlErr := e.openListClient.GetRawLink(ctx, access, task.Source.Path)
-			if urlErr == nil {
-				rawURL = client.ResolveMaybeRelativeURL(cfg.OpenList.BaseURL, newURL)
-				log.Printf("[download] refreshed url: task=%s", task.ID)
-			}
-		}
+		// Proxy URL doesn't expire - just retry with same URL
+		log.Printf("[download] retrying with same proxy url: task=%s", task.ID)
 	}
 	_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "下载失败：已重试3次")
 	return fmt.Errorf("download failed after %d retries", maxRetries)
