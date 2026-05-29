@@ -405,7 +405,7 @@ func (e *DownloadExecutor) downloadDirect(ctx context.Context, task model.Task) 
 		return fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 
-	localPath := task.Download.LocalPath
+	localPath := toContainerPath(task.Download.LocalPath)
 	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
 		return err
 	}

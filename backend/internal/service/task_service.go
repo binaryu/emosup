@@ -501,7 +501,7 @@ func (s *TaskService) PrepareTaskDownload(ctx context.Context, taskID string) (m
 		clearTaskError(task)
 		task.Download.Aria2GID = ""
 		task.Download.SaveDir = downloadDir
-		task.Download.LocalPath = filepath.Join(downloadDir, fileName)
+		task.Download.LocalPath = filepath.Join(toContainerPath(downloadDir), fileName)
 		task.Download.Status = "starting"
 		task.Download.TotalBytes = maxInt64(task.Download.TotalBytes, task.Source.FileSize)
 		task.Download.CompletedBytes = 0
