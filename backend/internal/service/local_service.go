@@ -27,15 +27,7 @@ func NewLocalService(store *store.FileStore) *LocalService {
 }
 
 func (s *LocalService) GetFileInfo(_ context.Context, relPath string) (LocalEntry, error) {
-	cfg, err := s.store.LoadConfig()
-	if err != nil {
-		return LocalEntry{}, err
-	}
-
-	downloadDir := strings.TrimSpace(cfg.Aria2.DownloadDir)
-	if downloadDir == "" {
-		downloadDir = "."
-	}
+	downloadDir := "/app/backend/data/downloads"
 
 	absBase, err := filepath.Abs(downloadDir)
 	if err != nil {
@@ -68,15 +60,7 @@ func (s *LocalService) GetFileInfo(_ context.Context, relPath string) (LocalEntr
 }
 
 func (s *LocalService) Browse(_ context.Context, relPath string) (string, []LocalEntry, error) {
-	cfg, err := s.store.LoadConfig()
-	if err != nil {
-		return "", nil, err
-	}
-
-	downloadDir := strings.TrimSpace(cfg.Aria2.DownloadDir)
-	if downloadDir == "" {
-		downloadDir = "."
-	}
+	downloadDir := "/app/backend/data/downloads"
 
 	absBase, err := filepath.Abs(downloadDir)
 	if err != nil {
