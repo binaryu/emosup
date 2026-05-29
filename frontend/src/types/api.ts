@@ -45,6 +45,7 @@ export interface EmosConfig {
 export interface WorkerConfig {
   poll_interval_seconds: number
   max_concurrency: number
+  download_threads: number
   upload_chunk_size_mb: number
   save_retry_interval_seconds: number
   save_retry_max_attempts: number

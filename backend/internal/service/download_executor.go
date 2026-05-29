@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -451,6 +452,17 @@ var downloadHTTPClient = &http.Client{
 }
 
 func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string) error {
+	threads := cfg.Worker.DownloadThreads
+	if threads <= 1 {
+		threads = 1
+	}
+	if threads == 1 {
+		return e.downloadSingle(ctx, task, access, cfg, rawURL, localPath)
+	}
+	return e.downloadMulti(ctx, task, access, cfg, rawURL, localPath, threads)
+}
+
+func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string) error {
 	// Check for partial file for resume
 	var offset int64
 	if info, err := os.Stat(localPath); err == nil && info.Size() > 0 {
@@ -503,7 +515,8 @@ func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, ac
 		totalBytes = task.Source.FileSize
 	}
 	var doneBytes int64 = offset
-	buf := make([]byte, 1024*1024) // 1MB buffer for faster downloads
+	buf := make([]byte, 1024*1024)
+	startTime := time.Now()
 	lastLog := time.Now()
 
 	for {
@@ -520,16 +533,20 @@ func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, ac
 			}
 			doneBytes += int64(n)
 
-			// Push progress every 3 seconds
 			now := time.Now()
 			if now.Sub(lastLog) > 3*time.Second || doneBytes >= totalBytes {
 				lastLog = now
 				progress := float64(0)
+				elapsed := now.Sub(startTime)
+				speed := int64(0)
+				if elapsed > 0 && doneBytes > offset {
+					speed = int64(float64(doneBytes-offset) / elapsed.Seconds())
+				}
 				if totalBytes > 0 {
 					progress = float64(doneBytes) * 100 / float64(totalBytes)
 				}
-				speed := int64(0)
-				log.Printf("[download] progress: task=%s %.1f%% %s/%s", task.ID, progress, formatBytes(doneBytes), formatBytes(totalBytes))
+				log.Printf("[download] progress: task=%s %.1f%% %s/%s %s/s",
+					task.ID, progress, formatBytes(doneBytes), formatBytes(totalBytes), formatBytes(speed))
 				if _, syncErr := e.taskService.SyncDownloadStatus(ctx, task.ID, client.Aria2Status{
 					Status:          "active",
 					TotalLength:     totalBytes,
@@ -538,7 +555,7 @@ func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, ac
 				}); syncErr == nil && e.eventBus != nil {
 					e.eventBus.Publish(eventbus.TaskEvent{
 						TaskID: task.ID, Status: "downloading",
-						DlProg: progress, DlDone: doneBytes, DlTotal: totalBytes,
+						DlProg: progress, DlSpeed: speed, DlDone: doneBytes, DlTotal: totalBytes,
 					})
 				}
 			}
@@ -566,6 +583,130 @@ func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, ac
 		TotalLength:     info.Size(),
 		CompletedLength: info.Size(),
 		Files:           []client.Aria2File{{Path: localPath}},
+	})
+	return err
+}
+
+func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string, threads int) error {
+	log.Printf("[download] multi-thread start: task=%s threads=%d", task.ID, threads)
+
+	// Check file size
+	headReq, _ := http.NewRequestWithContext(ctx, "HEAD", rawURL, nil)
+	headReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	if access.Token != "" {
+		headReq.Header.Set("Authorization", access.Token)
+	}
+	resp, err := downloadHTTPClient.Do(headReq)
+	if err != nil {
+		return e.downloadSingle(ctx, task, access, cfg, rawURL, localPath)
+	}
+	totalSize := resp.ContentLength
+	resp.Body.Close()
+
+	if totalSize <= 0 || threads <= 1 {
+		return e.downloadSingle(ctx, task, access, cfg, rawURL, localPath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		return err
+	}
+
+	segmentSize := totalSize / int64(threads)
+	type segment struct {
+		index int
+		data  []byte
+		start int64
+		err   error
+	}
+	results := make(chan segment, threads)
+	var wg sync.WaitGroup
+
+	for i := 0; i < threads; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			start := int64(idx) * segmentSize
+			end := start + segmentSize - 1
+			if idx == threads-1 {
+				end = totalSize - 1
+			}
+
+			req, _ := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+			req.Header.Set("Referer", strings.TrimRight(cfg.OpenList.BaseURL, "/")+"/")
+			req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+			if access.Token != "" {
+				req.Header.Set("Authorization", access.Token)
+			}
+
+			segResp, err := downloadHTTPClient.Do(req)
+			if err != nil {
+				results <- segment{idx, nil, start, err}
+				return
+			}
+			defer segResp.Body.Close()
+
+			if segResp.StatusCode != 206 && segResp.StatusCode != 200 {
+				results <- segment{idx, nil, start, fmt.Errorf("segment %d returned %d", idx, segResp.StatusCode)}
+				return
+			}
+
+			data, err := io.ReadAll(segResp.Body)
+			results <- segment{idx, data, start, err}
+		}(i)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	file, err := os.OpenFile(localPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var totalDone int64
+	startTime := time.Now()
+	lastLog := time.Now()
+
+	for seg := range results {
+		if seg.err != nil {
+			log.Printf("[download] segment %d failed: %v, falling back to single-thread", seg.index, seg.err)
+			return e.downloadSingle(ctx, task, access, cfg, rawURL, localPath)
+		}
+		if _, err := file.WriteAt(seg.data, seg.start); err != nil {
+			return err
+		}
+		totalDone += int64(len(seg.data))
+
+		now := time.Now()
+		if now.Sub(lastLog) > 3*time.Second || totalDone >= totalSize {
+			lastLog = now
+			progress := float64(totalDone) * 100 / float64(totalSize)
+			speed := int64(0)
+			if elapsed := now.Sub(startTime); elapsed > 0 {
+				speed = int64(float64(totalDone) / elapsed.Seconds())
+			}
+			log.Printf("[download] progress: task=%s %.1f%% %s/%s %s/s (%d threads)",
+				task.ID, progress, formatBytes(totalDone), formatBytes(totalSize), formatBytes(speed), threads)
+			if _, syncErr := e.taskService.SyncDownloadStatus(ctx, task.ID, client.Aria2Status{
+				Status: "active", TotalLength: totalSize, CompletedLength: totalDone, DownloadSpeed: speed,
+			}); syncErr == nil && e.eventBus != nil {
+				e.eventBus.Publish(eventbus.TaskEvent{
+					TaskID: task.ID, Status: "downloading",
+					DlProg: progress, DlSpeed: speed, DlDone: totalDone, DlTotal: totalSize,
+				})
+			}
+		}
+	}
+
+	info, _ := os.Stat(localPath)
+	log.Printf("[download] complete: task=%s size=%s", task.ID, formatBytes(info.Size()))
+	_, err = e.taskService.MarkDownloadCompleted(ctx, task.ID, client.Aria2Status{
+		Status: "complete", TotalLength: info.Size(), CompletedLength: info.Size(),
+		Files: []client.Aria2File{{Path: localPath}},
 	})
 	return err
 }

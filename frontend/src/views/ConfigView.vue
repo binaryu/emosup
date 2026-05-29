@@ -136,6 +136,10 @@
             <el-form-item label="最大并发">
               <el-input-number v-model="configStore.config.worker.max_concurrency" :min="1" :max="20" class="full-width" :controls="false" />
             </el-form-item>
+            <el-form-item label="下载线程">
+              <el-input-number v-model="configStore.config.worker.download_threads" :min="1" :max="16" class="full-width" :controls="false" />
+              <span style="font-size:11px;color:var(--text-subtle)">多线程分段下载，4线程约4倍速</span>
+            </el-form-item>
             <el-form-item label="分片(MB)">
               <el-input-number v-model="configStore.config.worker.upload_chunk_size_mb" :min="1" :max="512" class="full-width" :controls="false" />
             </el-form-item>

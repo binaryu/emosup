@@ -28,6 +28,7 @@ const defaultConfig: AppConfig = {
   worker: {
     poll_interval_seconds: 5,
     max_concurrency: 1,
+    download_threads: 4,
     upload_chunk_size_mb: 8,
     save_retry_interval_seconds: 25,
     save_retry_max_attempts: 8,
