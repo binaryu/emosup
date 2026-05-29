@@ -75,9 +75,8 @@ func (e *DownloadExecutor) Execute(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	// For OpenList sources on 302-unfriendly backends (Quark etc), download directly.
-	// Check if the first path component matches the configured proxy backend list.
-	if task.Source.Type == "openlist" && e.needsDirectDownload(ctx, task) {
+	// All OpenList sources download directly through emosup (proper auth headers, no aria2 needed)
+	if task.Source.Type == "openlist" {
 		return e.downloadDirect(ctx, task)
 	}
 
