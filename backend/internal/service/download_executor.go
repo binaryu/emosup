@@ -273,7 +273,6 @@ func (e *DownloadExecutor) RecoverTask(ctx context.Context, task model.Task) (bo
 
 func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access client.Aria2Access, task model.Task) (string, error) {
 	gid, err := e.aria2Client.AddURI(ctx, access, task.Source.RawURL, client.Aria2AddURIOptions{
-		Dir:              task.Download.SaveDir,
 		Out:              filepath.Base(task.Download.LocalPath),
 		ContinueDownload: true,
 		UserAgent:        "Mozilla/5.0 emosup/phase6",
@@ -298,7 +297,6 @@ func (e *DownloadExecutor) addDownloadWithRefresh(ctx context.Context, access cl
 
 	retryURL := refreshedTask.Source.RawURL
 	gid, retryErr := e.aria2Client.AddURI(ctx, access, retryURL, client.Aria2AddURIOptions{
-		Dir:              refreshedTask.Download.SaveDir,
 		Out:              filepath.Base(refreshedTask.Download.LocalPath),
 		ContinueDownload: true,
 		UserAgent:        "Mozilla/5.0 emosup/phase6",
