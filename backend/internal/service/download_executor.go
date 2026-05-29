@@ -438,6 +438,18 @@ func (e *DownloadExecutor) downloadWithResume(ctx context.Context, task model.Ta
 	return fmt.Errorf("download failed after %d retries", maxRetries)
 }
 
+var downloadHTTPClient = &http.Client{
+	Timeout: 0,
+	Transport: &http.Transport{
+		MaxIdleConns:        10,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  true,
+		WriteBufferSize:     256 * 1024,
+		ReadBufferSize:      256 * 1024,
+		ForceAttemptHTTP2:   true,
+	},
+}
+
 func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string) error {
 	// Check for partial file for resume
 	var offset int64
@@ -463,7 +475,7 @@ func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, ac
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := downloadHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -491,7 +503,7 @@ func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, ac
 		totalBytes = task.Source.FileSize
 	}
 	var doneBytes int64 = offset
-	buf := make([]byte, 256*1024)
+	buf := make([]byte, 1024*1024) // 1MB buffer for faster downloads
 	lastLog := time.Now()
 
 	for {
