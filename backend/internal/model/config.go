@@ -64,7 +64,7 @@ func DefaultAppConfig() AppConfig {
 		Worker: WorkerConfig{
 			PollIntervalSeconds:      5,
 			MaxConcurrency:           1,
-			DownloadThreads:           4,
+			DownloadThreads:           1,
 			UploadChunkSizeMB:        8,
 			SaveRetryIntervalSeconds: 25,
 			SaveRetryMaxAttempts:     8,
