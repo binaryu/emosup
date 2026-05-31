@@ -118,7 +118,7 @@
           </template>
 
           <el-table :data="entries" stripe @selection-change="onFileSelectionChange">
-            <el-table-column type="selection" width="42" :selectable="(r: OpenListEntry) => !r.is_dir && isVideoFile(r.name)" />
+            <el-table-column type="selection" width="42" :selectable="(r: OpenListEntry) => r.is_dir || isVideoFile(r.name)" />
             <el-table-column prop="name" label="名称" min-width="200" show-overflow-tooltip />
             <el-table-column label="类型" width="70" align="center">
               <template #default="{ row }">
@@ -242,6 +242,9 @@ async function scanDir() {
 }
 
 async function scanSingleFile(row: OpenListEntry) {
+  // Auto-fill search from parent directory
+  const parentPath = row.path.substring(0, row.path.lastIndexOf('/')) || '/'
+  autoDetectTMDB(parentPath)
   if (!tmdbId.value || Number(tmdbId.value) <= 0) { ElMessage.warning('请先搜索影片或手动填写 TMDB ID'); return }
   try { await doScan(row.path, row.path) }
   catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
@@ -310,7 +313,7 @@ onMounted(() => { loadEntries(); autoDetectTMDB(currentPath.value) })
   border: none;
   border-radius: 10px;
   background: transparent;
-  color: var(--text-subtle);
+  color: var(--text-main);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -320,13 +323,13 @@ onMounted(() => { loadEntries(); autoDetectTMDB(currentPath.value) })
 
 .toggle-btn:hover:not(.active) {
   color: var(--text-main);
-  background: rgba(0,0,0,0.04);
+  background: rgba(128,128,128,0.1);
 }
 
 .toggle-btn.active {
-  background: #fff;
-  color: var(--text-main);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+  background: var(--el-color-primary);
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
   font-weight: 600;
 }
 

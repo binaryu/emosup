@@ -347,6 +347,7 @@ async function createSingleTask(scanId: string, row: ScanItem) {
         scan.unmatched_count = scan.total_count - scan.matched_count
         if (scan.total_count === 0) {
           scanStore.scans = scanStore.scans.filter((s) => s.id !== scanId)
+          if (scanStore.scans.length === 0) router.push('/tasks')
         }
       }
     }
@@ -386,6 +387,7 @@ async function createTasks(scanId: string) {
       // Auto-remove empty scan card
       if (scan.total_count === 0) {
         scanStore.scans = scanStore.scans.filter((s) => s.id !== scanId)
+        if (scanStore.scans.length === 0) router.push('/tasks')
       }
     }
 
