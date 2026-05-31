@@ -242,9 +242,9 @@ async function scanDir() {
 }
 
 async function scanSingleFile(row: OpenListEntry) {
-  // Auto-fill search from parent directory
   const parentPath = row.path.substring(0, row.path.lastIndexOf('/')) || '/'
-  autoDetectTMDB(parentPath)
+  const searchName = parentPath === '/' ? row.name : extractShowName(parentPath)
+  if (searchName) { tmdbQuery.value = searchName; await doSearchTMDB() }
   if (!tmdbId.value || Number(tmdbId.value) <= 0) { ElMessage.warning('请先搜索影片或手动填写 TMDB ID'); return }
   try { await doScan(row.path, row.path) }
   catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
