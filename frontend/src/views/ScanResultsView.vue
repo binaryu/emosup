@@ -82,12 +82,13 @@
                     <div class="expand-title">人工修正</div>
                     <div class="edit-grid">
                       <div class="edit-field">
-                        <span class="edit-label">item_type</span>
-                        <el-input v-model="row.selected_item_type" placeholder="vl / ve" size="small" @blur="() => fetchTitle(row)" />
-                      </div>
-                      <div class="edit-field">
                         <span class="edit-label">item_id</span>
-                        <el-input-number v-model="row.selected_item_id" :min="0" size="small" controls-position="right" @change="() => fetchTitle(row)" />
+                        <el-input
+                          :model-value="row.selected_item_type && row.selected_item_id ? row.selected_item_type + '-' + row.selected_item_id : ''"
+                          placeholder="ve-1829946"
+                          size="small"
+                          @blur="(e: FocusEvent) => parseItemID(row, (e.target as HTMLInputElement).value)"
+                        />
                       </div>
                       <div class="edit-field title-field">
                         <span class="edit-label">title</span>
@@ -115,7 +116,7 @@
                         class="candidate-tag"
                         @click="applyCandidate(row, candidate)"
                       >
-                        {{ candidate.item_type }}/{{ candidate.item_id }} {{ candidate.title }}
+                        {{ candidate.item_type }}-{{ candidate.item_id }} {{ candidate.title }}
                       </el-tag>
                     </div>
                     <span v-else class="muted-text">无</span>
@@ -221,6 +222,15 @@ async function rescan(scan: ScanSession) {
 async function selectEmptyMedia(scan: ScanSession) {
   const ids = scan.items.filter(i => i.has_media === false && canCreateTask(i, scan.source)).map(i => i.id)
   selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scan.id]: ids }
+}
+
+function parseItemID(row: ScanItem, value: string) {
+  const parts = value.trim().split('-')
+  if (parts.length >= 2) {
+    row.selected_item_type = parts[0]
+    row.selected_item_id = parseInt(parts[1], 10) || 0
+    fetchTitle(row)
+  }
 }
 
 function applyCandidate(row: ScanItem, candidate: MatchCandidate) {
