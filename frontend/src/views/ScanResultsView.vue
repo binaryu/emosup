@@ -84,10 +84,11 @@
                       <div class="edit-field">
                         <span class="edit-label">item_id</span>
                         <el-input
-                          :model-value="row.selected_item_type && row.selected_item_id ? row.selected_item_type + '-' + row.selected_item_id : ''"
+                          :model-value="itemInputs[row.id] ?? (row.selected_item_type && row.selected_item_id ? row.selected_item_type + '-' + row.selected_item_id : (row.selected_item_type || ''))"
+                          @update:model-value="(val: string) => { itemInputs = { ...itemInputs, [row.id]: val } }"
                           placeholder="ve-1829946"
                           size="small"
-                          @blur="(e: FocusEvent) => parseItemID(row, (e.target as HTMLInputElement).value)"
+                          @blur="() => parseItemID(row)"
                         />
                       </div>
                       <div class="edit-field title-field">
@@ -224,19 +225,26 @@ async function selectEmptyMedia(scan: ScanSession) {
   selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scan.id]: ids }
 }
 
-function parseItemID(row: ScanItem, value: string) {
-  const parts = value.trim().split('-')
-  if (parts.length >= 2) {
-    row.selected_item_type = parts[0]
-    row.selected_item_id = parseInt(parts[1], 10) || 0
-    fetchTitle(row)
+const itemInputs = ref<Record<string, string>>({})
+
+function parseItemID(row: ScanItem) {
+  const value = (itemInputs.value[row.id] || '').trim()
+  if (!value) return
+  const idx = value.indexOf('-')
+  if (idx > 0) {
+    row.selected_item_type = value.substring(0, idx)
+    row.selected_item_id = parseInt(value.substring(idx + 1), 10) || 0
+  } else {
+    row.selected_item_type = value
   }
+  fetchTitle(row)
 }
 
 function applyCandidate(row: ScanItem, candidate: MatchCandidate) {
   row.selected_item_type = candidate.item_type
   row.selected_item_id = candidate.item_id
   row.selected_title = candidate.title
+  itemInputs.value = { ...itemInputs.value, [row.id]: candidate.item_type + '-' + candidate.item_id }
 }
 
 let fetchTitleTimer: ReturnType<typeof setTimeout> | null = null
