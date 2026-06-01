@@ -397,21 +397,18 @@ func (e *DownloadExecutor) downloadDirect(ctx context.Context, task model.Task) 
 		}
 	}
 
-	// Verify OpenList access works by fetching raw link (for auth check)
-	_, err = e.openListClient.GetRawLink(ctx, access, task.Source.Path)
+	// Get the actual CDN download URL from OpenList
+	rawURL, err := e.openListClient.GetRawLink(ctx, access, task.Source.Path)
 	if err != nil {
 		log.Printf("[download] get link failed: task=%s err=%v", task.ID, err)
 		_, _ = e.taskService.MarkDownloadFailed(ctx, task.ID, "获取下载链接失败: "+err.Error())
 		return err
 	}
-	// Build proxy URL: download through OpenList directly (handles auth internally)
-	// This is more reliable than raw CDN URLs which may have short TTLs
-	proxyURL := strings.TrimRight(cfg.OpenList.BaseURL, "/") + "/d" + task.Source.Path
-	log.Printf("[download] using proxy: %s", proxyURL[:minInt(len(proxyURL), 80)])
+	downloadURL := client.ResolveMaybeRelativeURL(cfg.OpenList.BaseURL, rawURL)
+	log.Printf("[download] cdn url: task=%s", task.ID)
 
-	// Download with retry using OpenList proxy (handles auth + CDN internally)
 	localPath := toContainerPath(task.Download.LocalPath)
-	return e.downloadWithResume(ctx, task, access, cfg, proxyURL, localPath)
+	return e.downloadWithResume(ctx, task, access, cfg, downloadURL, localPath)
 }
 
 func (e *DownloadExecutor) downloadWithResume(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, downloadURL, localPath string) error {
