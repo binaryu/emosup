@@ -221,8 +221,15 @@ func (e *DownloadExecutor) RecoverTask(ctx context.Context, task model.Task) (bo
 	switch task.Status {
 	case model.TaskStatusDownloading:
 		if strings.TrimSpace(task.Download.Aria2GID) == "" {
-			// Direct download task — skip aria2 recovery, just re-queue
+			// Direct download interrupted — re-queue to restart
 			_, err := e.taskService.MarkDownloadFailedWithDetails(ctx, task.ID, "recovery", "download_interrupted", "direct download interrupted during recovery; retry to restart")
+			// Also set status back to queued so scheduler can re-pick it
+			if _, retryErr := e.taskService.RetryTask(ctx, task.ID); retryErr == nil {
+				log.Printf("recovery re-queued direct-download task: %s", task.ID)
+				return true, nil
+			} else {
+				log.Printf("recovery failed to re-queue task %s: %v", task.ID, retryErr)
+			}
 			return false, err
 		}
 
