@@ -632,7 +632,9 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 				end = totalSize - 1
 			}
 
-			req, _ := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+			segCtx, segCancel := context.WithTimeout(ctx, 30*time.Second)
+			defer segCancel()
+			req, _ := http.NewRequestWithContext(segCtx, "GET", rawURL, nil)
 			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 			req.Header.Set("Referer", strings.TrimRight(cfg.OpenList.BaseURL, "/")+"/")
 			req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
