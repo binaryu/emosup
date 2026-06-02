@@ -217,9 +217,9 @@
               </div>
             </template>
             <div class="logs-container">
-              <el-timeline v-if="taskStore.activeTaskLog?.items.length">
+              <el-timeline v-if="logEntries.length">
                 <el-timeline-item
-                  v-for="entry in taskStore.activeTaskLog.items"
+                  v-for="entry in logEntries"
                   :key="entry.id"
                   :timestamp="formatTime(entry.time)"
                   :type="entry.level === 'error' ? 'danger' : entry.level === 'warn' ? 'warning' : 'primary'"
@@ -247,13 +247,42 @@ import { useRoute } from 'vue-router'
 import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { useTaskStore } from '@/stores/tasks'
-import type { TaskStatus } from '@/types/api'
+import type { TaskLogEntry, TaskStatus } from '@/types/api'
 import { formatBytes, formatSpeed, formatTime } from '@/utils/format'
 
 const route = useRoute()
 const taskStore = useTaskStore()
 
 const task = computed(() => taskStore.activeTask)
+const logEntries = computed<TaskLogEntry[]>(() => {
+  const items = [...(taskStore.activeTaskLog?.items ?? [])]
+  const currentTask = task.value
+  if (!currentTask) return items
+
+  const resultError = currentTask.result?.error_message?.trim()
+  if (resultError && !items.some((item) => item.level === 'error' && item.message.includes(resultError))) {
+    const stage = currentTask.result.error_stage || 'unknown'
+    const code = currentTask.result.error_code || 'unknown'
+    items.push({
+      id: `snapshot-error-${currentTask.id}`,
+      level: 'error',
+      message: `任务错误快照：stage=${stage}, code=${code}, message=${resultError}`,
+      time: currentTask.result.last_error_at || currentTask.updated_at,
+    })
+  }
+
+  const saveError = currentTask.upload?.last_save_error?.trim()
+  if (saveError && !items.some((item) => item.message.includes(saveError))) {
+    items.push({
+      id: `snapshot-save-error-${currentTask.id}`,
+      level: 'warn',
+      message: `最近保存错误：${saveError}`,
+      time: currentTask.updated_at,
+    })
+  }
+
+  return items.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+})
 
 let timer: number | undefined
 

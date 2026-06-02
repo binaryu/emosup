@@ -1137,7 +1137,19 @@ func (s *TaskService) IsTaskCanceled(ctx context.Context, taskID string) (bool, 
 	return task.Status == model.TaskStatusCanceled, nil
 }
 
+func (s *TaskService) AddTaskLog(_ context.Context, taskID, level, message string) error {
+	return s.appendTaskLog(taskID, level, message)
+}
+
 func (s *TaskService) appendTaskLog(taskID, level, message string) error {
+	level = strings.TrimSpace(level)
+	if level == "" {
+		level = "info"
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "-"
+	}
 	return s.store.AppendTaskLog(taskID, model.TaskLogItem{
 		ID:      utils.NewID("log"),
 		Level:   level,
