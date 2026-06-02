@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -698,35 +699,91 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 	return err
 }
 
+func (e *DownloadExecutor) probeDownloadSize(ctx context.Context, taskID string, access client.OpenListAccess, cfg model.AppConfig, rawURL string) (int64, error) {
+	headCtx, headCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer headCancel()
+
+	headReq, err := http.NewRequestWithContext(headCtx, "HEAD", rawURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	usedOpenListAuth := applyDownloadHeaders(headReq, rawURL, access, cfg)
+	log.Printf("[download] HEAD request prepared: task=%s upstream=%s openlist_auth=%t", taskID, summarizeURL(rawURL), usedOpenListAuth)
+	headResp, err := downloadHTTPClient.Do(headReq)
+	if err == nil {
+		totalSize := headResp.ContentLength
+		statusCode := headResp.StatusCode
+		contentType := headResp.Header.Get("Content-Type")
+		headResp.Body.Close()
+		if statusCode < 400 && totalSize > 0 {
+			return totalSize, nil
+		}
+		log.Printf("[download] HEAD unavailable, probing with Range GET: task=%s upstream=%s status=%d content_type=%q size=%d", taskID, summarizeURL(rawURL), statusCode, contentType, totalSize)
+	} else {
+		log.Printf("[download] HEAD failed, probing with Range GET: task=%s upstream=%s err=%v", taskID, summarizeURL(rawURL), err)
+	}
+
+	rangeCtx, rangeCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer rangeCancel()
+
+	rangeReq, err := http.NewRequestWithContext(rangeCtx, "GET", rawURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	usedOpenListAuth = applyDownloadHeaders(rangeReq, rawURL, access, cfg)
+	rangeReq.Header.Set("Range", "bytes=0-0")
+	log.Printf("[download] Range probe prepared: task=%s upstream=%s openlist_auth=%t", taskID, summarizeURL(rawURL), usedOpenListAuth)
+	rangeResp, err := downloadHTTPClient.Do(rangeReq)
+	if err != nil {
+		return 0, fmt.Errorf("range probe request failed: %w", err)
+	}
+	defer rangeResp.Body.Close()
+
+	if rangeResp.StatusCode == http.StatusPartialContent {
+		totalSize, err := parseContentRangeTotal(rangeResp.Header.Get("Content-Range"))
+		if err != nil {
+			return 0, err
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(rangeResp.Body, 1))
+		log.Printf("[download] Range probe ok: task=%s size=%s", taskID, formatBytes(totalSize))
+		return totalSize, nil
+	}
+	if rangeResp.StatusCode >= 400 {
+		return 0, fmt.Errorf("range probe upstream %s returned %d %s; content_type=%q body=%q", summarizeURL(rawURL), rangeResp.StatusCode, rangeResp.Status, rangeResp.Header.Get("Content-Type"), responseSnippet(rangeResp.Body, 512))
+	}
+	return 0, fmt.Errorf("range probe returned %d %s, upstream does not support byte ranges", rangeResp.StatusCode, rangeResp.Status)
+}
+
+func parseContentRangeTotal(value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	slash := strings.LastIndex(value, "/")
+	if slash < 0 || slash == len(value)-1 {
+		return 0, fmt.Errorf("invalid Content-Range %q", value)
+	}
+	totalPart := strings.TrimSpace(value[slash+1:])
+	if totalPart == "*" {
+		return 0, fmt.Errorf("Content-Range total size is unknown: %q", value)
+	}
+	total, err := strconv.ParseInt(totalPart, 10, 64)
+	if err != nil || total <= 0 {
+		return 0, fmt.Errorf("invalid Content-Range total size %q", value)
+	}
+	return total, nil
+}
+
 func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string, threads int) error {
 	log.Printf("[download] multi-thread start: task=%s threads=%d", task.ID, threads)
 	e.taskLog(ctx, task.ID, "info", fmt.Sprintf("multi-thread download started: threads=%d", threads))
 
-	// Check file size with timeout
-	headCtx, headCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer headCancel()
-	headReq, _ := http.NewRequestWithContext(headCtx, "HEAD", rawURL, nil)
-	usedOpenListAuth := applyDownloadHeaders(headReq, rawURL, access, cfg)
-	log.Printf("[download] HEAD request prepared: task=%s upstream=%s openlist_auth=%t", task.ID, summarizeURL(rawURL), usedOpenListAuth)
-	resp, err := downloadHTTPClient.Do(headReq)
-	if err != nil {
-		log.Printf("[download] HEAD failed, falling back to single-thread: task=%s err=%v", task.ID, err)
-		e.taskLog(ctx, task.ID, "warn", "HEAD request failed, fallback to single-thread: "+err.Error())
-		return e.downloadSingle(ctx, task, access, cfg, rawURL, localPath)
-	}
-	totalSize := resp.ContentLength
-	statusCode := resp.StatusCode
-	contentType := resp.Header.Get("Content-Type")
-	resp.Body.Close()
-
-	if statusCode >= 400 {
-		log.Printf("[download] HEAD rejected, falling back to single-thread GET: task=%s upstream=%s status=%d content_type=%q", task.ID, summarizeURL(rawURL), statusCode, contentType)
-		e.taskLog(ctx, task.ID, "warn", fmt.Sprintf("HEAD rejected by upstream %s: status=%d content_type=%q; fallback to single-thread GET", summarizeURL(rawURL), statusCode, contentType))
-		return e.downloadSingle(ctx, task, access, cfg, rawURL, localPath)
-	}
-	if totalSize <= 0 || threads <= 1 {
-		log.Printf("[download] size unknown, falling back to single-thread: task=%s size=%d", task.ID, totalSize)
-		e.taskLog(ctx, task.ID, "warn", "file size unknown from HEAD, fallback to single-thread")
+	totalSize, err := e.probeDownloadSize(ctx, task.ID, access, cfg, rawURL)
+	if err != nil || totalSize <= 0 || threads <= 1 {
+		if err != nil {
+			log.Printf("[download] size probe failed, falling back to single-thread: task=%s err=%v", task.ID, err)
+			e.taskLog(ctx, task.ID, "warn", "download size probe failed, fallback to single-thread GET: "+err.Error())
+		} else {
+			log.Printf("[download] size unknown, falling back to single-thread: task=%s size=%d", task.ID, totalSize)
+			e.taskLog(ctx, task.ID, "warn", "file size unknown, fallback to single-thread GET")
+		}
 		return e.downloadSingle(ctx, task, access, cfg, rawURL, localPath)
 	}
 
