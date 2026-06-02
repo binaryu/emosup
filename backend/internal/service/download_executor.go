@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,6 +95,18 @@ func responseSnippet(body io.Reader, limit int64) string {
 	}
 	data, _ := io.ReadAll(io.LimitReader(body, limit))
 	return strings.TrimSpace(strings.ReplaceAll(string(data), "\n", " "))
+}
+
+func summarizeURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" {
+		return "invalid-url"
+	}
+	path := parsed.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	return parsed.Scheme + "://" + parsed.Host + path
 }
 
 func (e *DownloadExecutor) taskLog(ctx context.Context, taskID, level, message string) {
@@ -556,7 +569,7 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 		return errors.New(message)
 	}
 	if resp.StatusCode >= 400 {
-		message := fmt.Sprintf("upstream returned %d %s; content_type=%q content_length=%d body=%q", resp.StatusCode, resp.Status, resp.Header.Get("Content-Type"), resp.ContentLength, responseSnippet(resp.Body, 1024))
+		message := fmt.Sprintf("GET upstream %s returned %d %s; content_type=%q content_length=%d body=%q", summarizeURL(rawURL), resp.StatusCode, resp.Status, resp.Header.Get("Content-Type"), resp.ContentLength, responseSnippet(resp.Body, 1024))
 		return errors.New(message)
 	}
 
@@ -682,7 +695,9 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 	resp.Body.Close()
 
 	if statusCode >= 400 {
-		return fmt.Errorf("HEAD upstream returned %d; content_type=%q", statusCode, contentType)
+		log.Printf("[download] HEAD rejected, falling back to single-thread GET: task=%s upstream=%s status=%d content_type=%q", task.ID, summarizeURL(rawURL), statusCode, contentType)
+		e.taskLog(ctx, task.ID, "warn", fmt.Sprintf("HEAD rejected by upstream %s: status=%d content_type=%q; fallback to single-thread GET", summarizeURL(rawURL), statusCode, contentType))
+		return e.downloadSingle(ctx, task, access, cfg, rawURL, localPath)
 	}
 	if totalSize <= 0 || threads <= 1 {
 		log.Printf("[download] size unknown, falling back to single-thread: task=%s size=%d", task.ID, totalSize)
@@ -851,7 +866,7 @@ func (e *DownloadExecutor) downloadSegment(ctx context.Context, file *os.File, a
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("segment %d returned %d %s; body=%q", index, resp.StatusCode, resp.Status, responseSnippet(resp.Body, 512))
+		return fmt.Errorf("segment %d upstream %s returned %d %s; body=%q", index, summarizeURL(rawURL), resp.StatusCode, resp.Status, responseSnippet(resp.Body, 512))
 	}
 
 	buf := make([]byte, 1024*1024)
