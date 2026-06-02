@@ -109,6 +109,36 @@ func summarizeURL(rawURL string) string {
 	return parsed.Scheme + "://" + parsed.Host + path
 }
 
+func isOpenListDownloadTarget(rawURL, baseURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	if !parsed.IsAbs() {
+		return true
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil || base.Host == "" {
+		return false
+	}
+	return strings.EqualFold(parsed.Host, base.Host)
+}
+
+func applyDownloadHeaders(req *http.Request, rawURL string, access client.OpenListAccess, cfg model.AppConfig) bool {
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Accept", "*/*")
+
+	if !isOpenListDownloadTarget(rawURL, cfg.OpenList.BaseURL) {
+		return false
+	}
+
+	req.Header.Set("Referer", strings.TrimRight(cfg.OpenList.BaseURL, "/")+"/")
+	if access.Token != "" {
+		req.Header.Set("Authorization", access.Token)
+	}
+	return true
+}
+
 func (e *DownloadExecutor) taskLog(ctx context.Context, taskID, level, message string) {
 	if e == nil || e.taskService == nil {
 		return
@@ -549,11 +579,8 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	req.Header.Set("Referer", strings.TrimRight(cfg.OpenList.BaseURL, "/")+"/")
-	if access.Token != "" {
-		req.Header.Set("Authorization", access.Token)
-	}
+	usedOpenListAuth := applyDownloadHeaders(req, rawURL, access, cfg)
+	log.Printf("[download] GET request prepared: task=%s upstream=%s openlist_auth=%t range=%t", task.ID, summarizeURL(rawURL), usedOpenListAuth, offset > 0)
 	if offset > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 	}
@@ -679,10 +706,8 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 	headCtx, headCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer headCancel()
 	headReq, _ := http.NewRequestWithContext(headCtx, "HEAD", rawURL, nil)
-	headReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	if access.Token != "" {
-		headReq.Header.Set("Authorization", access.Token)
-	}
+	usedOpenListAuth := applyDownloadHeaders(headReq, rawURL, access, cfg)
+	log.Printf("[download] HEAD request prepared: task=%s upstream=%s openlist_auth=%t", task.ID, summarizeURL(rawURL), usedOpenListAuth)
 	resp, err := downloadHTTPClient.Do(headReq)
 	if err != nil {
 		log.Printf("[download] HEAD failed, falling back to single-thread: task=%s err=%v", task.ID, err)
@@ -852,12 +877,8 @@ func (e *DownloadExecutor) downloadSegment(ctx context.Context, file *os.File, a
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	req.Header.Set("Referer", strings.TrimRight(cfg.OpenList.BaseURL, "/")+"/")
+	applyDownloadHeaders(req, rawURL, access, cfg)
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-	if access.Token != "" {
-		req.Header.Set("Authorization", access.Token)
-	}
 
 	resp, err := downloadHTTPClient.Do(req)
 	if err != nil {
