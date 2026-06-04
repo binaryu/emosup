@@ -406,6 +406,9 @@ func (s *TaskService) DeleteTask(ctx context.Context, id string) error {
 		return newTaskServiceError(http.StatusBadRequest, "cannot delete an active task, cancel it first")
 	}
 
+	// Remove downloaded file (best-effort, with cleanup log)
+	s.removeTaskDownloadedFiles(task)
+
 	err = s.store.DeleteTask(task.ID)
 	if err != nil {
 		return err
@@ -417,6 +420,28 @@ func (s *TaskService) DeleteTask(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+func (s *TaskService) removeTaskDownloadedFiles(task model.Task) {
+	localPath := strings.TrimSpace(task.Download.LocalPath)
+	if localPath == "" {
+		return
+	}
+
+	// Remove main file
+	if err := os.Remove(localPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("[delete] remove downloaded file failed: task=%s path=%s err=%v", task.ID, localPath, err)
+	} else if err == nil {
+		log.Printf("[delete] removed downloaded file: task=%s path=%s", task.ID, localPath)
+	}
+
+	// Remove any multi-thread temp file
+	partPath := localPath + ".partmulti"
+	if err := os.Remove(partPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("[delete] remove temp file failed: task=%s path=%s err=%v", task.ID, partPath, err)
+	} else if err == nil {
+		log.Printf("[delete] removed temp file: task=%s path=%s", task.ID, partPath)
+	}
 }
 
 func (s *TaskService) LoadConfig(_ context.Context) (model.AppConfig, error) {
