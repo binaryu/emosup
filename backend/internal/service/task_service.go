@@ -888,7 +888,29 @@ func (s *TaskService) RecoverInterruptedUpload(ctx context.Context, taskID strin
 	if ok, _ := hasReusableLocalFile(task); !ok {
 		return s.MarkUploadFailedWithDetails(ctx, taskID, "recovery", "local_file_missing", "local file missing after interrupted upload")
 	}
-	return s.MarkUploadFailedWithDetails(ctx, taskID, "recovery", "upload_interrupted", "service interrupted during upload, please retry")
+	// Preserve upload context (FileID, UploadURL, UploadedBytes) for resumable upload
+	// Set status to upload_pending so the scheduler will retry with resume
+	now := time.Now()
+	task, err = s.store.UpdateTask(taskID, func(task *model.Task) error {
+		task.Status = model.TaskStatusUploadPending
+		task.Upload.MediaID = ""
+		task.Upload.Progress = 0
+		task.Upload.Speed = 0
+		task.Upload.Status = "pending"
+		task.Upload.SaveRetryCount = 0
+		task.Upload.LastSaveError = ""
+		task.UpdatedAt = now
+		task.FinishedAt = nil
+		clearTaskError(task)
+		return nil
+	})
+	if err != nil {
+		return model.Task{}, err
+	}
+	if err := s.appendTaskLog(taskID, "info", "task recovered from interrupted upload with resume context"); err != nil {
+		return model.Task{}, err
+	}
+	return task, nil
 }
 
 func (s *TaskService) MarkTaskRecovered(_ context.Context, taskID string, ariaStatus client.Aria2Status) (model.Task, error) {
@@ -983,15 +1005,25 @@ func (s *TaskService) RetryTask(ctx context.Context, id string) (model.Task, err
 			task.Download.TotalBytes = maxInt64(task.Source.FileSize, task.Download.TotalBytes)
 		}
 
-		task.Upload.FileID = ""
-		task.Upload.UploadURL = ""
-		task.Upload.MediaID = ""
-		task.Upload.UploadedBytes = 0
-		task.Upload.Progress = 0
-		task.Upload.Speed = 0
-		task.Upload.Status = "pending"
-		task.Upload.SaveRetryCount = 0
-		task.Upload.LastSaveError = ""
+		// Preserve upload context for resumable uploads when local file is reusable
+		if nextStatus == model.TaskStatusUploadPending && task.Upload.FileID != "" && task.Upload.UploadURL != "" {
+			task.Upload.MediaID = ""
+			task.Upload.Progress = 0
+			task.Upload.Speed = 0
+			task.Upload.Status = "pending"
+			task.Upload.SaveRetryCount = 0
+			task.Upload.LastSaveError = ""
+		} else {
+			task.Upload.FileID = ""
+			task.Upload.UploadURL = ""
+			task.Upload.MediaID = ""
+			task.Upload.UploadedBytes = 0
+			task.Upload.Progress = 0
+			task.Upload.Speed = 0
+			task.Upload.Status = "pending"
+			task.Upload.SaveRetryCount = 0
+			task.Upload.LastSaveError = ""
+		}
 		task.Upload.TotalBytes = maxInt64(maxInt64(task.Source.FileSize, task.Upload.TotalBytes), localFileSize)
 		task.UpdatedAt = now
 		task.FinishedAt = nil
