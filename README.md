@@ -12,14 +12,14 @@ OpenList / 本地文件 → Emos 异步转存面板。
 - **SQLite 存储** — 任务进度高频写入不再卡在 JSON 文件上
 - **一键二进制部署** — 安装 / 更新 / 卸载脚本 + systemd
 
-## 快速开始（推荐：二进制）
+## 快速开始
 
 ```bash
-# 一键安装最新 Release 到 /opt/emosup 并注册 systemd
+
 curl -fsSL https://raw.githubusercontent.com/binaryu/emosup/main/scripts/install.sh | sudo bash
 ```
 
-打开 `http://服务器IP:8080`，默认账号 **`admin` / `admin`**（请立刻改密码）。
+打开 `http://服务器IP:端口`，默认账号 **`admin` / `admin`**（请立刻改密码）。
 
 ### 常用命令
 
@@ -127,25 +127,6 @@ docker compose up -d
 | OpenList | 网盘浏览与下载 | 网盘扫描时 |
 | Emos API | 视频树 + 上传 | 是 |
 | TMDB API | 片名搜索 | 推荐 |
-
-## 发布 Release
-
-打 tag 即触发 CI（二进制 amd64/arm64 + Docker）：
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-产物：`emosup-linux-amd64.tar.gz`、`emosup-linux-arm64.tar.gz` 及 `.sha256`。
-
-本地打包：
-
-```bash
-./scripts/build-release.sh v1.0.0 amd64
-# 或 all
-./scripts/build-release.sh v1.0.0 all
-```
 
 ## 开发
 

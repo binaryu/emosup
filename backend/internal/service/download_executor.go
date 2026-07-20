@@ -283,9 +283,18 @@ func (e *DownloadExecutor) RecoverTask(ctx context.Context, task model.Task) (bo
 	switch task.Status {
 	case model.TaskStatusDownloading:
 		if strings.TrimSpace(task.Download.Aria2GID) == "" {
-			// Direct download interrupted — re-queue to restart
+			// Direct download path (no aria2): complete if local file is already good.
+			if ok, size := hasReusableLocalFile(task); ok {
+				_, err := e.taskService.MarkDownloadCompleted(ctx, task.ID, client.Aria2Status{
+					Status:          "complete",
+					TotalLength:     size,
+					CompletedLength: size,
+					Files:           []client.Aria2File{{Path: task.Download.LocalPath}},
+				})
+				return false, err
+			}
+			// Incomplete — re-queue so scheduler restarts direct download.
 			_, err := e.taskService.MarkDownloadFailedWithDetails(ctx, task.ID, "recovery", "download_interrupted", "direct download interrupted during recovery; retry to restart")
-			// Also set status back to queued so scheduler can re-pick it
 			if _, retryErr := e.taskService.RetryTask(ctx, task.ID); retryErr == nil {
 				log.Printf("recovery re-queued direct-download task: %s", task.ID)
 				return true, nil

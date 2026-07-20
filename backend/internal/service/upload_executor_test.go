@@ -98,7 +98,7 @@ func TestUploadExecutorExecuteUploadPendingTaskWithSaveRetry(t *testing.T) {
 	}
 }
 
-func TestRetryUploadFailedTaskClearsUploadState(t *testing.T) {
+func TestRetryUploadFailedTaskPreservesUploadSessionForResume(t *testing.T) {
 	t.Parallel()
 
 	fileStore := newTaskTestStore(t)
@@ -111,8 +111,8 @@ func TestRetryUploadFailedTaskClearsUploadState(t *testing.T) {
 		task.Upload.FileID = "file-123"
 		task.Upload.UploadURL = "https://upload.example/session"
 		task.Upload.MediaID = "media-123"
-		task.Upload.UploadedBytes = 1024
-		task.Upload.Progress = 100
+		task.Upload.UploadedBytes = 512
+		task.Upload.Progress = 50
 		task.Upload.Speed = 128
 		task.Upload.SaveRetryCount = 2
 		task.Upload.LastSaveError = "save timeout"
@@ -130,11 +130,12 @@ func TestRetryUploadFailedTaskClearsUploadState(t *testing.T) {
 	if task.Status != model.TaskStatusUploadPending {
 		t.Fatalf("expected upload_pending status after retry, got %s", task.Status)
 	}
-	if task.Upload.FileID != "" || task.Upload.UploadURL != "" || task.Upload.MediaID != "" {
-		t.Fatalf("expected upload context to be cleared, got %#v", task.Upload)
+	// Keep FileID/UploadURL so upload can resume; clear save-side error state.
+	if task.Upload.FileID != "file-123" || task.Upload.UploadURL != "https://upload.example/session" {
+		t.Fatalf("expected upload session to be preserved for resume, got %#v", task.Upload)
 	}
-	if task.Upload.UploadedBytes != 0 || task.Upload.Progress != 0 || task.Upload.Speed != 0 {
-		t.Fatalf("expected upload progress to be reset, got %#v", task.Upload)
+	if task.Upload.MediaID != "" {
+		t.Fatalf("expected media_id cleared before re-save, got %q", task.Upload.MediaID)
 	}
 	if task.Upload.SaveRetryCount != 0 || task.Upload.LastSaveError != "" {
 		t.Fatalf("expected save retry state to be reset, got %#v", task.Upload)

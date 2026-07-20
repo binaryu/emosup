@@ -10,9 +10,11 @@ set -euo pipefail
 REPO="${EMOSUP_REPO:-binaryu/emosup}"
 INSTALL_DIR="${EMOSUP_INSTALL_DIR:-/opt/emosup}"
 VERSION="${EMOSUP_VERSION:-}"
-PORT="${EMOSUP_PORT:-8080}"
+PORT="${EMOSUP_PORT:-}"
+PORT_FROM_CLI=0
 SERVICE_NAME="emosup"
 KEEP_DATA=0
+NONINTERACTIVE="${EMOSUP_NONINTERACTIVE:-0}"
 
 GITHUB_API="https://api.github.com/repos/${REPO}"
 GITHUB_RELEASES="https://github.com/${REPO}/releases"
@@ -137,8 +139,10 @@ write_env_file() {
   local envf="${dest}/emosup.env"
   if [[ -f "$envf" ]]; then
     log "保留已有环境文件 ${envf}"
+    sync_env_port "$dest"
     return
   fi
+  : "${PORT:=8080}"
   cat > "$envf" <<EOF
 # emosup 运行环境（systemd EnvironmentFile）
 EMOSUP_DATA_DIR=${dest}/data
@@ -199,6 +203,71 @@ stop_service() {
   sleep 0.5
 }
 
+# Ask for listen port when interactive and not already set via --port / EMOSUP_PORT.
+prompt_port() {
+  if [[ -n "$PORT" ]]; then
+    return
+  fi
+  # Preserve existing install port on update if emosup.env already has one.
+  if [[ -f "${INSTALL_DIR}/emosup.env" ]]; then
+    local existing
+    existing="$(sed -n 's/^EMOSUP_PORT=//p' "${INSTALL_DIR}/emosup.env" | head -1 | tr -d '"' | tr -d "'")"
+    if [[ "$existing" =~ ^[0-9]+$ ]] && (( existing >= 1 && existing <= 65535 )); then
+      PORT="$existing"
+      log "沿用已配置端口: ${PORT}"
+      return
+    fi
+  fi
+
+  local default_port=8080
+  if [[ "$NONINTERACTIVE" == "1" ]] || [[ ! -t 0 ]]; then
+    # Piped install (curl | bash): stdin is the script, not a TTY.
+    # Try to read from /dev/tty so the user can still answer.
+    if [[ -r /dev/tty ]]; then
+      local answer=""
+      echo -en "${GREEN}[emosup]${NC} 请输入面板端口 [${default_port}]: " > /dev/tty
+      read -r answer < /dev/tty || true
+      answer="$(echo "${answer:-}" | tr -d '[:space:]')"
+      if [[ -z "$answer" ]]; then
+        PORT="$default_port"
+      elif [[ "$answer" =~ ^[0-9]+$ ]] && (( answer >= 1 && answer <= 65535 )); then
+        PORT="$answer"
+      else
+        warn "端口无效，使用默认 ${default_port}"
+        PORT="$default_port"
+      fi
+      return
+    fi
+    PORT="$default_port"
+    log "非交互环境，使用默认端口 ${PORT}"
+    return
+  fi
+
+  local answer=""
+  read -r -p "$(echo -e "${GREEN}[emosup]${NC} 请输入面板端口 [${default_port}]: ")" answer || true
+  answer="$(echo "${answer:-}" | tr -d '[:space:]')"
+  if [[ -z "$answer" ]]; then
+    PORT="$default_port"
+  elif [[ "$answer" =~ ^[0-9]+$ ]] && (( answer >= 1 && answer <= 65535 )); then
+    PORT="$answer"
+  else
+    warn "端口无效，使用默认 ${default_port}"
+    PORT="$default_port"
+  fi
+}
+
+# Update EMOSUP_PORT in env file if the file already existed with another port.
+sync_env_port() {
+  local dest="$1"
+  local envf="${dest}/emosup.env"
+  [[ -f "$envf" ]] || return 0
+  if grep -q '^EMOSUP_PORT=' "$envf"; then
+    sed -i "s|^EMOSUP_PORT=.*|EMOSUP_PORT=${PORT}|" "$envf"
+  else
+    echo "EMOSUP_PORT=${PORT}" >> "$envf"
+  fi
+}
+
 cmd_install() {
   need_cmd tar
   need_cmd uname
@@ -206,7 +275,8 @@ cmd_install() {
   detect_os >/dev/null
   arch="$(detect_arch)"
   version="$(resolve_version)"
-  log "架构=${arch} 版本=${version} 目录=${INSTALL_DIR}"
+  prompt_port
+  log "架构=${arch} 版本=${version} 目录=${INSTALL_DIR} 端口=${PORT}"
 
   if [[ -x "${INSTALL_DIR}/emosup-server" ]]; then
     warn "检测到已有安装，将覆盖程序文件并保留 data/"
@@ -215,6 +285,7 @@ cmd_install() {
 
   download_and_extract "$version" "$arch" "$INSTALL_DIR"
   write_env_file "$INSTALL_DIR"
+  sync_env_port "$INSTALL_DIR"
 
   if install_systemd "$INSTALL_DIR"; then
     sleep 1
@@ -295,16 +366,19 @@ emosup 安装脚本
 
 用法:
   $0 install   [--dir DIR] [--version TAG] [--port PORT]
-  $0 update    [--dir DIR] [--version TAG]
+  $0 update    [--dir DIR] [--version TAG] [--port PORT]
   $0 uninstall [--dir DIR] [--keep-data]
   $0 status    [--dir DIR]
   $0 restart
 
-一键安装最新版:
+一键安装最新版（会询问端口，默认 8080）:
   curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sudo bash
 
-指定版本 / 目录:
-  curl -fsSL .../install.sh | sudo bash -s -- install --version v1.0.0 --dir /opt/emosup
+指定端口 / 版本:
+  curl -fsSL .../install.sh | sudo bash -s -- install --port 9090 --version v1.0.0
+
+非交互（跳过询问）:
+  curl -fsSL .../install.sh | sudo EMOSUP_PORT=9090 EMOSUP_NONINTERACTIVE=1 bash
 
 更新 / 卸载:
   sudo bash install.sh update
@@ -320,12 +394,14 @@ main() {
     case "$1" in
       --dir)      INSTALL_DIR="$2"; shift 2 ;;
       --version)  VERSION="$2"; shift 2 ;;
-      --port)     PORT="$2"; shift 2 ;;
+      --port)     PORT="$2"; PORT_FROM_CLI=1; shift 2 ;;
       --keep-data) KEEP_DATA=1; shift ;;
+      -y|--yes)   NONINTERACTIVE=1; shift ;;
       -h|--help)  usage; exit 0 ;;
       *)          shift ;;
     esac
   done
+  # PORT already set from EMOSUP_PORT at startup, or from --port above.
 
   case "$action" in
     install|"")   cmd_install ;;

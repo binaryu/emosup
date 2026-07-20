@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 )
 
@@ -83,7 +82,7 @@ func (c *TMDBClient) Search(ctx context.Context, apiKey, query, mediaType string
 }
 
 func (c *TMDBClient) GetExternalID(ctx context.Context, apiKey string, tmdbID int64, mediaType string) (int64, error) {
-	endpoint := fmt.Sprintf("https://api.themoviedb.org/3/%s/%d/external_ids", mediaType, strconv.FormatInt(tmdbID, 10))
+	endpoint := fmt.Sprintf("https://api.themoviedb.org/3/%s/%d/external_ids", mediaType, tmdbID)
 	u, _ := url.Parse(endpoint)
 	q := u.Query()
 	q.Set("api_key", apiKey)

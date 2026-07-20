@@ -26,58 +26,48 @@ func TestDownloadExecutorExecuteQueuedTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("batch create tasks: %v", err)
 	}
+	taskID := result.Created[0].TaskID
 
-	task, err := taskService.GetTask(context.Background(), result.Created[0].TaskID)
+	// Prepare once to get the deterministic local path, write a complete file, then
+	// leave status as downloading so Execute/direct path can finish from local file.
+	prepared, err := taskService.PrepareTaskDownload(context.Background(), taskID)
 	if err != nil {
-		t.Fatalf("get task: %v", err)
+		t.Fatalf("prepare download: %v", err)
 	}
-
-	cfg, err := fileStore.LoadConfig()
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	localPath := filepath.Join(cfg.Aria2.DownloadDir, buildDownloadFileName(task))
-	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(prepared.Download.LocalPath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(localPath, make([]byte, 1024), 0o644); err != nil {
+	size := prepared.Source.FileSize
+	if size <= 0 {
+		size = 1024
+	}
+	if err := os.WriteFile(prepared.Download.LocalPath, make([]byte, size), 0o644); err != nil {
 		t.Fatalf("write local file: %v", err)
 	}
-
-	aria2Client.statuses = []client.Aria2Status{
-		{
-			GID:             "gid-1",
-			Status:          "active",
-			TotalLength:     1024,
-			CompletedLength: 512,
-			DownloadSpeed:   128,
-			Files:           []client.Aria2File{{Path: localPath}},
-		},
-		{
-			GID:             "gid-1",
-			Status:          "complete",
-			TotalLength:     1024,
-			CompletedLength: 1024,
-			Files:           []client.Aria2File{{Path: localPath}},
-		},
+	// Reset to queued so Execute enters downloadDirect from the start.
+	if _, err := fileStore.UpdateTask(taskID, func(tk *model.Task) error {
+		tk.Status = model.TaskStatusQueued
+		return nil
+	}); err != nil {
+		t.Fatalf("reset to queued: %v", err)
 	}
 
-	if err := executor.Execute(context.Background(), task.ID); err != nil {
+	if err := executor.Execute(context.Background(), taskID); err != nil {
 		t.Fatalf("execute task: %v", err)
 	}
 
-	task, err = taskService.GetTask(context.Background(), task.ID)
+	task, err := taskService.GetTask(context.Background(), taskID)
 	if err != nil {
 		t.Fatalf("get task after execution: %v", err)
 	}
 	if task.Status != model.TaskStatusUploadPending {
 		t.Fatalf("expected upload_pending status, got %s", task.Status)
 	}
-	if task.Download.Aria2GID != "gid-1" {
-		t.Fatalf("expected aria2 gid to be saved, got %s", task.Download.Aria2GID)
-	}
 	if task.Download.Progress != 100 {
 		t.Fatalf("expected progress 100, got %v", task.Download.Progress)
+	}
+	if task.Download.LocalPath == "" {
+		t.Fatalf("expected local path to be set")
 	}
 }
 
@@ -111,7 +101,6 @@ func TestDownloadExecutorRecoverDownloadingTaskWithoutGIDUsesLocalFile(t *testin
 		task.Status = model.TaskStatusDownloading
 		task.Download.Aria2GID = ""
 		task.Download.TotalBytes = 1024
-		task.Download.LocalPath = task.Download.LocalPath
 		return nil
 	})
 	if err != nil {
