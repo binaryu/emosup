@@ -123,31 +123,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download all assets
+      # Only binary release tarballs — never download Docker/buildx junk artifacts
+      # (e.g. binaryu~emosup~*.dockerbuild) from the same workflow run.
+      - name: Download binary assets
         uses: actions/download-artifact@v4
         with:
+          pattern: emosup-linux-*
           path: release-assets
           merge-multiple: true
 
       - name: Detect prerelease
         id: meta
         run: |
+          set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           if [[ "$TAG" == beta || "$TAG" == beta-* || "$TAG" == *-beta* || "$TAG" == *-rc* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
-          ls -la release-assets/
+          echo "=== release-assets ==="
+          find release-assets -type f -print
+          # Must have both arches
+          test -f release-assets/emosup-linux-amd64.tar.gz
+          test -f release-assets/emosup-linux-arm64.tar.gz
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ steps.meta.outputs.prerelease }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            release-assets/*.tar.gz
-            release-assets/*.sha256
+            release-assets/emosup-linux-amd64.tar.gz
+            release-assets/emosup-linux-amd64.tar.gz.sha256
+            release-assets/emosup-linux-arm64.tar.gz
+            release-assets/emosup-linux-arm64.tar.gz.sha256
           body: |
             ## 安装
 
@@ -155,20 +166,24 @@ jobs:
             curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sudo bash
             ```
 
-            或指定版本 / 目录：
+            安装时会询问端口（默认 8080）。或指定：
 
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sudo bash -s -- install --version ${{ github.ref_name }}
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sudo bash -s -- install --version ${{ github.ref_name }} --port 8080
             ```
 
             默认账号：`admin` / `admin`  
-            面板：`http://服务器IP:8080`
+            面板：`http://服务器IP:端口`
 
+  # Independent of publish-release so a flaky Docker push never blocks the GitHub Release.
   build-docker:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -194,5 +209,10 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          # Avoid uploading buildx/provenance blobs as workflow artifacts
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
