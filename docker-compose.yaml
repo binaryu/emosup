@@ -10,16 +10,22 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - EMOSUP_FRONTEND_DIST=/app/frontend
       - EMOSUP_PORT=${EMOSUP_PORT:-8080}
-      - EMOSUP_LOCAL_ROOT=${EMOSUP_LOCAL_ROOT:-/app/backend/data/downloads}
-      - EMOSUP_DOWNLOADS_DIR=${EMOSUP_DOWNLOADS_DIR:-/app/backend/data/downloads}
+      # 本地面板浏览根目录（容器内路径，对应下方 media 挂载）
+      - EMOSUP_LOCAL_ROOT=/media
+      # 下载缓存目录（容器内路径，位于 data 卷内，无需再单独挂）
+      - EMOSUP_DOWNLOADS_DIR=/app/backend/data/downloads
     ports:
       - "${EMOSUP_PORT:-8080}:${EMOSUP_PORT:-8080}"
     volumes:
+      # 应用数据：配置 / 任务 / 扫描 / 下载缓存
       - ${EMOSUP_DATA_DIR:-./data}:/app/backend/data
-      - ${EMOSUP_DOWNLOADS_DIR:-/home/binary}:/app/backend/data/downloads
+      # 本地媒体库：在面板「本地媒体」中浏览；宿主机路径用 EMOSUP_MEDIA_DIR 指定
+      - ${EMOSUP_MEDIA_DIR:-./media}:/media
     entrypoint:
       - /bin/sh
       - -ec
       - |
+        mkdir -p /app/backend/data/downloads /media
         [ -f /app/backend/data/config.json ] || cp /app/defaults/config.example.json /app/backend/data/config.json
+        # 确保下载目录与环境变量一致（写入 config 时由服务端 normalize）
         exec /app/backend/emosup-server

@@ -42,6 +42,7 @@ func (s *MatchService) Match(tree client.EmosVideoTree, parsed model.ParsedEpiso
 		}
 	}
 
+	// Default season 1 when only episode is known (common for single-season packs).
 	seasonNumber := 1
 	if parsed.Season != nil {
 		seasonNumber = *parsed.Season
@@ -55,24 +56,16 @@ func (s *MatchService) Match(tree client.EmosVideoTree, parsed model.ParsedEpiso
 		if season.SeasonNumber != seasonNumber {
 			continue
 		}
-
-	for _, season := range tree.Seasons {
-		if season.SeasonNumber != seasonNumber {
-			continue
-		}
-
 		for _, episode := range season.Episodes {
 			if episode.EpisodeNumber != *parsed.Episode {
 				continue
 			}
-
 			candidates = append(candidates, model.MatchCandidate{
 				ItemType: episode.ItemType,
 				ItemID:   episode.ItemID,
 				Title:    buildEpisodeTitle(tree.Title, season.SeasonNumber, episode.EpisodeNumber, episode.EpisodeTitle),
 			})
 		}
-	}
 	}
 
 	switch len(candidates) {
@@ -103,6 +96,5 @@ func buildEpisodeTitle(seriesTitle string, seasonNumber, episodeNumber int, epis
 	if episodeTitle == "" {
 		return fmt.Sprintf("%s - S%02dE%02d", seriesTitle, seasonNumber, episodeNumber)
 	}
-
 	return fmt.Sprintf("%s - S%02dE%02d - %s", seriesTitle, seasonNumber, episodeNumber, episodeTitle)
 }

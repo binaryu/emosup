@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 
 import type { ScanItem, ScanSession } from '@/types/api'
-import { parseApiResponse } from '@/utils/api'
+import { apiGet, apiSend } from '@/utils/api'
 
 export const useScanStore = defineStore('scans', {
   state: () => ({
@@ -12,7 +12,7 @@ export const useScanStore = defineStore('scans', {
     async fetchScans() {
       this.loading = true
       try {
-        this.scans = await parseApiResponse<ScanSession[]>(await fetch('/api/scans'))
+        this.scans = await apiGet<ScanSession[]>('/api/scans')
       } finally {
         this.loading = false
       }
@@ -20,22 +20,14 @@ export const useScanStore = defineStore('scans', {
     async createScan(path: string, tmdbId: number, videoType = '', filePath = '', source = '', filePaths: string[] = []) {
       this.loading = true
       try {
-        const data = await parseApiResponse<ScanSession>(
-          await fetch('/api/scans', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              path,
-              file_path: filePath || undefined,
-              file_paths: filePaths.length > 0 ? filePaths : undefined,
-              source: source || undefined,
-              tmdb_id: tmdbId,
-              video_type: videoType || undefined,
-            }),
-          }),
-        )
+        const data = await apiSend<ScanSession>('/api/scans', 'POST', {
+          path,
+          file_path: filePath || undefined,
+          file_paths: filePaths.length > 0 ? filePaths : undefined,
+          source: source || undefined,
+          tmdb_id: tmdbId,
+          video_type: videoType || undefined,
+        })
         this.scans = [data, ...this.scans.filter((item) => item.id !== data.id)]
         return data
       } finally {
@@ -45,15 +37,7 @@ export const useScanStore = defineStore('scans', {
     async updateScanItem(scanId: string, itemId: string, patch: Partial<Pick<ScanItem, 'selected_item_type' | 'selected_item_id' | 'selected_title' | 'confirmed'>>) {
       this.loading = true
       try {
-        const data = await parseApiResponse<ScanItem>(
-          await fetch(`/api/scans/${scanId}/items/${itemId}`, {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(patch),
-          }),
-        )
+        const data = await apiSend<ScanItem>(`/api/scans/${scanId}/items/${itemId}`, 'PATCH', patch)
 
         const scan = this.scans.find((item) => item.id === scanId)
         if (scan) {
@@ -72,7 +56,7 @@ export const useScanStore = defineStore('scans', {
     async deleteScan(scanId: string) {
       this.loading = true
       try {
-        await parseApiResponse(await fetch(`/api/scans/${scanId}`, { method: 'DELETE' }))
+        await apiSend(`/api/scans/${scanId}`, 'DELETE')
         this.scans = this.scans.filter((item) => item.id !== scanId)
       } finally {
         this.loading = false
@@ -81,11 +65,7 @@ export const useScanStore = defineStore('scans', {
     async deleteScanItem(scanId: string, itemId: string) {
       this.loading = true
       try {
-        const data = await parseApiResponse<ScanSession>(
-          await fetch(`/api/scans/${scanId}/items/${itemId}`, {
-            method: 'DELETE',
-          }),
-        )
+        const data = await apiSend<ScanSession>(`/api/scans/${scanId}/items/${itemId}`, 'DELETE')
 
         const scan = this.scans.find((item) => item.id === scanId)
         if (scan) {

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"emosup/backend/internal/client"
@@ -109,8 +107,12 @@ func TestCreateScan(t *testing.T) {
 		t.Fatalf("expected raw url to be filled")
 	}
 
-	scanFile := filepath.Join(dataDir, "scans", "scan_"+scan.ID+".json")
-	if _, err := os.Stat(scanFile); err != nil {
-		t.Fatalf("expected scan file to exist: %v", err)
+	// Persisted in SQLite (not JSON files).
+	reloaded, err := fileStore.GetScan(scan.ID)
+	if err != nil {
+		t.Fatalf("expected scan to persist in sqlite: %v", err)
+	}
+	if reloaded.TotalCount != scan.TotalCount {
+		t.Fatalf("reloaded total=%d want %d", reloaded.TotalCount, scan.TotalCount)
 	}
 }

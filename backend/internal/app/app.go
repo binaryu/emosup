@@ -30,6 +30,11 @@ func New() (*App, error) {
 	}
 
 	configService := service.NewConfigService(fileStore)
+	authService := service.NewAuthService(fileStore)
+	if err := authService.EnsureBootstrap(); err != nil {
+		return nil, fmt.Errorf("bootstrap auth: %w", err)
+	}
+
 	openListClient := client.NewHTTPOpenListClient()
 	emosClient := client.NewHTTPEmosClient()
 	openListService := service.NewOpenListService(fileStore, openListClient)
@@ -45,7 +50,8 @@ func New() (*App, error) {
 	uploadExecutor := service.NewUploadExecutor(taskService, emosClient, eventBus)
 	tmdbClient := client.NewTMDBClient()
 
-	cfg, err := configService.GetConfig(context.Background())
+	// Load full config from store (not redacted) for scheduler settings.
+	cfg, err := fileStore.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +67,7 @@ func New() (*App, error) {
 
 	router := handler.NewRouter(handler.RouterDependencies{
 		Health:       handler.NewHealthHandler(),
+		Auth:         handler.NewAuthHandler(authService),
 		System:       handler.NewSystemHandler(manager, fileStore),
 		Config:       handler.NewConfigHandler(configService),
 		OpenList:     handler.NewOpenListHandler(openListService),

@@ -23,7 +23,7 @@ func TestRouterServesFrontendIndexForSpaRoutes(t *testing.T) {
 
 	router := NewRouter(RouterDependencies{
 		Health:       NewHealthHandler(),
-		System:       NewSystemHandler(nil),
+		System:       NewSystemHandler(nil, nil),
 		Config:       NewConfigHandler(nil),
 		OpenList:     NewOpenListHandler(nil),
 		Scan:         NewScanHandler(nil),
@@ -65,7 +65,7 @@ func TestRouterRejectsPathTraversalOutsideFrontendDist(t *testing.T) {
 
 	router := NewRouter(RouterDependencies{
 		Health:       NewHealthHandler(),
-		System:       NewSystemHandler(nil),
+		System:       NewSystemHandler(nil, nil),
 		Config:       NewConfigHandler(nil),
 		OpenList:     NewOpenListHandler(nil),
 		Scan:         NewScanHandler(nil),

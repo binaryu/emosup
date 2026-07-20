@@ -9,7 +9,7 @@ import type {
   TaskStats,
   TaskStatus,
 } from '@/types/api'
-import { parseApiResponse } from '@/utils/api'
+import { apiGet, apiSend } from '@/utils/api'
 
 export const useTaskStore = defineStore('tasks', {
   state: () => ({
@@ -40,7 +40,7 @@ export const useTaskStore = defineStore('tasks', {
         params.set('page', String(page))
         params.set('page_size', String(pageSize))
 
-        const data = await parseApiResponse<TaskListResponse>(await fetch(`/api/tasks?${params.toString()}`))
+        const data = await apiGet<TaskListResponse>(`/api/tasks?${params.toString()}`)
         // Merge instead of replace to avoid table re-render
         if (this.tasks.length === 0 || page !== this.page || status !== this.statusFilter) {
           this.tasks = data.items
@@ -73,7 +73,7 @@ export const useTaskStore = defineStore('tasks', {
     async fetchTask(taskId: string) {
       this.loading = true
       try {
-        const data = await parseApiResponse<Task>(await fetch(`/api/tasks/${taskId}`))
+        const data = await apiGet<Task>(`/api/tasks/${taskId}`)
         this.activeTask = data
         return data
       } finally {
@@ -83,7 +83,7 @@ export const useTaskStore = defineStore('tasks', {
     async fetchTaskLog(taskId: string) {
       this.loading = true
       try {
-        const data = await parseApiResponse<TaskLog>(await fetch(`/api/tasks/${taskId}/logs`))
+        const data = await apiGet<TaskLog>(`/api/tasks/${taskId}/logs`)
         this.activeTaskLog = data
         return data
       } finally {
@@ -91,30 +91,22 @@ export const useTaskStore = defineStore('tasks', {
       }
     },
     async fetchTaskStats() {
-      const data = await parseApiResponse<TaskStats>(await fetch('/api/tasks/stats'))
+      const data = await apiGet<TaskStats>('/api/tasks/stats')
       this.stats = data
       return data
     },
     async fetchRuntimeStatus() {
-      const data = await parseApiResponse<RuntimeStatus>(await fetch('/api/system/runtime'))
+      const data = await apiGet<RuntimeStatus>('/api/system/runtime')
       this.runtime = data
       return data
     },
     async batchCreateTasks(scanSessionId: string, itemIds: string[]) {
       this.loading = true
       try {
-        return await parseApiResponse<BatchCreateTasksResponse>(
-          await fetch('/api/tasks/batch-create', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              scan_session_id: scanSessionId,
-              item_ids: itemIds,
-            }),
-          }),
-        )
+        return await apiSend<BatchCreateTasksResponse>('/api/tasks/batch-create', 'POST', {
+          scan_session_id: scanSessionId,
+          item_ids: itemIds,
+        })
       } finally {
         this.loading = false
       }
@@ -122,11 +114,7 @@ export const useTaskStore = defineStore('tasks', {
     async cancelTask(taskId: string) {
       this.loading = true
       try {
-        const data = await parseApiResponse<Task>(
-          await fetch(`/api/tasks/${taskId}/cancel`, {
-            method: 'POST',
-          }),
-        )
+        const data = await apiSend<Task>(`/api/tasks/${taskId}/cancel`, 'POST')
         this.syncTask(data)
         return data
       } finally {
@@ -136,11 +124,7 @@ export const useTaskStore = defineStore('tasks', {
     async retryTask(taskId: string) {
       this.loading = true
       try {
-        const data = await parseApiResponse<Task>(
-          await fetch(`/api/tasks/${taskId}/retry`, {
-            method: 'POST',
-          }),
-        )
+        const data = await apiSend<Task>(`/api/tasks/${taskId}/retry`, 'POST')
         this.syncTask(data)
         return data
       } finally {
@@ -150,7 +134,7 @@ export const useTaskStore = defineStore('tasks', {
     async deleteTask(taskId: string) {
       this.loading = true
       try {
-        await parseApiResponse(await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' }))
+        await apiSend(`/api/tasks/${taskId}`, 'DELETE')
         this.tasks = this.tasks.filter((item) => item.id !== taskId)
         this.total = Math.max(0, this.total - 1)
       } finally {
@@ -158,12 +142,12 @@ export const useTaskStore = defineStore('tasks', {
       }
     },
     async pauseTask(taskId: string) {
-      const task = await parseApiResponse<Task>(await fetch(`/api/tasks/${taskId}/pause`, { method: 'POST' }))
+      const task = await apiSend<Task>(`/api/tasks/${taskId}/pause`, 'POST')
       this.syncTask(task)
       return task
     },
     async resumeTask(taskId: string) {
-      const task = await parseApiResponse<Task>(await fetch(`/api/tasks/${taskId}/resume`, { method: 'POST' }))
+      const task = await apiSend<Task>(`/api/tasks/${taskId}/resume`, 'POST')
       this.syncTask(task)
       return task
     },
@@ -175,6 +159,63 @@ export const useTaskStore = defineStore('tasks', {
       if (this.activeTask?.id === task.id) {
         this.activeTask = task
       }
+    },
+    /**
+     * Apply a live SSE progress/status patch without full list reload.
+     * Replaces the row object so Element Plus table re-renders nested fields.
+     */
+    applyLiveUpdate(payload: {
+      taskId: string
+      status?: TaskStatus | string
+      download?: Partial<Task['download']>
+      upload?: Partial<Task['upload']>
+    }): boolean {
+      const index = this.tasks.findIndex((item) => item.id === payload.taskId)
+      if (index < 0) return false
+
+      const current = this.tasks[index]
+      const next: Task = {
+        ...current,
+        download: { ...current.download },
+        upload: { ...current.upload },
+        result: { ...current.result },
+        updated_at: new Date().toISOString(),
+      }
+
+      if (payload.status) {
+        next.status = payload.status as TaskStatus
+      }
+      if (payload.download) {
+        for (const [key, value] of Object.entries(payload.download)) {
+          if (value !== undefined) {
+            ;(next.download as Record<string, unknown>)[key] = value
+          }
+        }
+      }
+      if (payload.upload) {
+        for (const [key, value] of Object.entries(payload.upload)) {
+          if (value !== undefined) {
+            ;(next.upload as Record<string, unknown>)[key] = value
+          }
+        }
+      }
+
+      this.tasks[index] = next
+      if (this.activeTask?.id === payload.taskId) {
+        this.activeTask = {
+          ...this.activeTask,
+          status: next.status,
+          download: { ...next.download },
+          upload: { ...next.upload },
+          updated_at: next.updated_at,
+        }
+      }
+      return true
+    },
+    hasActiveTasks(): boolean {
+      return this.tasks.some((t) =>
+        ['downloading', 'uploading', 'saving', 'queued', 'upload_pending'].includes(t.status),
+      )
     },
   },
 })

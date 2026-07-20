@@ -27,7 +27,8 @@ func New() *Bus {
 }
 
 func (b *Bus) Subscribe() chan TaskEvent {
-	ch := make(chan TaskEvent, 64)
+	// Larger buffer absorbs short UI freezes without dropping progress ticks.
+	ch := make(chan TaskEvent, 256)
 	b.mu.Lock()
 	b.subscribers[ch] = struct{}{}
 	b.mu.Unlock()
@@ -48,6 +49,15 @@ func (b *Bus) Publish(event TaskEvent) {
 		select {
 		case ch <- event:
 		default:
+			// Channel full: drop one stale event then push latest so UI keeps freshest progress.
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- event:
+			default:
+			}
 		}
 	}
 }

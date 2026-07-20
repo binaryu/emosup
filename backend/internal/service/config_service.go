@@ -16,13 +16,27 @@ func NewConfigService(store *store.FileStore) *ConfigService {
 }
 
 func (s *ConfigService) GetConfig(_ context.Context) (model.AppConfig, error) {
-	return s.store.LoadConfig()
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		return model.AppConfig{}, err
+	}
+	return RedactAuthForResponse(cfg), nil
 }
 
 func (s *ConfigService) SaveConfig(_ context.Context, cfg model.AppConfig) (model.AppConfig, error) {
-	if err := s.store.SaveConfig(cfg); err != nil {
+	existing, err := s.store.LoadConfig()
+	if err != nil {
 		return model.AppConfig{}, err
 	}
 
-	return cfg, nil
+	merged, err := MergeAuthOnSave(existing, cfg)
+	if err != nil {
+		return model.AppConfig{}, err
+	}
+
+	if err := s.store.SaveConfig(merged); err != nil {
+		return model.AppConfig{}, err
+	}
+
+	return RedactAuthForResponse(merged), nil
 }

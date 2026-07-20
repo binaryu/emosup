@@ -1,11 +1,18 @@
 import { defineStore } from 'pinia'
 
-import type { AppConfig, ApiResponse } from '@/types/api'
+import type { AppConfig } from '@/types/api'
+import { apiGet, apiSend } from '@/utils/api'
 
 const defaultConfig: AppConfig = {
   server: {
     host: '127.0.0.1',
     port: 8080,
+  },
+  auth: {
+    username: 'admin',
+    password: '',
+    jwt_secret: '',
+    token_ttl_hours: 72,
   },
   openlist: {
     base_url: '',
@@ -39,17 +46,29 @@ const defaultConfig: AppConfig = {
 
 export const useConfigStore = defineStore('config', {
   state: () => ({
-    config: defaultConfig as AppConfig,
+    config: structuredClone(defaultConfig) as AppConfig,
     loading: false,
   }),
   actions: {
     async fetchConfig() {
       this.loading = true
       try {
-        const response = await fetch('/api/config')
-        const payload: ApiResponse<AppConfig> = await response.json()
-        if (payload.success) {
-          this.config = payload.data
+        const data = await apiGet<AppConfig>('/api/config')
+        this.config = {
+          ...structuredClone(defaultConfig),
+          ...data,
+          auth: {
+            ...defaultConfig.auth,
+            ...(data.auth || {}),
+            // API never returns secrets; keep empty so save means "unchanged".
+            password: '',
+            jwt_secret: '',
+          },
+          server: { ...defaultConfig.server, ...(data.server || {}) },
+          openlist: { ...defaultConfig.openlist, ...(data.openlist || {}) },
+          aria2: { ...defaultConfig.aria2, ...(data.aria2 || {}) },
+          emos: { ...defaultConfig.emos, ...(data.emos || {}) },
+          worker: { ...defaultConfig.worker, ...(data.worker || {}) },
         }
       } finally {
         this.loading = false
@@ -58,16 +77,16 @@ export const useConfigStore = defineStore('config', {
     async saveConfig() {
       this.loading = true
       try {
-        const response = await fetch('/api/config', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
+        const data = await apiSend<AppConfig>('/api/config', 'PUT', this.config)
+        this.config = {
+          ...this.config,
+          ...data,
+          auth: {
+            ...this.config.auth,
+            ...(data.auth || {}),
+            password: '',
+            jwt_secret: '',
           },
-          body: JSON.stringify(this.config),
-        })
-        const payload: ApiResponse<AppConfig> = await response.json()
-        if (payload.success) {
-          this.config = payload.data
         }
       } finally {
         this.loading = false

@@ -21,6 +21,13 @@ func TestParseEpisodeInfo(t *testing.T) {
 			episode:  ptr(2),
 		},
 		{
+			name:     "sxxexx with dot",
+			fileName: "Show.S01.E02.mkv",
+			fullPath: "/TV/Show/Show.S01.E02.mkv",
+			season:   ptr(1),
+			episode:  ptr(2),
+		},
+		{
 			name:     "bracket episode [01]",
 			fileName: "[VCB-Studio] Ao Haru Ride [01][Ma10p_1080p][x265_flac].mkv",
 			fullPath: "/ccs/[VCB-Studio] Ao Haru Ride [Ma10p_1080p]/[VCB-Studio] Ao Haru Ride [01][Ma10p_1080p][x265_flac].mkv",
@@ -56,12 +63,47 @@ func TestParseEpisodeInfo(t *testing.T) {
 			episode:  ptr(3),
 		},
 		{
+			name:     "E-only token",
+			fileName: "Show.E07.1080p.mkv",
+			fullPath: "/TV/Show/Show.E07.1080p.mkv",
+			season:   nil,
+			episode:  ptr(7),
+		},
+		{
+			name:     "cn episode 第12集",
+			fileName: "剧名 第12集.mkv",
+			fullPath: "/TV/剧名/剧名 第12集.mkv",
+			season:   nil,
+			episode:  ptr(12),
+		},
+		{
+			name:     "cn episode 话",
+			fileName: "动画 第3话.mkv",
+			fullPath: "/anime/动画/第1季/动画 第3话.mkv",
+			season:   ptr(1),
+			episode:  ptr(3),
+		},
+		{
 			name:      "special season",
 			fileName:  "Show.第1集.mkv",
 			fullPath:  "/TV/Show/Specials/Show.第1集.mkv",
 			season:    ptr(0),
 			episode:   ptr(1),
 			isSpecial: true,
+		},
+		{
+			name:     "nearest season folder wins",
+			fileName: "03.mkv",
+			fullPath: "/TV/Show/Season 1/Season 3/03.mkv",
+			season:   ptr(3),
+			episode:  ptr(3),
+		},
+		{
+			name:     "sxxexx not overwritten by later bracket",
+			fileName: "Show.S02E04.[1080p].mkv",
+			fullPath: "/TV/Show/Show.S02E04.[1080p].mkv",
+			season:   ptr(2),
+			episode:  ptr(4),
 		},
 	}
 
@@ -77,6 +119,27 @@ func TestParseEpisodeInfo(t *testing.T) {
 				t.Fatalf("expected special=%v, got %v", testCase.isSpecial, result.IsSpecial)
 			}
 		})
+	}
+}
+
+func TestExtractShowTitle(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/TV/Ao Haru Ride/Season 1", "Ao Haru Ride"},
+		{"/ccs/[VCB-Studio] Ao Haru Ride [Ma10p_1080p]", "Ao Haru Ride"},
+		{"/quark/盾牌勇者/第一季（2002）全13集", "盾牌勇者"},
+		{"/anime/Show Name/S01", "Show Name"},
+		{"/", ""},
+	}
+	for _, c := range cases {
+		got := ExtractShowTitle(c.path)
+		if got != c.want {
+			t.Fatalf("ExtractShowTitle(%q) = %q, want %q", c.path, got, c.want)
+		}
 	}
 }
 

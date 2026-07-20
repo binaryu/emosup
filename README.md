@@ -20,7 +20,9 @@ wget https://raw.githubusercontent.com/binaryu/emosup/main/docker-compose.yaml
 # 2. 创建 .env（可选，自定义端口/目录）
 cat > .env << EOF
 EMOSUP_PORT=8080
-EMOSUP_DOWNLOADS_DIR=/home/user/downloads
+EMOSUP_DATA_DIR=./data
+# 本机已有的媒体库（可选，用于「本地媒体」扫描）
+EMOSUP_MEDIA_DIR=/path/to/your/media
 TZ=Asia/Shanghai
 EOF
 
@@ -28,24 +30,32 @@ EOF
 docker compose up -d
 ```
 
-打开 `http://localhost:8080`，在配置页填入凭证即可使用。
+打开 `http://localhost:8080`，使用默认账号 `admin` / `admin` 登录，在配置页修改密码并填入外部服务凭证即可使用。
 
 ## 目录挂载
 
-Docker 容器内下载路径为 `/app/backend/data/downloads`，通过 docker-compose 映射到宿主机：
+| 用途 | 宿主机 (`.env`) | 容器内 | 说明 |
+|------|-----------------|--------|------|
+| 应用数据 | `EMOSUP_DATA_DIR`（默认 `./data`） | `/app/backend/data` | 配置、任务、扫描记录 |
+| 下载缓存 | （在 data 卷内） | `/app/backend/data/downloads` | OpenList 下载临时文件，无需单独挂 |
+| 本地媒体 | `EMOSUP_MEDIA_DIR`（默认 `./media`） | `/media` | 面板「本地媒体」浏览/扫描的根目录 |
 
 ```
-宿主机                          容器内
-/home/user/downloads    ←→    /app/backend/data/downloads
+宿主机 media 库          容器
+/path/to/your/media  ←→  /media          ← 本地扫描
+./data               ←→  /app/backend/data
+                         └── downloads/  ← 网盘下载缓存
 ```
 
-`.env` 中设置 `EMOSUP_DOWNLOADS_DIR` 指向你的下载目录即可。容器内本地浏览功能使用 `EMOSUP_LOCAL_ROOT` 环境变量（默认即上述容器路径）。
+> 不要再把宿主机下载目录嵌套挂到 `data/downloads` 上——下载缓存随 data 卷一起持久化即可。  
+> 若要扫描本机已有影片，把目录映射到 `EMOSUP_MEDIA_DIR`，在面板选择「本地媒体」。
 
 ## 配置项
 
 | 分类 | 字段 | 说明 |
 |------|------|------|
 | 服务 | 监听地址 / 端口 | HTTP 服务绑定 |
+| 登录认证 | 用户名 / 密码 / Token 有效期 | 面板 JWT 登录（默认 admin/admin） |
 | OpenList | 接口地址 / 用户名 / 密码 / Token | 填写网盘地址和登录凭证 |
 | Emos | 接口地址 / Token / 存储位置 | Emos API 连接 |
 | 任务调度 | 轮询间隔 / 最大并发 / 下载线程 / 分片大小 / 重试参数 | 调度策略 |
@@ -66,7 +76,7 @@ Docker 容器内下载路径为 `/app/backend/data/downloads`，通过 docker-co
 git clone git@github.com:binaryu/emosup.git
 cd emosup
 
-# 后端
+# 后端（在仓库根或 backend 下均可）
 cd backend && go run ./cmd/server
 
 # 前端
@@ -74,6 +84,16 @@ cd frontend && npm install && npx vite
 ```
 
 前端 `http://localhost:5173`，后端 `http://localhost:8080`。
+
+直接跑二进制时：
+
+| 路径 | 默认位置 |
+|------|----------|
+| 数据根 | `backend/data`（或 `EMOSUP_DATA_DIR`） |
+| 数据库 | `{数据根}/emosup.db`（SQLite WAL） |
+| 下载缓存 / 本地浏览 | `{数据根}/downloads`（启动时自动创建） |
+
+可用 `EMOSUP_LOCAL_ROOT` 覆盖本地浏览根目录（例如指向你的媒体库）。
 
 ## 目录结构
 
@@ -89,9 +109,9 @@ emosup/
 │   │   ├── model/      # 数据模型
 │   │   ├── scheduler/  # 任务调度
 │   │   ├── service/    # 业务逻辑
-│   │   ├── store/      # JSON 存储
+│   │   ├── store/      # SQLite 存储
 │   │   └── utils/      # 工具（解析器等）
-│   └── data/           # 运行时数据
+│   └── data/           # 运行时数据 (emosup.db / downloads)
 ├── frontend/
 │   └── src/
 │       ├── components/

@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"os"
+	"strings"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
@@ -45,9 +46,23 @@ func (h *SystemHandler) getRecovery(c *gin.Context) {
 }
 
 func (h *SystemHandler) getDiskUsage(c *gin.Context) {
-	path := "/app/backend/data/downloads"
-	if envPath := os.Getenv("EMOSUP_LOCAL_ROOT"); envPath != "" {
-		path = envPath
+	// Prefer configured download cache (where free space actually matters).
+	path := ""
+	if h.store != nil {
+		if cfg, err := h.store.LoadConfig(); err == nil && strings.TrimSpace(cfg.Aria2.DownloadDir) != "" {
+			path = cfg.Aria2.DownloadDir
+		} else if root := h.store.Root(); root != "" {
+			path = root
+		}
+	}
+	if path == "" {
+		if envPath := strings.TrimSpace(os.Getenv("EMOSUP_DOWNLOADS_DIR")); envPath != "" {
+			path = envPath
+		} else if envPath := strings.TrimSpace(os.Getenv("EMOSUP_LOCAL_ROOT")); envPath != "" {
+			path = envPath
+		} else {
+			path = "."
+		}
 	}
 
 	var stat syscall.Statfs_t

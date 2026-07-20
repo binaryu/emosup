@@ -54,18 +54,31 @@ func NewScanService(
 }
 
 func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (model.ScanSession, error) {
-	singleFile := strings.TrimSpace(req.FilePath)
-	multiFiles := req.FilePaths
-	if singleFile == "" && len(multiFiles) == 0 && strings.TrimSpace(req.Path) == "" {
+	// Normalize targets: file_paths (preferred) | file_path | path (directory)
+	targets := make([]string, 0, len(req.FilePaths)+2)
+	for _, p := range req.FilePaths {
+		if t := strings.TrimSpace(p); t != "" {
+			targets = append(targets, t)
+		}
+	}
+	if single := strings.TrimSpace(req.FilePath); single != "" {
+		targets = append(targets, single)
+	}
+	if len(targets) == 0 {
+		if dir := strings.TrimSpace(req.Path); dir != "" {
+			targets = append(targets, dir)
+		}
+	}
+	if len(targets) == 0 {
 		return model.ScanSession{}, errors.New("path, file_path or file_paths is required")
 	}
 	if req.TMDBID <= 0 {
 		return model.ScanSession{}, errors.New("tmdb_id must be greater than 0")
 	}
 
-	scanPath := req.Path
-	if singleFile != "" && scanPath == "" {
-		scanPath = singleFile
+	scanPath := strings.TrimSpace(req.Path)
+	if scanPath == "" {
+		scanPath = targets[0]
 	}
 
 	now := time.Now()
@@ -81,92 +94,21 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 		UpdatedAt: now,
 	}
 
-	log.Printf("scan started: id=%s path=%s file_path=%s tmdb_id=%d", scan.ID, req.Path, singleFile, req.TMDBID)
+	log.Printf("scan started: id=%s path=%s targets=%d tmdb_id=%d source=%s", scan.ID, scanPath, len(targets), req.TMDBID, req.Source)
 	if err := s.store.SaveScan(scan); err != nil {
 		return model.ScanSession{}, err
 	}
 
-	var entries []client.OpenListEntry
-	var err error
 	isLocal := strings.EqualFold(req.Source, "local")
-	if isLocal && len(multiFiles) > 0 {
-		// Local multi-file mode
-		for _, fp := range multiFiles {
-			fp = strings.TrimSpace(fp)
-			if fp == "" {
-				continue
-			}
-			localEntry, localErr := s.localService.GetFileInfo(ctx, fp)
-			if localErr != nil {
-				log.Printf("local file info failed: scan=%s file=%s err=%v", scan.ID, fp, localErr)
-				continue
-			}
-			entries = append(entries, client.OpenListEntry{
-				Name:  localEntry.Name,
-				Path:  localEntry.Path,
-				IsDir: false,
-				Size:  localEntry.Size,
-			})
-		}
-		log.Printf("local multi-file: scan=%s files=%d", scan.ID, len(entries))
-	} else if !isLocal && len(multiFiles) > 0 {
-		// OpenList multi-file mode
-		for _, fp := range multiFiles {
-			fp = strings.TrimSpace(fp)
-			if fp == "" {
-				continue
-			}
-			fileEntries, fileErr := s.openListService.GetFileInfo(ctx, fp)
-			if fileErr != nil {
-				log.Printf("openlist file info failed: scan=%s file=%s err=%v", scan.ID, fp, fileErr)
-				continue
-			}
-			entries = append(entries, fileEntries...)
-		}
-		log.Printf("openlist multi-file: scan=%s files=%d", scan.ID, len(entries))
-	} else if isLocal && singleFile != "" {
-		// Local single file mode
-		localEntry, localErr := s.localService.GetFileInfo(ctx, singleFile)
-		if localErr != nil {
-			log.Printf("local file info failed: scan=%s file=%s err=%v", scan.ID, singleFile, localErr)
-			scan.Status = model.ScanSessionStatusFailed
-			scan.UpdatedAt = time.Now()
-			_ = s.store.SaveScan(scan)
-			return model.ScanSession{}, localErr
-		}
-		entries = []client.OpenListEntry{{
-			Name:  localEntry.Name,
-			Path:  localEntry.Path,
-			IsDir: false,
-			Size:  localEntry.Size,
-		}}
-		log.Printf("local single file: scan=%s file=%s size=%d", scan.ID, singleFile, localEntry.Size)
-	} else if isLocal {
-		// Local directory mode: list video files recursively from download dir
-		entries = s.listLocalVideosRecursive(ctx, req.Path)
-		log.Printf("local list success: scan=%s videos=%d", scan.ID, len(entries))
-	} else if singleFile != "" {
-		// OpenList single file mode
-		entries, err = s.openListService.GetFileInfo(ctx, singleFile)
-		if err != nil {
-			log.Printf("openlist file info failed: scan=%s file=%s err=%v", scan.ID, singleFile, err)
-			scan.Status = model.ScanSessionStatusFailed
-			scan.UpdatedAt = time.Now()
-			_ = s.store.SaveScan(scan)
-			return model.ScanSession{}, err
-		}
-		log.Printf("openlist single file: scan=%s file=%s", scan.ID, singleFile)
-	} else {
-		entries, err = s.openListService.ListVideoFiles(ctx, req.Path)
-		if err != nil {
-			log.Printf("openlist list failed: scan=%s err=%v", scan.ID, err)
-			scan.Status = model.ScanSessionStatusFailed
-			scan.UpdatedAt = time.Now()
-			_ = s.store.SaveScan(scan)
-			return model.ScanSession{}, err
-		}
-		log.Printf("openlist list success: scan=%s videos=%d", scan.ID, len(entries))
+	entries, err := s.collectVideoEntries(ctx, isLocal, targets)
+	if err != nil {
+		log.Printf("scan collect failed: scan=%s err=%v", scan.ID, err)
+		scan.Status = model.ScanSessionStatusFailed
+		scan.UpdatedAt = time.Now()
+		_ = s.store.SaveScan(scan)
+		return model.ScanSession{}, err
 	}
+	log.Printf("scan collect success: scan=%s videos=%d", scan.ID, len(entries))
 
 	tree, err := s.emosService.GetVideoTree(ctx, req.TMDBID, req.VideoType)
 	if err != nil {
@@ -268,6 +210,80 @@ func (s *ScanService) ListScans(_ context.Context) ([]model.ScanSession, error) 
 
 func (s *ScanService) GetScan(_ context.Context, id string) (model.ScanSession, error) {
 	return s.store.GetScan(id)
+}
+
+// collectVideoEntries expands mixed file/dir targets into a de-duplicated video list.
+func (s *ScanService) collectVideoEntries(ctx context.Context, isLocal bool, targets []string) ([]client.OpenListEntry, error) {
+	seen := make(map[string]struct{})
+	result := make([]client.OpenListEntry, 0)
+
+	add := func(entry client.OpenListEntry) {
+		key := strings.TrimSpace(entry.Path)
+		if key == "" {
+			key = entry.Name
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		if !IsVideoFile(entry.Name) && !entry.IsDir {
+			return
+		}
+		if entry.IsDir {
+			return
+		}
+		seen[key] = struct{}{}
+		result = append(result, entry)
+	}
+
+	for _, target := range targets {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			continue
+		}
+
+		if isLocal {
+			if s.localService.IsDir(ctx, target) {
+				for _, e := range s.listLocalVideosRecursive(ctx, target) {
+					add(e)
+				}
+				continue
+			}
+			localEntry, err := s.localService.GetFileInfo(ctx, target)
+			if err != nil {
+				log.Printf("local target skip: path=%s err=%v", target, err)
+				continue
+			}
+			add(client.OpenListEntry{
+				Name:  localEntry.Name,
+				Path:  localEntry.Path,
+				IsDir: false,
+				Size:  localEntry.Size,
+			})
+			continue
+		}
+
+		// OpenList: try as file first; if not found, treat as directory.
+		fileEntries, fileErr := s.openListService.GetFileInfo(ctx, target)
+		if fileErr == nil && len(fileEntries) > 0 {
+			for _, e := range fileEntries {
+				add(e)
+			}
+			continue
+		}
+		dirVideos, dirErr := s.openListService.ListVideoFiles(ctx, target)
+		if dirErr != nil {
+			log.Printf("openlist target skip: path=%s fileErr=%v dirErr=%v", target, fileErr, dirErr)
+			continue
+		}
+		for _, e := range dirVideos {
+			add(e)
+		}
+	}
+
+	if len(result) == 0 {
+		return nil, errors.New("no video files found in selected targets")
+	}
+	return result, nil
 }
 
 func (s *ScanService) listLocalVideosRecursive(ctx context.Context, path string) []client.OpenListEntry {

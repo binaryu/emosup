@@ -5,10 +5,18 @@ import BrowseView from '@/views/BrowseView.vue'
 import ScanResultsView from '@/views/ScanResultsView.vue'
 import TaskQueueView from '@/views/TaskQueueView.vue'
 import TaskDetailView from '@/views/TaskDetailView.vue'
+import LoginView from '@/views/LoginView.vue'
+import { getToken } from '@/utils/api'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    {
+      path: '/login',
+      name: 'login',
+      component: LoginView,
+      meta: { public: true },
+    },
     {
       path: '/',
       redirect: '/tasks',
@@ -51,6 +59,24 @@ const router = createRouter({
       component: () => import('@/views/NotFoundView.vue'),
     },
   ],
+})
+
+router.beforeEach((to) => {
+  const isPublic = Boolean(to.meta.public)
+  const token = getToken()
+
+  if (!isPublic && !token) {
+    return {
+      name: 'login',
+      query: { redirect: to.fullPath },
+    }
+  }
+
+  if (to.name === 'login' && token) {
+    return { name: 'tasks' }
+  }
+
+  return true
 })
 
 export default router

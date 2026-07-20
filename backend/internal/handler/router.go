@@ -11,6 +11,7 @@ import (
 
 type RouterDependencies struct {
 	Health       *HealthHandler
+	Auth         *AuthHandler
 	System       *SystemHandler
 	Config       *ConfigHandler
 	OpenList     *OpenListHandler
@@ -29,7 +30,7 @@ func NewRouter(deps RouterDependencies) *gin.Engine {
 
 	router.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -39,7 +40,17 @@ func NewRouter(deps RouterDependencies) *gin.Engine {
 	})
 
 	api := router.Group("/api")
+	// Public endpoints (no JWT required).
 	deps.Health.RegisterRoutes(api)
+	if deps.Auth != nil {
+		deps.Auth.RegisterPublicRoutes(api)
+		api.Use(deps.Auth.Middleware())
+	}
+
+	// Protected endpoints.
+	if deps.Auth != nil {
+		deps.Auth.RegisterRoutes(api)
+	}
 	deps.System.RegisterRoutes(api)
 	deps.Config.RegisterRoutes(api)
 	deps.OpenList.RegisterRoutes(api)

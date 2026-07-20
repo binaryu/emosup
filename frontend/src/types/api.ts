@@ -21,6 +21,20 @@ export interface ServerConfig {
   port: number
 }
 
+export interface AuthConfig {
+  username: string
+  password: string
+  jwt_secret: string
+  token_ttl_hours: number
+}
+
+export interface LoginResponse {
+  token: string
+  token_type: string
+  expires_at: string
+  username: string
+}
+
 export interface OpenListConfig {
   base_url: string
   username: string
@@ -55,6 +69,7 @@ export interface WorkerConfig {
 
 export interface AppConfig {
   server: ServerConfig
+  auth: AuthConfig
   openlist: OpenListConfig
   aria2: Aria2Config
   emos: EmosConfig

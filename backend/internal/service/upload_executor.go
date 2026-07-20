@@ -136,6 +136,7 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 		log.Printf("upload resuming: task=%s from byte %d/%d", task.ID, offset, info.Size())
 	}
 
+	lastSSE := time.Time{}
 	err = e.emosClient.UploadFile(ctx, effectiveUploadURL, localPath, chunkSize, offset, func(progress client.EmosUploadProgress) error {
 		if canceled, cancelErr := e.taskService.IsTaskCanceled(ctx, task.ID); cancelErr != nil {
 			return cancelErr
@@ -143,8 +144,28 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 			return errTaskCanceled
 		}
 
-		_, syncErr := e.taskService.SyncUploadProgress(ctx, task.ID, progress)
-		return syncErr
+		updated, syncErr := e.taskService.SyncUploadProgress(ctx, task.ID, progress)
+		if syncErr != nil {
+			return syncErr
+		}
+
+		// Push live progress over SSE (throttle to ~1/s; always emit final chunk).
+		if e.eventBus != nil {
+			now := time.Now()
+			done := progress.TotalBytes > 0 && progress.UploadedBytes >= progress.TotalBytes
+			if done || now.Sub(lastSSE) >= time.Second {
+				lastSSE = now
+				e.eventBus.Publish(eventbus.TaskEvent{
+					TaskID:  updated.ID,
+					Status:  "uploading",
+					UlProg:  updated.Upload.Progress,
+					UlSpeed: updated.Upload.Speed,
+					UlDone:  updated.Upload.UploadedBytes,
+					UlTotal: updated.Upload.TotalBytes,
+				})
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		if errors.Is(err, errTaskCanceled) {

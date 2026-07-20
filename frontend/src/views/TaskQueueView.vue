@@ -81,6 +81,7 @@
     <el-card class="queue-card" :body-style="{ padding: '0' }">
       <el-table
         :data="taskStore.tasks"
+        row-key="id"
         stripe
         class="task-table"
         @selection-change="onSelectionChange"
@@ -190,7 +191,7 @@ import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { useTaskStore } from '@/stores/tasks'
 import type { Task, TaskStatus } from '@/types/api'
-import { parseApiResponse } from '@/utils/api'
+import { apiFetch, getToken } from '@/utils/api'
 import { formatBytes, formatSpeed, formatTime } from '@/utils/format'
 
 const router = useRouter()
@@ -212,54 +213,164 @@ const runtimeDescription = computed(() => {
   return `最大并发：${taskStore.runtime.max_concurrency}，正在执行：${ids.join(', ')}`
 })
 
-let timer: number | undefined
+type LiveTaskEvent = {
+  task_id: string
+  status?: string
+  dl_prog?: number
+  dl_speed?: number
+  dl_done?: number
+  dl_total?: number
+  ul_prog?: number
+  ul_speed?: number
+  ul_done?: number
+  ul_total?: number
+}
+
+let backupTimer: number | undefined
+let softRefreshTimer: number | undefined
 let eventSource: EventSource | undefined
-let pendingEvents: any[] = []
+let pendingEvents: LiveTaskEvent[] = []
 let flushTimer: number | undefined
+let reconnectTimer: number | undefined
+let pageVisible = true
 
 function connectSSE() {
-  if (eventSource) return
-  eventSource = new EventSource('/api/tasks/events')
+  if (!pageVisible || eventSource) return
+  const token = getToken()
+  const url = token
+    ? `/api/tasks/events?token=${encodeURIComponent(token)}`
+    : '/api/tasks/events'
+  eventSource = new EventSource(url)
   eventSource.onmessage = (e) => {
     try {
-      pendingEvents.push(JSON.parse(e.data))
+      pendingEvents.push(JSON.parse(e.data) as LiveTaskEvent)
       scheduleFlush()
-    } catch { /* ignore */ }
+    } catch { /* ignore malformed */ }
   }
   eventSource.onerror = () => {
     eventSource?.close()
     eventSource = undefined
-    setTimeout(connectSSE, 3000)
+    if (!pageVisible) return
+    if (reconnectTimer) window.clearTimeout(reconnectTimer)
+    reconnectTimer = window.setTimeout(connectSSE, 3000)
   }
 }
 
 function scheduleFlush() {
   if (flushTimer) return
+  // Batch UI patches ~4fps — enough for smooth progress, cheap for Vue/table.
   flushTimer = window.setTimeout(() => {
     flushTimer = undefined
     const events = pendingEvents.splice(0)
-    // Deduplicate: keep only latest per task
-    const latest = new Map<string, any>()
-    for (const evt of events) latest.set(evt.task_id, evt)
-    // Update active tasks only
+    if (!events.length) return
+
+    // Keep only the latest event per task within this batch.
+    const latest = new Map<string, LiveTaskEvent>()
+    for (const evt of events) {
+      if (!evt?.task_id) continue
+      const prev = latest.get(evt.task_id)
+      latest.set(evt.task_id, prev ? { ...prev, ...evt } : evt)
+    }
+
+    let needSoftRefresh = false
     for (const evt of latest.values()) {
-      if (evt.status === 'done') { refreshData(); return }
-      const task = taskStore.tasks.find(t => t.id === evt.task_id)
-      if (!task || !isActive(task.status as TaskStatus)) continue
-      if (evt.dl_prog !== undefined) {
-        task.download.progress = evt.dl_prog
-        task.download.speed = evt.dl_speed
-        task.download.completed_bytes = evt.dl_done
-        task.download.total_bytes = evt.dl_total
+      if (evt.status === 'done') {
+        needSoftRefresh = true
+        continue
       }
-      if (evt.ul_prog !== undefined) {
-        task.upload.progress = evt.ul_prog
-        task.upload.speed = evt.ul_speed
-        task.upload.uploaded_bytes = evt.ul_done
-        task.upload.total_bytes = evt.ul_total
+      if (!applyLiveEvent(evt)) {
+        // Task not on current page (or just created) — refresh list soon.
+        needSoftRefresh = true
       }
     }
-  }, 500)
+    if (needSoftRefresh) scheduleSoftRefresh()
+  }, 250)
+}
+
+/** Map scheduler stage names + progress payloads onto local task rows. */
+function applyLiveEvent(evt: LiveTaskEvent): boolean {
+  const hasDownload =
+    evt.dl_prog !== undefined ||
+    evt.dl_done !== undefined ||
+    evt.dl_total !== undefined ||
+    evt.dl_speed !== undefined
+  const hasUpload =
+    evt.ul_prog !== undefined ||
+    evt.ul_done !== undefined ||
+    evt.ul_total !== undefined ||
+    evt.ul_speed !== undefined
+
+  let status: TaskStatus | string | undefined
+  switch (evt.status) {
+    case 'download':
+    case 'downloading':
+      status = 'downloading'
+      break
+    case 'uploading':
+      status = 'uploading'
+      break
+    case 'saving':
+      status = 'saving'
+      break
+    default:
+      if (hasDownload) status = 'downloading'
+      else if (hasUpload) status = 'uploading'
+  }
+
+  return taskStore.applyLiveUpdate({
+    taskId: evt.task_id,
+    status,
+    download: hasDownload
+      ? {
+          progress: evt.dl_prog,
+          speed: evt.dl_speed,
+          completed_bytes: evt.dl_done,
+          total_bytes: evt.dl_total,
+          status: 'active',
+        }
+      : undefined,
+    upload: hasUpload
+      ? {
+          progress: evt.ul_prog,
+          speed: evt.ul_speed,
+          uploaded_bytes: evt.ul_done,
+          total_bytes: evt.ul_total,
+          status: status === 'saving' ? 'saving' : 'uploading',
+        }
+      : undefined,
+  })
+}
+
+/** Coalesce full list/stats reloads so many task completions don't thrash the UI. */
+function scheduleSoftRefresh() {
+  if (softRefreshTimer) return
+  softRefreshTimer = window.setTimeout(async () => {
+    softRefreshTimer = undefined
+    try {
+      await Promise.all([
+        taskStore.fetchTasks({ status: filterStatus.value, page: taskStore.page }),
+        taskStore.fetchTaskStats(),
+        taskStore.fetchRuntimeStatus(),
+      ])
+    } catch { /* ignore background refresh errors */ }
+  }, 1000)
+}
+
+function startBackupPoll() {
+  stopBackupPoll()
+  // Safety net when SSE misses events; only useful while something is running.
+  backupTimer = window.setInterval(() => {
+    if (!pageVisible) return
+    if (!taskStore.hasActiveTasks() && !taskStore.runtime?.current_task_ids?.length) return
+    scheduleSoftRefresh()
+  }, 12000)
+}
+
+function stopBackupPoll() {
+  if (backupTimer) {
+    window.clearInterval(backupTimer)
+    backupTimer = undefined
+  }
 }
 
 function canRetry(status: TaskStatus) { return ['canceled', 'download_failed', 'upload_failed', 'completed'].includes(status) }
@@ -278,7 +389,7 @@ async function selectAllTasks() {
     return
   }
   try {
-    const resp = await fetch(`/api/tasks/ids?status=${filterStatus.value}`)
+    const resp = await apiFetch(`/api/tasks/ids?status=${filterStatus.value}`)
     const d = await resp.json()
     if (d.success) { selectedTaskIds.value = d.data; allSelected.value = true }
   } catch { /* ignore */ }
@@ -286,7 +397,7 @@ async function selectAllTasks() {
 
 async function fetchDiskInfo() {
   try {
-    const resp = await fetch('/api/system/disk')
+    const resp = await apiFetch('/api/system/disk')
     const d = await resp.json()
     if (d.success) diskInfo.value = d.data
   } catch { /* ignore */ }
@@ -337,7 +448,7 @@ async function handleBatchPause() {
   const ids = selectedTaskIds.value
   if (!ids.length) return
   try {
-    const resp = await fetch('/api/tasks/batch-pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
+    const resp = await apiFetch('/api/tasks/batch-pause', { method: 'POST', body: JSON.stringify({ ids }) })
     const d = await resp.json()
     if (d.success) { selectedTaskIds.value = []; refreshData(); ElMessage.success('已暂停 ' + (d.data.paused?.length || 0) + ' 个任务') }
   } catch { ElMessage.error('操作失败') }
@@ -347,7 +458,7 @@ async function handleBatchResume() {
   const ids = selectedTaskIds.value
   if (!ids.length) return
   try {
-    const resp = await fetch('/api/tasks/batch-resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
+    const resp = await apiFetch('/api/tasks/batch-resume', { method: 'POST', body: JSON.stringify({ ids }) })
     const d = await resp.json()
     if (d.success) { selectedTaskIds.value = []; refreshData(); ElMessage.success('已恢复 ' + (d.data.resumed?.length || 0) + ' 个任务') }
   } catch { ElMessage.error('操作失败') }
@@ -360,9 +471,8 @@ async function handleBatchDelete() {
     await ElMessageBox.confirm(`确定要删除选中的 ${ids.length} 个任务吗？`, '批量删除', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' })
   } catch { return }
   try {
-    const resp = await fetch('/api/tasks/batch-delete', {
+    const resp = await apiFetch('/api/tasks/batch-delete', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
     })
     const data = await resp.json()
@@ -400,24 +510,32 @@ async function handlePageChange(page: number) {
 onMounted(() => {
   reload()
   connectSSE()
+  startBackupPoll()
 
   function onVisibilityChange() {
+    pageVisible = !document.hidden
     if (document.hidden) {
       eventSource?.close()
       eventSource = undefined
-      if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined }
-      if (timer) { window.clearInterval(timer); timer = undefined }
+      if (reconnectTimer) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined }
+      if (flushTimer) { window.clearTimeout(flushTimer); flushTimer = undefined }
+      pendingEvents = []
     } else {
       connectSSE()
+      scheduleSoftRefresh()
     }
   }
 
   document.addEventListener('visibilitychange', onVisibilityChange)
   onUnmounted(() => {
+    pageVisible = false
     eventSource?.close()
     eventSource = undefined
-    if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined }
-    if (timer) { window.clearInterval(timer); timer = undefined }
+    stopBackupPoll()
+    if (reconnectTimer) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined }
+    if (flushTimer) { window.clearTimeout(flushTimer); flushTimer = undefined }
+    if (softRefreshTimer) { window.clearTimeout(softRefreshTimer); softRefreshTimer = undefined }
+    pendingEvents = []
     document.removeEventListener('visibilitychange', onVisibilityChange)
   })
 })

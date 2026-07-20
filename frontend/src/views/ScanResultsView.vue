@@ -194,6 +194,7 @@ import StatusTag from '@/components/StatusTag.vue'
 import { useScanStore } from '@/stores/scans'
 import { useTaskStore } from '@/stores/tasks'
 import type { ScanItem, ScanSession, MatchCandidate } from '@/types/api'
+import { apiFetch } from '@/utils/api'
 import { formatSizeInMB } from '@/utils/format'
 
 const router = useRouter()
@@ -256,7 +257,7 @@ async function fetchTitle(row: ScanItem) {
   if (fetchTitleTimer) clearTimeout(fetchTitleTimer)
   fetchTitleTimer = setTimeout(async () => {
     try {
-      const resp = await fetch(
+      const resp = await apiFetch(
         `/api/emos/video/base?item_type=${encodeURIComponent(itemType)}&item_id=${itemId}`,
       )
       const data = await resp.json()

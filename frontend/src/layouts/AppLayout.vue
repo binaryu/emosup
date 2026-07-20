@@ -17,12 +17,26 @@
       </nav>
       
       <div class="sidebar-footer">
+        <div class="user-row" v-if="authStore.username" :title="authStore.username">
+          <span class="nav-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+          </span>
+          <span class="nav-label" v-show="!isCollapsed">{{ authStore.username }}</span>
+        </div>
+
         <button class="action-btn" @click="toggleTheme" :title="isDark ? '切换亮色' : '切换暗色'">
           <span class="nav-icon">
             <svg v-if="isDark" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
             <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
           </span>
           <span class="nav-label" v-show="!isCollapsed">{{ isDark ? 'Light Mode' : 'Dark Mode' }}</span>
+        </button>
+
+        <button class="action-btn" @click="handleLogout" title="退出登录">
+          <span class="nav-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+          </span>
+          <span class="nav-label" v-show="!isCollapsed">退出登录</span>
         </button>
 
         <button class="action-btn collapse-btn" @click="toggleCollapse" v-if="!isMobile" :title="isCollapsed ? '展开' : '收起'">
@@ -58,6 +72,9 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+
+const authStore = useAuthStore()
 
 const navItems = [
   { label: '影片扫描', to: '/browse', icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>' },
@@ -99,10 +116,17 @@ function toggleTheme() {
   }
 }
 
+function handleLogout() {
+  authStore.logout(true)
+}
+
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
-  
+  if (!authStore.username) {
+    authStore.fetchMe()
+  }
+
   const savedTheme = localStorage.getItem('theme')
   if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
     isDark.value = true
@@ -223,6 +247,28 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  color: var(--text-subtle);
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sidebar.is-collapsed .user-row {
+  justify-content: center;
+  padding: 8px;
+}
+
+.user-row .nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .action-btn {

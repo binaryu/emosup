@@ -81,6 +81,10 @@ func TestBatchCreateTasksPreventsDuplicateActiveTask(t *testing.T) {
 		t.Fatalf("expected first task creation to succeed")
 	}
 
+	// BatchCreate auto-removes scan items; re-seed the same item so duplicate
+	// detection is exercised against the still-active task.
+	scan = seedTaskTestScan(t, fileStore)
+
 	second, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
 		ScanSessionID: scan.ID,
 		ItemIDs:       []string{"item-confirmed"},

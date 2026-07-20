@@ -1,12 +1,18 @@
 <template>
   <div class="browse-view">
-    <PageHeaderCard title="影片扫描" subtitle="选择来源、搜索影片、选中文件后发起扫描。">
-      <el-button type="primary" :loading="scanStore.loading" @click="scanSelectedFiles" :disabled="selectedFiles.length === 0">
-        扫描所选 ({{ selectedFiles.length }})
+    <PageHeaderCard title="影片扫描" subtitle="浏览目录 → 勾选文件/文件夹 → 选择 TMDB → 开始扫描。">
+      <el-button
+        type="primary"
+        :loading="scanStore.loading"
+        :disabled="!canScan"
+        @click="startScan"
+      >
+        {{ scanButtonLabel }}
       </el-button>
     </PageHeaderCard>
 
     <el-row :gutter="16">
+      <!-- Left: TMDB + settings -->
       <el-col :xs="24" :md="8">
         <el-card class="panel-card">
           <template #header>扫描设置</template>
@@ -16,34 +22,34 @@
                 <button
                   type="button"
                   :class="['toggle-btn', { active: source === 'openlist' }]"
-                  @click="source = 'openlist'"
+                  @click="switchSource('openlist')"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
                   OpenList
                 </button>
                 <button
                   type="button"
                   :class="['toggle-btn', { active: source === 'local' }]"
-                  @click="source = 'local'"
+                  @click="switchSource('local')"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-                  本地目录
+                  本地媒体
                 </button>
               </div>
+              <p class="hint">
+                {{ source === 'local'
+                  ? '本地目录：默认 data/downloads；Docker 可用 EMOSUP_LOCAL_ROOT=/media'
+                  : '浏览 OpenList 网盘目录' }}
+              </p>
             </el-form-item>
 
-            <el-form-item label="搜索影片">
+            <el-form-item label="搜索影片 (TMDB)">
               <el-input
                 v-model="tmdbQuery"
-                placeholder="输入剧名搜索，如 Ao Haru Ride"
+                placeholder="剧名 / 电影名"
                 clearable
                 @keyup.enter="doSearchTMDB"
               >
-                <template #prefix>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                </template>
                 <template #append>
-                  <el-button :loading="tmdbLoading" @click="doSearchTMDB" icon="Search" />
+                  <el-button :loading="tmdbLoading" @click="doSearchTMDB">搜索</el-button>
                 </template>
               </el-input>
             </el-form-item>
@@ -51,8 +57,8 @@
             <div v-if="tmdbResults.length > 0" class="tmdb-results">
               <div
                 v-for="item in tmdbResults"
-                :key="item.tmdb_id"
-                :class="['tmdb-card', { selected: tmdbId === item.tmdb_id }]"
+                :key="`${item.media_type}-${item.tmdb_id}`"
+                :class="['tmdb-card', { selected: tmdbId === item.tmdb_id && videoType === item.media_type }]"
                 @click="selectTMDB(item)"
               >
                 <div class="tmdb-poster">
@@ -61,24 +67,28 @@
                     :src="'https://image.tmdb.org/t/p/w92' + item.poster_path"
                     :alt="item.title"
                   />
-                  <div v-else class="tmdb-no-poster">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line><line x1="17" y1="17" x2="22" y2="17"></line></svg>
-                  </div>
+                  <div v-else class="tmdb-no-poster">—</div>
                 </div>
                 <div class="tmdb-info">
                   <div class="tmdb-title">{{ item.title }}</div>
                   <div class="tmdb-meta">
                     <span>{{ item.year || '未知' }}</span>
-                    <el-tag size="small" effect="plain" :type="item.media_type === 'movie' ? 'warning' : ''">{{ item.media_type === 'movie' ? '电影' : '剧集' }}</el-tag>
+                    <el-tag size="small" effect="plain" :type="item.media_type === 'movie' ? 'warning' : ''">
+                      {{ item.media_type === 'movie' ? '电影' : '剧集' }}
+                    </el-tag>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div v-if="tmdbLoading" style="text-align: center; padding: 12px; color: var(--text-subtle); font-size: 12px">搜索中...</div>
-
-            <el-form-item label="或手动输入 TMDB ID">
-              <el-input-number v-model="tmdbId" :min="0" style="width: 100%" controls-position="right" placeholder="搜不到时直接填数字 ID" />
+            <el-form-item label="TMDB ID">
+              <el-input-number
+                v-model="tmdbId"
+                :min="0"
+                style="width: 100%"
+                controls-position="right"
+                placeholder="也可手动填写"
+              />
             </el-form-item>
 
             <el-form-item label="类型">
@@ -89,38 +99,57 @@
               </el-select>
             </el-form-item>
 
-            <el-form-item v-if="source === 'openlist' && !selectedPath" label="当前路径">
-              <div class="path-display">{{ displayPath }}</div>
-            </el-form-item>
-            <el-form-item v-if="selectedPath" label="已选目录">
-              <el-tag closable @close="selectedPath = ''">{{ selectedPath }}</el-tag>
-            </el-form-item>
-
-            <el-form-item>
-              <el-button type="primary" :loading="scanStore.loading" :disabled="!selectedPath" @click="scanDir" style="width: 100%">
-                扫描目录
-              </el-button>
-            </el-form-item>
+            <div v-if="selectionSummary" class="selection-box">
+              <div class="selection-title">当前选择</div>
+              <div class="selection-text">{{ selectionSummary }}</div>
+              <el-button link type="primary" size="small" @click="clearSelection">清空选择</el-button>
+            </div>
           </el-form>
         </el-card>
       </el-col>
 
+      <!-- Right: browser -->
       <el-col :xs="24" :md="16">
         <el-card class="panel-card">
           <template #header>
             <div class="browse-header">
-              <span>{{ displayPath }}</span>
+              <div class="breadcrumb">
+                <button type="button" class="crumb" @click="goTo('/')">根目录</button>
+                <template v-for="(seg, idx) in pathSegments" :key="idx">
+                  <span class="crumb-sep">/</span>
+                  <button type="button" class="crumb" @click="goTo(seg.path)">{{ seg.name }}</button>
+                </template>
+              </div>
               <div class="browse-actions">
-                <el-button v-if="displayPath !== '/'" link type="primary" @click="goUp">返回上级</el-button>
-                <el-button :loading="loading" @click="loadEntries">刷新</el-button>
+                <el-button v-if="currentPath !== '/'" link type="primary" @click="goUp">上级</el-button>
+                <el-button :loading="loading" @click="loadEntries()">刷新</el-button>
               </div>
             </div>
           </template>
 
-          <el-table :data="entries" stripe @selection-change="onFileSelectionChange">
-            <el-table-column type="selection" width="42" :selectable="(r: OpenListEntry) => r.is_dir || isVideoFile(r.name)" />
-            <el-table-column prop="name" label="名称" min-width="200" show-overflow-tooltip />
-            <el-table-column label="类型" width="70" align="center">
+          <el-table
+            ref="tableRef"
+            :data="entries"
+            row-key="path"
+            stripe
+            @selection-change="onSelectionChange"
+            @row-dblclick="onRowDblClick"
+          >
+            <el-table-column type="selection" width="42" :selectable="isSelectable" />
+            <el-table-column label="名称" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }">
+                <button
+                  v-if="row.is_dir"
+                  type="button"
+                  class="name-link"
+                  @click="enterDirectory(row.path)"
+                >
+                  📁 {{ row.name }}
+                </button>
+                <span v-else>{{ isVideoFile(row.name) ? '🎬' : '📄' }} {{ row.name }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="类型" width="72" align="center">
               <template #default="{ row }">
                 <el-tag :type="row.is_dir ? 'success' : ''" size="small" effect="plain">
                   {{ row.is_dir ? '目录' : '文件' }}
@@ -132,11 +161,11 @@
                 {{ row.is_dir ? '-' : formatSizeInMB(row.size) }}
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="160" fixed="right">
+            <el-table-column label="操作" width="100" fixed="right">
               <template #default="{ row }">
-                <el-button v-if="row.is_dir" link type="primary" size="small" @click="enterDirectory(row.path)">进入</el-button>
-                <el-button v-if="row.is_dir" link size="small" @click="selectForScan(row.path)">选此目录</el-button>
-                <el-button v-if="!row.is_dir && isVideoFile(row.name)" link type="warning" size="small" @click="scanSingleFile(row)">扫描</el-button>
+                <el-button v-if="row.is_dir" link type="primary" size="small" @click="enterDirectory(row.path)">
+                  进入
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -147,33 +176,151 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import type { TableInstance } from 'element-plus'
 
 import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import { useScanStore } from '@/stores/scans'
 import type { OpenListEntry } from '@/types/api'
-import { parseApiResponse } from '@/utils/api'
+import { apiFetch, parseApiResponse } from '@/utils/api'
 import { formatSizeInMB } from '@/utils/format'
+import { extractShowTitle, isVideoFile } from '@/utils/media'
 
 const router = useRouter()
 const scanStore = useScanStore()
+const tableRef = ref<TableInstance>()
 
 const source = ref<'openlist' | 'local'>('openlist')
 const loading = ref(false)
 const currentPath = ref('/')
 const displayPath = ref('/')
-const selectedPath = ref('')
-const tmdbId = ref<number | ''>('')
+const tmdbId = ref<number | undefined>(undefined)
 const tmdbQuery = ref('')
 const videoType = ref('')
 const entries = ref<OpenListEntry[]>([])
-const selectedFiles = ref<OpenListEntry[]>([])
+const selected = ref<OpenListEntry[]>([])
 const tmdbLoading = ref(false)
-const tmdbResults = ref<{ tmdb_id: number; title: string; year: string; type: string; media_type?: string; poster_path: string }[]>([])
+const tmdbResults = ref<Array<{
+  tmdb_id: number
+  title: string
+  year: string
+  type: string
+  media_type?: string
+  poster_path: string
+}>>([])
 
-function selectTMDB(item: { tmdb_id: number; title: string; year: string; type?: string; media_type?: string; poster_path: string }) {
+const pathSegments = computed(() => {
+  const parts = displayPath.value.replace(/\/+$/, '').split('/').filter(Boolean)
+  const segs: Array<{ name: string; path: string }> = []
+  let acc = ''
+  for (const part of parts) {
+    acc += `/${part}`
+    segs.push({ name: part, path: acc })
+  }
+  return segs
+})
+
+const selectedDirs = computed(() => selected.value.filter((e) => e.is_dir))
+const selectedVideos = computed(() => selected.value.filter((e) => !e.is_dir && isVideoFile(e.name)))
+
+const selectionSummary = computed(() => {
+  const d = selectedDirs.value.length
+  const f = selectedVideos.value.length
+  if (!d && !f) return ''
+  const parts: string[] = []
+  if (d) parts.push(`${d} 个文件夹`)
+  if (f) parts.push(`${f} 个视频`)
+  return parts.join(' · ') + '（将递归扫描文件夹内视频）'
+})
+
+const canScan = computed(() => {
+  const hasTarget = selectedDirs.value.length > 0 || selectedVideos.value.length > 0 || currentPath.value !== ''
+  const hasTmdb = Number(tmdbId.value) > 0
+  return hasTarget && hasTmdb && !scanStore.loading
+})
+
+const scanButtonLabel = computed(() => {
+  const n = selectedDirs.value.length + selectedVideos.value.length
+  if (n > 0) return `扫描所选 (${n})`
+  return '扫描当前目录'
+})
+
+const apiBase = () => (source.value === 'local' ? '/api/local/list' : '/api/openlist/list')
+
+function isSelectable(row: OpenListEntry) {
+  return row.is_dir || isVideoFile(row.name)
+}
+
+function switchSource(next: 'openlist' | 'local') {
+  if (source.value === next) return
+  source.value = next
+  currentPath.value = '/'
+  selected.value = []
+  loadEntries()
+}
+
+async function loadEntries(showLoading = true) {
+  if (showLoading) loading.value = true
+  try {
+    const data = await parseApiResponse<{ path: string; items: OpenListEntry[] }>(
+      await apiFetch(`${apiBase()}?path=${encodeURIComponent(currentPath.value)}`),
+    )
+    displayPath.value = data.path
+    entries.value = data.items
+    selected.value = []
+    await nextTick()
+    tableRef.value?.clearSelection()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载失败')
+  } finally {
+    if (showLoading) loading.value = false
+  }
+}
+
+function enterDirectory(path: string) {
+  currentPath.value = path
+  loadEntries()
+  const title = extractShowTitle(path)
+  if (title) {
+    tmdbQuery.value = title
+  }
+}
+
+function goTo(path: string) {
+  currentPath.value = path || '/'
+  loadEntries()
+}
+
+function goUp() {
+  const parts = currentPath.value.replace(/\/$/, '').split('/')
+  parts.pop()
+  currentPath.value = parts.join('/') || '/'
+  loadEntries()
+}
+
+function onSelectionChange(rows: OpenListEntry[]) {
+  selected.value = rows
+}
+
+function onRowDblClick(row: OpenListEntry) {
+  if (row.is_dir) enterDirectory(row.path)
+}
+
+function clearSelection() {
+  selected.value = []
+  tableRef.value?.clearSelection()
+}
+
+function selectTMDB(item: {
+  tmdb_id: number
+  title: string
+  year: string
+  type?: string
+  media_type?: string
+  poster_path: string
+}) {
   tmdbId.value = item.tmdb_id
   const mtype = item.media_type || item.type || ''
   if (mtype === 'tv' || mtype === 'movie') {
@@ -181,127 +328,126 @@ function selectTMDB(item: { tmdb_id: number; title: string; year: string; type?:
   }
 }
 
-const apiBase = () => source.value === 'local' ? '/api/local/list' : '/api/openlist/list'
-
-async function loadEntries(showLoading = true) {
-  if (showLoading) loading.value = true
-  try {
-    const data = await parseApiResponse<{ path: string; items: OpenListEntry[] }>(
-      await fetch(`${apiBase()}?path=${encodeURIComponent(currentPath.value)}`),
-    )
-    displayPath.value = data.path
-    entries.value = data.items
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '加载失败')
-  } finally { if (showLoading) loading.value = false }
-}
-
-function enterDirectory(path: string) { currentPath.value = path; selectedPath.value = ''; loadEntries(); autoDetectTMDB(path) }
-function goUp() {
-  const parts = currentPath.value.replace(/\/$/, '').split('/')
-  parts.pop()
-  currentPath.value = parts.join('/') || '/'
-  selectedPath.value = ''
-  loadEntries()
-}
-function selectForScan(path: string) { selectedPath.value = path }
-function onFileSelectionChange(rows: OpenListEntry[]) { selectedFiles.value = rows }
-
 async function doSearchTMDB() {
   const query = tmdbQuery.value.trim()
-  if (!query || query.length < 2) { tmdbResults.value = []; return }
+  if (!query || query.length < 2) {
+    tmdbResults.value = []
+    return
+  }
   tmdbLoading.value = true
   try {
-    // Search both TV and movie simultaneously
     const [tvResp, mvResp] = await Promise.all([
-      fetch(`/api/tmdb/search?query=${encodeURIComponent(query)}&type=tv`),
-      fetch(`/api/tmdb/search?query=${encodeURIComponent(query)}&type=movie`),
+      apiFetch(`/api/tmdb/search?query=${encodeURIComponent(query)}&type=tv`),
+      apiFetch(`/api/tmdb/search?query=${encodeURIComponent(query)}&type=movie`),
     ])
     const [tvData, mvData] = await Promise.all([tvResp.json(), mvResp.json()])
     const tvResults = (tvData.success ? tvData.data : []).map((r: any) => ({ ...r, media_type: 'tv' }))
     const mvResults = (mvData.success ? mvData.data : []).map((r: any) => ({ ...r, media_type: 'movie' }))
-    // TV first, then movies
     tmdbResults.value = [...tvResults, ...mvResults]
-  } catch { tmdbResults.value = [] }
-  finally { tmdbLoading.value = false }
-}
-
-async function doScan(path: string, filePath = '', filePaths: string[] = []) {
-  const created = await scanStore.createScan(path, Number(tmdbId.value) || 0, videoType.value, filePath, source.value, filePaths)
-  if (created) {
-    ElMessage.success(`扫描完成，${created.total_count} 个视频文件`)
-    router.push('/scans')
+  } catch {
+    tmdbResults.value = []
+  } finally {
+    tmdbLoading.value = false
   }
 }
 
-async function scanDir() {
-  if (!selectedPath.value) return
-  if (!tmdbId.value || Number(tmdbId.value) <= 0) { ElMessage.warning('请先在上方搜索影片'); return }
-  try { await doScan(selectedPath.value) }
-  catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
+/**
+ * Unified scan entry:
+ * - If rows selected → pass their paths (files + dirs). Backend expands dirs.
+ * - If nothing selected → scan current directory.
+ */
+async function startScan() {
+  if (!tmdbId.value || Number(tmdbId.value) <= 0) {
+    ElMessage.warning('请先搜索并选择影片，或手动填写 TMDB ID')
+    return
+  }
+
+  const targets = selected.value
+    .filter((e) => e.is_dir || isVideoFile(e.name))
+    .map((e) => e.path)
+
+  const path = currentPath.value || '/'
+  const filePaths = targets.length > 0 ? targets : [path]
+
+  try {
+    const created = await scanStore.createScan(
+      path,
+      Number(tmdbId.value),
+      videoType.value,
+      '',
+      source.value,
+      filePaths,
+    )
+    if (created) {
+      ElMessage.success(`扫描完成，共 ${created.total_count} 个视频`)
+      router.push('/scans')
+    }
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '扫描失败')
+  }
 }
 
-async function scanSingleFile(row: OpenListEntry) {
-  const parentPath = row.path.substring(0, row.path.lastIndexOf('/')) || '/'
-  const searchName = parentPath === '/' ? row.name : extractShowName(parentPath)
-  if (searchName) { tmdbQuery.value = searchName; await doSearchTMDB() }
-  if (!tmdbId.value || Number(tmdbId.value) <= 0) { ElMessage.warning('请先搜索影片或手动填写 TMDB ID'); return }
-  try { await doScan(row.path, row.path) }
-  catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
-}
-
-async function scanSelectedFiles() {
-  if (!tmdbId.value || Number(tmdbId.value) <= 0) { ElMessage.warning('请先在上方搜索影片'); return }
-  try { await doScan(currentPath.value, '', selectedFiles.value.map(f => f.path)) }
-  catch (e) { ElMessage.error(e instanceof Error ? e.message : '扫描失败') }
-}
-
-function isVideoFile(name: string): boolean {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  return ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'ts', 'mpg', 'mpeg', 'webm'].includes(ext)
-}
-
-function extractShowName(path: string): string {
-  // Get the last meaningful directory name
-  const parts = path.replace(/\/$/, '').split('/')
-  const last = parts[parts.length - 1]
-  if (!last || last === '') return ''
-  // Strip common patterns: [group], season info, year
-  let name = last
-    .replace(/\[.*?\]/g, ' ')       // remove [bracketed tags]
-    .replace(/\(.*?\)/g, ' ')       // remove (parentheses)
-    .replace(/S\d{1,2}/gi, ' ')     // remove S01
-    .replace(/Season\s*\d+/gi, ' ') // remove Season 1
-    .replace(/\d{4}/g, ' ')         // remove years
-    .replace(/\s+/g, ' ')           // collapse whitespace
-    .trim()
-  return name || parts[parts.length - 2]?.replace(/\[.*?\]/g, ' ').trim() || ''
-}
-
-async function autoDetectTMDB(path: string) {
-  const name = extractShowName(path)
-  if (!name || name.length < 2) return
-  tmdbQuery.value = name
-}
-
-watch(source, () => { currentPath.value = '/'; selectedPath.value = ''; loadEntries(false) })
-onMounted(() => { loadEntries(); autoDetectTMDB(currentPath.value) })
+onMounted(() => {
+  loadEntries()
+})
 </script>
 
 <style scoped>
 .browse-view { width: 100%; }
-.panel-card { border-radius: 20px; margin-bottom: 16px; height: fit-content; }
-.browse-header { display: flex; align-items: center; justify-content: space-between; }
+.panel-card { border-radius: 16px; margin-bottom: 16px; height: fit-content; }
+
+.browse-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 .browse-actions { display: flex; align-items: center; gap: 8px; }
-.path-display { font-size: 12px; color: var(--text-subtle); word-break: break-all; }
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  min-width: 0;
+}
+.crumb {
+  border: none;
+  background: transparent;
+  color: var(--brand);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font: inherit;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crumb:hover { background: var(--brand-soft); }
+.crumb-sep { color: var(--text-muted); }
+
+.name-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-main);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.name-link:hover { color: var(--brand); }
 
 .source-toggle {
   display: flex;
   gap: 2px;
   padding: 4px;
-  background: rgba(0,0,0,0.04);
+  background: rgba(0, 0, 0, 0.04);
   border-radius: 12px;
 }
+html.dark .source-toggle { background: rgba(255, 255, 255, 0.06); }
 
 .toggle-btn {
   flex: 1;
@@ -320,29 +466,29 @@ onMounted(() => { loadEntries(); autoDetectTMDB(currentPath.value) })
   transition: all 0.2s ease;
   font-family: inherit;
 }
-
-.toggle-btn:hover:not(.active) {
-  color: var(--text-main);
-  background: rgba(128,128,128,0.1);
-}
-
+.toggle-btn:hover:not(.active) { background: rgba(128, 128, 128, 0.1); }
 .toggle-btn.active {
   background: var(--el-color-primary);
   color: #fff;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
   font-weight: 600;
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
 }
 
 .tmdb-results {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 300px;
+  max-height: 280px;
   overflow-y: auto;
-  margin-top: -8px;
-  margin-bottom: 8px;
+  margin: -4px 0 12px;
 }
-
 .tmdb-card {
   display: flex;
   gap: 10px;
@@ -352,32 +498,68 @@ onMounted(() => { loadEntries(); autoDetectTMDB(currentPath.value) })
   transition: background 0.15s;
   border: 2px solid transparent;
 }
-
-.tmdb-card:hover { background: rgba(0,0,0,0.03); }
-.tmdb-card.selected { border-color: var(--el-color-primary); background: rgba(64,158,255,0.06); }
-
+.tmdb-card:hover { background: rgba(0, 0, 0, 0.03); }
+.tmdb-card.selected {
+  border-color: var(--el-color-primary);
+  background: rgba(64, 158, 255, 0.06);
+}
 .tmdb-poster {
   width: 40px;
   height: 56px;
   border-radius: 4px;
   overflow: hidden;
   flex-shrink: 0;
-  background: rgba(0,0,0,0.05);
+  background: rgba(0, 0, 0, 0.05);
 }
-
 .tmdb-poster img { width: 100%; height: 100%; object-fit: cover; }
-
 .tmdb-no-poster {
   width: 100%;
   height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.tmdb-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+.tmdb-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tmdb-meta {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
   color: var(--text-subtle);
-  opacity: 0.3;
 }
 
-.tmdb-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
-.tmdb-title { font-size: 13px; font-weight: 600; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tmdb-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-subtle); }
+.selection-box {
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+.selection-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand);
+  margin-bottom: 4px;
+}
+.selection-text {
+  font-size: 13px;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
 </style>

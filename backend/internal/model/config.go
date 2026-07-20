@@ -2,10 +2,18 @@ package model
 
 type AppConfig struct {
 	Server   ServerConfig   `json:"server"`
+	Auth     AuthConfig     `json:"auth"`
 	OpenList OpenListConfig `json:"openlist"`
 	Aria2    Aria2Config    `json:"aria2"`
 	Emos     EmosConfig     `json:"emos"`
 	Worker   WorkerConfig   `json:"worker"`
+}
+
+type AuthConfig struct {
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	JWTSecret     string `json:"jwt_secret"`
+	TokenTTLHours int    `json:"token_ttl_hours"`
 }
 
 type ServerConfig struct {
@@ -51,6 +59,11 @@ func DefaultAppConfig() AppConfig {
 			Host: "127.0.0.1",
 			Port: 8080,
 		},
+		Auth: AuthConfig{
+			Username:      "admin",
+			Password:      "admin",
+			TokenTTLHours: 72,
+		},
 		Aria2: Aria2Config{
 			RPCURL:                "http://127.0.0.1:6800/jsonrpc",
 			DownloadDir:           "./data/downloads",
@@ -64,7 +77,7 @@ func DefaultAppConfig() AppConfig {
 		Worker: WorkerConfig{
 			PollIntervalSeconds:      5,
 			MaxConcurrency:           1,
-			DownloadThreads:           1,
+			DownloadThreads:          1,
 			UploadChunkSizeMB:        8,
 			SaveRetryIntervalSeconds: 25,
 			SaveRetryMaxAttempts:     8,
@@ -81,6 +94,16 @@ func NormalizeAppConfig(cfg AppConfig) AppConfig {
 	}
 	if cfg.Server.Port <= 0 {
 		cfg.Server.Port = defaults.Server.Port
+	}
+
+	if cfg.Auth.Username == "" {
+		cfg.Auth.Username = defaults.Auth.Username
+	}
+	if cfg.Auth.Password == "" {
+		cfg.Auth.Password = defaults.Auth.Password
+	}
+	if cfg.Auth.TokenTTLHours <= 0 {
+		cfg.Auth.TokenTTLHours = defaults.Auth.TokenTTLHours
 	}
 
 	if cfg.Aria2.RPCURL == "" {

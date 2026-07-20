@@ -32,6 +32,39 @@
         </el-form>
       </el-card>
 
+      <!-- 登录认证 -->
+      <el-card class="setting-card">
+        <template #header>
+          <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            登录认证
+          </div>
+        </template>
+        <el-form label-position="top" class="compact-form">
+          <el-form-item label="用户名">
+            <el-input v-model="configStore.config.auth.username" placeholder="admin" />
+          </el-form-item>
+          <el-form-item label="新密码">
+            <el-input
+              v-model="configStore.config.auth.password"
+              type="password"
+              show-password
+              placeholder="留空则不修改"
+            />
+          </el-form-item>
+          <el-form-item label="Token 有效期 (小时)">
+            <el-input-number
+              v-model="configStore.config.auth.token_ttl_hours"
+              :min="1"
+              :max="8760"
+              class="full-width"
+              :controls="false"
+            />
+          </el-form-item>
+          <p class="field-hint">密码以 bcrypt 哈希存储；JWT 密钥由服务端自动生成，不会返回给前端。</p>
+        </el-form>
+      </el-card>
+
       <!-- Emos 后端 -->
       <el-card class="setting-card">
         <template #header>
@@ -206,6 +239,13 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 
 @media (max-width: 480px) {

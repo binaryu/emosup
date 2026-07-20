@@ -1276,9 +1276,10 @@ func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage string
 	if isLocal {
 		sourceType = "local"
 		status = model.TaskStatusUploadPending
-		// Resolve the local file path from download dir
+		// Resolve against local media root (same rules as LocalService.Root).
+		localRoot := resolveLocalMediaRoot(downloadDir)
 		cleanRel := filepath.Clean(strings.TrimPrefix(filepath.Clean(item.OpenListPath), "/"))
-		localPath = filepath.Join(downloadDir, cleanRel)
+		localPath = filepath.Join(localRoot, cleanRel)
 		downloadStatus = "complete"
 		downloadProgress = 100
 		uploadStatus = "pending"
@@ -1431,6 +1432,16 @@ func maxInt64(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// resolveLocalMediaRoot uses the same rules as LocalService.Root.
+func resolveLocalMediaRoot(downloadDir string) string {
+	dataRoot := ""
+	// downloadDir already comes from config; data root is parent of .../downloads when possible.
+	if strings.HasSuffix(filepath.Clean(downloadDir), string(filepath.Separator)+"downloads") {
+		dataRoot = filepath.Dir(downloadDir)
+	}
+	return ResolveLocalMediaRoot(downloadDir, dataRoot)
 }
 
 func newTaskServiceError(code int, message string) error {

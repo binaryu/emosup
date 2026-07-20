@@ -22,27 +22,28 @@ import (
 )
 
 var (
+	// Optional legacy: map host paths stored in old configs into the container.
+	// Set EMOSUP_DOWNLOADS_HOST only if config.json still contains host absolute paths.
 	downloadHostPath      string
 	downloadContainerPath string
 )
 
 func initDownloadPaths() {
-	downloadHostPath = os.Getenv("EMOSUP_DOWNLOADS_DIR")
-	downloadContainerPath = os.Getenv("EMOSUP_LOCAL_ROOT")
-	if downloadContainerPath == "" {
-		downloadContainerPath = "/app/backend/data/downloads"
-	}
+	// Optional: only needed when config still stores host absolute paths from outside Docker.
+	downloadContainerPath = strings.TrimSpace(os.Getenv("EMOSUP_DOWNLOADS_DIR"))
+	downloadHostPath = strings.TrimSpace(os.Getenv("EMOSUP_DOWNLOADS_HOST"))
 }
 
-// toContainerPath converts a host download path to the container's view
-func toContainerPath(hostPath string) string {
+// toContainerPath rewrites legacy host download paths to the in-container path.
+// Modern configs already store container paths, so this is a no-op.
+func toContainerPath(path string) string {
 	if downloadHostPath == "" || downloadContainerPath == "" || downloadHostPath == downloadContainerPath {
-		return hostPath
+		return path
 	}
-	if strings.HasPrefix(hostPath, downloadHostPath) {
-		return downloadContainerPath + strings.TrimPrefix(hostPath, downloadHostPath)
+	if strings.HasPrefix(path, downloadHostPath) {
+		return downloadContainerPath + strings.TrimPrefix(path, downloadHostPath)
 	}
-	return hostPath
+	return path
 }
 
 type DownloadExecutor struct {
@@ -625,7 +626,50 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 	var doneBytes int64 = offset
 	buf := make([]byte, 1024*1024)
 	startTime := time.Now()
-	lastLog := time.Now()
+	lastSSE := time.Time{}
+	lastPersist := time.Time{}
+
+	publishDownloadProgress := func(force bool) {
+		now := time.Now()
+		done := doneBytes >= totalBytes && totalBytes > 0
+		shouldSSE := force || done || now.Sub(lastSSE) >= time.Second
+		shouldPersist := force || done || now.Sub(lastPersist) >= 3*time.Second
+		if !shouldSSE && !shouldPersist {
+			return
+		}
+
+		progress := float64(0)
+		elapsed := now.Sub(startTime)
+		speed := int64(0)
+		if elapsed > 0 && doneBytes > offset {
+			speed = int64(float64(doneBytes-offset) / elapsed.Seconds())
+		}
+		if totalBytes > 0 {
+			progress = float64(doneBytes) * 100 / float64(totalBytes)
+		}
+
+		if shouldPersist {
+			lastPersist = now
+			log.Printf("[download] progress: task=%s %.1f%% %s/%s %s/s",
+				task.ID, progress, formatBytes(doneBytes), formatBytes(totalBytes), formatBytes(speed))
+			if _, syncErr := e.taskService.SyncDownloadStatus(ctx, task.ID, client.Aria2Status{
+				Status:          "active",
+				TotalLength:     totalBytes,
+				CompletedLength: doneBytes,
+				DownloadSpeed:   speed,
+			}); syncErr != nil {
+				return
+			}
+		}
+
+		if shouldSSE && e.eventBus != nil {
+			lastSSE = now
+			e.eventBus.Publish(eventbus.TaskEvent{
+				TaskID: task.ID, Status: "downloading",
+				DlProg: progress, DlSpeed: speed, DlDone: doneBytes, DlTotal: totalBytes,
+			})
+		}
+	}
 
 	for {
 		select {
@@ -640,35 +684,10 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 				return fmt.Errorf("write local file %s: %w", localPath, writeErr)
 			}
 			doneBytes += int64(n)
-
-			now := time.Now()
-			if now.Sub(lastLog) > 3*time.Second || doneBytes >= totalBytes {
-				lastLog = now
-				progress := float64(0)
-				elapsed := now.Sub(startTime)
-				speed := int64(0)
-				if elapsed > 0 && doneBytes > offset {
-					speed = int64(float64(doneBytes-offset) / elapsed.Seconds())
-				}
-				if totalBytes > 0 {
-					progress = float64(doneBytes) * 100 / float64(totalBytes)
-				}
-				log.Printf("[download] progress: task=%s %.1f%% %s/%s %s/s",
-					task.ID, progress, formatBytes(doneBytes), formatBytes(totalBytes), formatBytes(speed))
-				if _, syncErr := e.taskService.SyncDownloadStatus(ctx, task.ID, client.Aria2Status{
-					Status:          "active",
-					TotalLength:     totalBytes,
-					CompletedLength: doneBytes,
-					DownloadSpeed:   speed,
-				}); syncErr == nil && e.eventBus != nil {
-					e.eventBus.Publish(eventbus.TaskEvent{
-						TaskID: task.ID, Status: "downloading",
-						DlProg: progress, DlSpeed: speed, DlDone: doneBytes, DlTotal: totalBytes,
-					})
-				}
-			}
+			publishDownloadProgress(false)
 		}
 		if readErr == io.EOF {
+			publishDownloadProgress(true)
 			break
 		}
 		if readErr != nil {
@@ -840,7 +859,8 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 	}()
 
 	startTime := time.Now()
-	lastLog := time.Now()
+	lastSSE := time.Time{}
+	lastPersist := time.Time{}
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	completedSegments := 0
@@ -848,23 +868,35 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 
 	reportProgress := func(force bool) {
 		now := time.Now()
-		if !force && now.Sub(lastLog) <= 3*time.Second {
-			return
-		}
-		lastLog = now
 		progressMu.Lock()
 		done := totalDone
 		progressMu.Unlock()
+		finished := done >= totalSize && totalSize > 0
+		shouldSSE := force || finished || now.Sub(lastSSE) >= time.Second
+		shouldPersist := force || finished || now.Sub(lastPersist) >= 3*time.Second
+		if !shouldSSE && !shouldPersist {
+			return
+		}
+
 		progress := float64(done) * 100 / float64(totalSize)
 		speed := int64(0)
 		if elapsed := now.Sub(startTime); elapsed > 0 {
 			speed = int64(float64(done) / elapsed.Seconds())
 		}
-		log.Printf("[download] progress: task=%s %.1f%% %s/%s %s/s (%d threads)",
-			task.ID, progress, formatBytes(done), formatBytes(totalSize), formatBytes(speed), threads)
-		if _, syncErr := e.taskService.SyncDownloadStatus(ctx, task.ID, client.Aria2Status{
-			Status: "active", TotalLength: totalSize, CompletedLength: done, DownloadSpeed: speed,
-		}); syncErr == nil && e.eventBus != nil {
+
+		if shouldPersist {
+			lastPersist = now
+			log.Printf("[download] progress: task=%s %.1f%% %s/%s %s/s (%d threads)",
+				task.ID, progress, formatBytes(done), formatBytes(totalSize), formatBytes(speed), threads)
+			if _, syncErr := e.taskService.SyncDownloadStatus(ctx, task.ID, client.Aria2Status{
+				Status: "active", TotalLength: totalSize, CompletedLength: done, DownloadSpeed: speed,
+			}); syncErr != nil {
+				return
+			}
+		}
+
+		if shouldSSE && e.eventBus != nil {
+			lastSSE = now
 			e.eventBus.Publish(eventbus.TaskEvent{
 				TaskID: task.ID, Status: "downloading",
 				DlProg: progress, DlSpeed: speed, DlDone: done, DlTotal: totalSize,
