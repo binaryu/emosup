@@ -64,7 +64,8 @@ type WorkerConfig struct {
 func DefaultAppConfig() AppConfig {
 	return AppConfig{
 		Server: ServerConfig{
-			Host: "127.0.0.1",
+			// 0.0.0.0 so binary/systemd installs are reachable on LAN/WAN by default.
+			Host: "0.0.0.0",
 			Port: 8080,
 		},
 		Auth: AuthConfig{

@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"emosup/backend/internal/client"
 	"emosup/backend/internal/eventbus"
@@ -20,9 +24,17 @@ import (
 type App struct {
 	server    *http.Server
 	scheduler *scheduler.Manager
+	addr      string
+	frontend  string
+	dataRoot  string
 }
 
 func New() (*App, error) {
+	// Production default: quiet Gin logs unless user overrides GIN_MODE.
+	if strings.TrimSpace(os.Getenv("GIN_MODE")) == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	dataRoot := resolveDataRoot()
 	fileStore := store.NewFileStore(dataRoot)
 	if err := fileStore.Init(); err != nil {
@@ -65,6 +77,7 @@ func New() (*App, error) {
 		eventBus,
 	)
 
+	frontendDist := findFrontendDistDir()
 	router := handler.NewRouter(handler.RouterDependencies{
 		Health:       handler.NewHealthHandler(),
 		Auth:         handler.NewAuthHandler(authService),
@@ -78,8 +91,16 @@ func New() (*App, error) {
 		Proxy:        handler.NewProxyHandler(fileStore, openListClient),
 		Scan:         handler.NewScanHandler(scanService),
 		Task:         handler.NewTaskHandler(taskService),
-		FrontendDist: findFrontendDistDir(),
+		FrontendDist: frontendDist,
 	})
+
+	host := strings.TrimSpace(cfg.Server.Host)
+	if envHost := strings.TrimSpace(os.Getenv("EMOSUP_HOST")); envHost != "" {
+		host = envHost
+	}
+	if host == "" {
+		host = "0.0.0.0"
+	}
 
 	port := cfg.Server.Port
 	if envPort := os.Getenv("EMOSUP_PORT"); envPort != "" {
@@ -88,8 +109,9 @@ func New() (*App, error) {
 		}
 	}
 
+	addr := fmt.Sprintf("%s:%d", host, port)
 	server := &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", cfg.Server.Host, port),
+		Addr:              addr,
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -97,6 +119,9 @@ func New() (*App, error) {
 	return &App{
 		server:    server,
 		scheduler: manager,
+		addr:      addr,
+		frontend:  frontendDist,
+		dataRoot:  dataRoot,
 	}, nil
 }
 
@@ -106,10 +131,18 @@ func (a *App) Run() error {
 
 	go a.scheduler.Start(ctx)
 
+	log.Printf("listening on http://%s  data=%s  frontend=%s", a.addr, a.dataRoot, a.frontendOrNone())
 	err := a.server.ListenAndServe()
 	cancel()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
 	return err
+}
+
+func (a *App) frontendOrNone() string {
+	if strings.TrimSpace(a.frontend) == "" {
+		return "(not found — API only)"
+	}
+	return a.frontend
 }

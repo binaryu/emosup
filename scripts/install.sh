@@ -147,6 +147,7 @@ write_env_file() {
 # emosup 运行环境（systemd EnvironmentFile）
 EMOSUP_DATA_DIR=${dest}/data
 EMOSUP_FRONTEND_DIST=${dest}/frontend
+EMOSUP_HOST=0.0.0.0
 EMOSUP_PORT=${PORT}
 # 本地媒体根目录（可选；也可在面板「系统配置 → 本地媒体」设置）
 # EMOSUP_LOCAL_ROOT=/path/to/your/media
@@ -182,6 +183,7 @@ LimitNOFILE=65535
 EnvironmentFile=-${dest}/emosup.env
 Environment=EMOSUP_DATA_DIR=${dest}/data
 Environment=EMOSUP_FRONTEND_DIST=${dest}/frontend
+Environment=EMOSUP_HOST=0.0.0.0
 Environment=EMOSUP_PORT=${PORT}
 
 [Install]
