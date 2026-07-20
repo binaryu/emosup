@@ -32,6 +32,35 @@
         </el-form>
       </el-card>
 
+      <!-- 本地媒体目录 -->
+      <el-card class="setting-card">
+        <template #header>
+          <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            本地媒体
+          </div>
+        </template>
+        <el-form label-position="top" class="compact-form">
+          <el-form-item label="浏览根目录">
+            <el-input
+              v-model="configStore.config.local.root"
+              placeholder="留空则使用下载目录；例如 /home/user/videos 或 /mnt/media"
+              clearable
+            />
+          </el-form-item>
+          <el-form-item label="下载缓存目录">
+            <el-input
+              v-model="configStore.config.aria2.download_dir"
+              placeholder="OpenList 任务下载到此目录"
+            />
+          </el-form-item>
+          <p class="field-hint">
+            「本地媒体」扫描使用浏览根目录（须为已存在的绝对路径）。二进制部署可设为任意本机路径，如 <code>/home/user/downloads</code>。
+            环境变量 <code>EMOSUP_LOCAL_ROOT</code> 优先级更高（Docker 常用）。
+          </p>
+        </el-form>
+      </el-card>
+
       <!-- 登录认证 -->
       <el-card class="setting-card">
         <template #header>
@@ -246,6 +275,13 @@ onMounted(() => {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.5;
+}
+
+.field-hint code {
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-hover);
 }
 
 @media (max-width: 480px) {

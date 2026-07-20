@@ -141,7 +141,7 @@ func (s *TaskService) BatchCreateTasks(_ context.Context, req BatchCreateTasksRe
 			continue
 		}
 
-		task := newTaskFromScan(scan, scanItem, cfg.Emos.Storage, cfg.Aria2.DownloadDir)
+		task := newTaskFromScan(scan, scanItem, cfg.Emos.Storage, cfg.Local.Root, cfg.Aria2.DownloadDir)
 		if err := s.store.SaveTask(task); err != nil {
 			return BatchCreateTasksResult{}, err
 		}
@@ -1255,7 +1255,7 @@ func (s *TaskService) markTaskCanceled(taskID, downloadStatus, message string) (
 	return task, nil
 }
 
-func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage string, downloadDir string) model.Task {
+func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage, localRootCfg, downloadDir string) model.Task {
 	now := time.Now()
 	title := strings.TrimSpace(item.SelectedTitle)
 	if title == "" {
@@ -1277,7 +1277,7 @@ func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage string
 		sourceType = "local"
 		status = model.TaskStatusUploadPending
 		// Resolve against local media root (same rules as LocalService.Root).
-		localRoot := resolveLocalMediaRoot(downloadDir)
+		localRoot := resolveLocalMediaRoot(localRootCfg, downloadDir)
 		cleanRel := filepath.Clean(strings.TrimPrefix(filepath.Clean(item.OpenListPath), "/"))
 		localPath = filepath.Join(localRoot, cleanRel)
 		downloadStatus = "complete"
@@ -1435,13 +1435,12 @@ func maxInt64(a, b int64) int64 {
 }
 
 // resolveLocalMediaRoot uses the same rules as LocalService.Root.
-func resolveLocalMediaRoot(downloadDir string) string {
+func resolveLocalMediaRoot(localRoot, downloadDir string) string {
 	dataRoot := ""
-	// downloadDir already comes from config; data root is parent of .../downloads when possible.
 	if strings.HasSuffix(filepath.Clean(downloadDir), string(filepath.Separator)+"downloads") {
 		dataRoot = filepath.Dir(downloadDir)
 	}
-	return ResolveLocalMediaRoot(downloadDir, dataRoot)
+	return ResolveLocalMediaRoot(localRoot, downloadDir, dataRoot)
 }
 
 func newTaskServiceError(code int, message string) error {

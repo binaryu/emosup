@@ -256,6 +256,21 @@ func (s *FileStore) normalizeConfig(cfg model.AppConfig) model.AppConfig {
 	if abs, err := filepath.Abs(cfg.Aria2.DownloadDir); err == nil {
 		cfg.Aria2.DownloadDir = abs
 	}
+
+	// Local browse root: keep empty (means fall back) or resolve to absolute path.
+	localRoot := strings.TrimSpace(cfg.Local.Root)
+	if localRoot != "" {
+		if !filepath.IsAbs(localRoot) {
+			localRoot = filepath.Join(s.root, localRoot)
+		}
+		if abs, err := filepath.Abs(localRoot); err == nil {
+			cfg.Local.Root = abs
+		} else {
+			cfg.Local.Root = localRoot
+		}
+	} else {
+		cfg.Local.Root = ""
+	}
 	return cfg
 }
 

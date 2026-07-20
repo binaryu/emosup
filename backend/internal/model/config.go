@@ -3,10 +3,18 @@ package model
 type AppConfig struct {
 	Server   ServerConfig   `json:"server"`
 	Auth     AuthConfig     `json:"auth"`
+	Local    LocalConfig    `json:"local"`
 	OpenList OpenListConfig `json:"openlist"`
 	Aria2    Aria2Config    `json:"aria2"`
 	Emos     EmosConfig     `json:"emos"`
 	Worker   WorkerConfig   `json:"worker"`
+}
+
+// LocalConfig controls on-disk media browsing (binary/Docker local source).
+type LocalConfig struct {
+	// Root is the absolute (or relative-to-data) path shown in「本地媒体」.
+	// Empty = fall back to download_dir / data/downloads.
+	Root string `json:"root"`
 }
 
 type AuthConfig struct {

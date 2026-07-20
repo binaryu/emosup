@@ -14,6 +14,9 @@ const defaultConfig: AppConfig = {
     jwt_secret: '',
     token_ttl_hours: 72,
   },
+  local: {
+    root: '',
+  },
   openlist: {
     base_url: '',
     username: '',
@@ -65,6 +68,7 @@ export const useConfigStore = defineStore('config', {
             jwt_secret: '',
           },
           server: { ...defaultConfig.server, ...(data.server || {}) },
+          local: { ...defaultConfig.local, ...(data.local || {}) },
           openlist: { ...defaultConfig.openlist, ...(data.openlist || {}) },
           aria2: { ...defaultConfig.aria2, ...(data.aria2 || {}) },
           emos: { ...defaultConfig.emos, ...(data.emos || {}) },

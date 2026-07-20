@@ -1,0 +1,26 @@
+[Unit]
+Description=emosup — OpenList / local media → Emos upload panel
+Documentation=https://github.com/binaryu/emosup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/emosup
+ExecStart=/opt/emosup/emosup-server
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+
+# Override via drop-in or EnvironmentFile=/opt/emosup/emosup.env
+Environment=EMOSUP_DATA_DIR=/opt/emosup/data
+Environment=EMOSUP_FRONTEND_DIST=/opt/emosup/frontend
+Environment=EMOSUP_PORT=8080
+# Environment=EMOSUP_LOCAL_ROOT=/path/to/media
+
+# Uncomment to run as non-root (create user first):
+# User=emosup
+# Group=emosup
+
+[Install]
+WantedBy=multi-user.target

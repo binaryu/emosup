@@ -36,7 +36,7 @@
               </div>
               <p class="hint">
                 {{ source === 'local'
-                  ? '本地目录：默认 data/downloads；Docker 可用 EMOSUP_LOCAL_ROOT=/media'
+                  ? '根目录可在「系统配置 → 本地媒体」修改'
                   : '浏览 OpenList 网盘目录' }}
               </p>
             </el-form-item>

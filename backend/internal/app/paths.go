@@ -14,10 +14,11 @@ func resolveDataRoot() string {
 	cwd, _ := os.Getwd()
 	exeDir := executableDir()
 
+	// Prefer existing data dirs (dev / restarts).
 	for _, candidate := range []string{
-		filepath.Join(cwd, "backend", "data"),
+		filepath.Join(exeDir, "data"), // release / install layout: /opt/emosup/data
 		filepath.Join(cwd, "data"),
-		filepath.Join(exeDir, "data"),
+		filepath.Join(cwd, "backend", "data"),
 		filepath.Join(exeDir, "backend", "data"),
 	} {
 		if dirExists(candidate) {
@@ -25,7 +26,10 @@ func resolveDataRoot() string {
 		}
 	}
 
+	// Create next to binary for install packages; fall back to repo layout for dev.
 	switch {
+	case exeDir != "" && fileExists(filepath.Join(exeDir, "emosup-server")):
+		return absOrClean(filepath.Join(exeDir, "data"))
 	case looksLikeRepoRoot(cwd):
 		return absOrClean(filepath.Join(cwd, "backend", "data"))
 	case looksLikeBackendRoot(cwd):
@@ -47,12 +51,13 @@ func findFrontendDistDir() string {
 
 	candidates := []string{
 		strings.TrimSpace(os.Getenv("EMOSUP_FRONTEND_DIST")),
-		filepath.Join(cwd, "frontend", "dist"),
+		// install / release: frontend/ next to binary
+		filepath.Join(exeDir, "frontend"),
+		filepath.Join(exeDir, "frontend", "dist"),
 		filepath.Join(cwd, "frontend"),
+		filepath.Join(cwd, "frontend", "dist"),
 		filepath.Join(cwd, "..", "frontend", "dist"),
 		filepath.Join(cwd, "..", "frontend"),
-		filepath.Join(exeDir, "frontend", "dist"),
-		filepath.Join(exeDir, "frontend"),
 		filepath.Join(exeDir, "..", "frontend", "dist"),
 		filepath.Join(exeDir, "..", "frontend"),
 		filepath.Join("..", "frontend", "dist"),
@@ -75,7 +80,10 @@ func executableDir() string {
 	if err != nil {
 		return ""
 	}
-
+	// Resolve symlinks so /usr/local/bin/emosup → /opt/emosup/emosup-server finds sibling frontend/
+	if resolved, err := filepath.EvalSymlinks(executablePath); err == nil {
+		executablePath = resolved
+	}
 	return filepath.Dir(executablePath)
 }
 

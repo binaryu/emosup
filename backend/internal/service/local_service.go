@@ -31,28 +31,33 @@ func NewLocalService(store *store.FileStore) *LocalService {
 // Root returns the absolute path used for local media browsing.
 //
 // Priority:
-//  1. EMOSUP_LOCAL_ROOT (explicit override, Docker: /media)
-//  2. config.aria2.download_dir (same as download cache by default)
-//  3. {dataRoot}/downloads
-//
-// Binary runs: dataRoot is typically <repo>/backend/data → .../backend/data/downloads
-// Docker runs: set EMOSUP_LOCAL_ROOT=/media and mount host media there.
+//  1. EMOSUP_LOCAL_ROOT (env override, e.g. Docker /media)
+//  2. config.local.root (settings UI / config file)
+//  3. config.aria2.download_dir
+//  4. {dataRoot}/downloads
 func (s *LocalService) Root() string {
-	downloadDir := ""
-	dataRoot := ""
+	localRoot, downloadDir, dataRoot := "", "", ""
 	if s.store != nil {
 		dataRoot = s.store.Root()
 		if cfg, err := s.store.LoadConfig(); err == nil {
+			localRoot = strings.TrimSpace(cfg.Local.Root)
 			downloadDir = strings.TrimSpace(cfg.Aria2.DownloadDir)
 		}
 	}
-	return ResolveLocalMediaRoot(downloadDir, dataRoot)
+	return ResolveLocalMediaRoot(localRoot, downloadDir, dataRoot)
 }
 
 // ResolveLocalMediaRoot is shared by task creation and local browse.
-func ResolveLocalMediaRoot(downloadDir, dataRoot string) string {
+func ResolveLocalMediaRoot(localRoot, downloadDir, dataRoot string) string {
 	if root := strings.TrimSpace(os.Getenv("EMOSUP_LOCAL_ROOT")); root != "" {
 		return absPath(root)
+	}
+	if dir := strings.TrimSpace(localRoot); dir != "" {
+		// Relative paths are anchored to data root when possible.
+		if !filepath.IsAbs(dir) && strings.TrimSpace(dataRoot) != "" {
+			return absPath(filepath.Join(dataRoot, dir))
+		}
+		return absPath(dir)
 	}
 	if dir := strings.TrimSpace(downloadDir); dir != "" {
 		return absPath(dir)
@@ -60,7 +65,6 @@ func ResolveLocalMediaRoot(downloadDir, dataRoot string) string {
 	if root := strings.TrimSpace(dataRoot); root != "" {
 		return absPath(filepath.Join(root, "downloads"))
 	}
-	// Last resort for bare binary without store: cwd/data/downloads
 	return absPath(filepath.Join("data", "downloads"))
 }
 
@@ -77,9 +81,8 @@ func (s *LocalService) resolve(relPath string) (absBase, fullPath, cleanRel stri
 		return "", "", "", errors.New("local media root is not configured")
 	}
 
-	// Auto-create root so first browse / binary start never fails with ENOENT.
-	if err := utils.EnsureDir(absBase); err != nil {
-		return "", "", "", fmt.Errorf("ensure local root %s: %w", absBase, err)
+	if err := s.ensureRootAccessible(absBase); err != nil {
+		return "", "", "", err
 	}
 
 	cleanRel = filepath.Clean(strings.TrimPrefix(filepath.Clean(relPath), "/"))
@@ -95,6 +98,37 @@ func (s *LocalService) resolve(relPath string) (absBase, fullPath, cleanRel stri
 		return "", "", "", errors.New("access denied")
 	}
 	return absBase, fullPath, cleanRel, nil
+}
+
+// ensureRootAccessible creates default data/downloads if missing; custom paths must already exist.
+func (s *LocalService) ensureRootAccessible(absBase string) error {
+	info, err := os.Stat(absBase)
+	if err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("本地目录不是文件夹: %s", absBase)
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	// Auto-create only when root sits under the app data directory (default downloads).
+	dataRoot := ""
+	if s.store != nil {
+		dataRoot = s.store.Root()
+	}
+	if dataRoot != "" {
+		dataAbs := absPath(dataRoot)
+		if absBase == dataAbs || strings.HasPrefix(absBase+string(filepath.Separator), dataAbs+string(filepath.Separator)) {
+			if mkErr := utils.EnsureDir(absBase); mkErr != nil {
+				return fmt.Errorf("创建本地目录失败 %s: %w", absBase, mkErr)
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("本地目录不存在: %s（请在「系统配置 → 本地媒体」填写已存在的绝对路径）", absBase)
 }
 
 func (s *LocalService) IsDir(_ context.Context, relPath string) bool {

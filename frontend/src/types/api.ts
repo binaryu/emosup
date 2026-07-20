@@ -21,6 +21,11 @@ export interface ServerConfig {
   port: number
 }
 
+export interface LocalConfig {
+  /** Absolute path for「本地媒体」browse root. Empty = download_dir / data/downloads. */
+  root: string
+}
+
 export interface AuthConfig {
   username: string
   password: string
@@ -70,6 +75,7 @@ export interface WorkerConfig {
 export interface AppConfig {
   server: ServerConfig
   auth: AuthConfig
+  local: LocalConfig
   openlist: OpenListConfig
   aria2: Aria2Config
   emos: EmosConfig
