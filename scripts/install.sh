@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/binaryu/emosup/main/scripts/install.sh | sudo bash
 #   sudo bash install.sh install|update|uninstall|status|restart
 #
-# Env: EMOSUP_REPO EMOSUP_INSTALL_DIR EMOSUP_VERSION EMOSUP_PORT
+# Env: EMOSUP_REPO EMOSUP_INSTALL_DIR EMOSUP_VERSION EMOSUP_PORT EMOSUP_PROXY
 set -euo pipefail
 
 REPO="${EMOSUP_REPO:-binaryu/emosup}"
@@ -16,6 +16,7 @@ BUNDLE="${EMOSUP_BUNDLE:-}"
 SERVICE_NAME="emosup"
 KEEP_DATA=0
 NONINTERACTIVE="${EMOSUP_NONINTERACTIVE:-0}"
+EMOSUP_PROXY="${EMOSUP_PROXY:-}"
 
 GITHUB_API="https://api.github.com/repos/${REPO}"
 GITHUB_RELEASES="https://github.com/${REPO}/releases"
@@ -44,6 +45,20 @@ http_get() {
   else
     die "需要 curl 或 wget"
   fi
+}
+
+proxy_github_url() {
+  local url="$1"
+  if [[ -z "$EMOSUP_PROXY" || "$EMOSUP_PROXY" == "0" ]]; then
+    echo "$url"
+    return
+  fi
+  local proxy_prefix="${EMOSUP_PROXY}"
+  if [[ "$EMOSUP_PROXY" == "1" ]]; then
+    proxy_prefix="https://gh-proxy.com/"
+  fi
+  [[ "$proxy_prefix" == */ ]] || proxy_prefix="${proxy_prefix}/"
+  echo "${proxy_prefix}${url}"
 }
 
 detect_arch() {
@@ -75,10 +90,10 @@ resolve_version() {
     return
   fi
   local tag
-  tag="$(http_get "${GITHUB_API}/releases/latest" 2>/dev/null \
+  tag="$(http_get "$(proxy_github_url "${GITHUB_API}/releases/latest")" 2>/dev/null \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
   if [[ -z "$tag" ]]; then
-    tag="$(http_get "${GITHUB_API}/releases?per_page=5" 2>/dev/null \
+    tag="$(http_get "$(proxy_github_url "${GITHUB_API}/releases?per_page=5")" 2>/dev/null \
       | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
   fi
   [[ -n "$tag" ]] || die "无法获取版本，请: --version vX.Y.Z 或 EMOSUP_VERSION=..."
@@ -97,13 +112,15 @@ download_and_extract() {
     cp -a "$BUNDLE" "${tmp}/${asset}"
   else
     local url="${GITHUB_RELEASES}/download/${version}/${asset}"
-    log "下载 ${url}"
-    if ! http_get "$url" "${tmp}/${asset}"; then
+    local proxy_url
+    proxy_url="$(proxy_github_url "$url")"
+    log "下载 ${proxy_url}"
+    if ! http_get "$proxy_url" "${tmp}/${asset}"; then
       rm -rf "$tmp"
       die "下载失败。请确认 Release ${version} 已发布且包含 ${asset}"
     fi
 
-    if http_get "${url}.sha256" "${tmp}/${asset}.sha256" 2>/dev/null; then
+    if http_get "$(proxy_github_url "${url}.sha256")" "${tmp}/${asset}.sha256" 2>/dev/null; then
       log "校验 SHA256"
       (cd "$tmp" && sha256sum -c "${asset}.sha256") || { rm -rf "$tmp"; die "校验和失败"; }
     else
@@ -273,6 +290,32 @@ prompt_port() {
   fi
 }
 
+prompt_proxy() {
+  if [[ -n "$EMOSUP_PROXY" ]]; then
+    return
+  fi
+  if [[ "$NONINTERACTIVE" == "1" ]] || [[ ! -t 0 ]]; then
+    if [[ -r /dev/tty ]]; then
+      local answer=""
+      echo -en "${GREEN}[emosup]${NC} 是否使用国内代理加速 GitHub 下载？[y/N]: " > /dev/tty
+      read -r answer < /dev/tty || true
+      case "$(echo "${answer:-}" | tr '[:upper:]' '[:lower:]')" in
+        y|yes|1) EMOSUP_PROXY="1" ;;
+        *)       EMOSUP_PROXY="0" ;;
+      esac
+      return
+    fi
+    EMOSUP_PROXY="0"
+    return
+  fi
+  local answer=""
+  read -r -p "$(echo -e "${GREEN}[emosup]${NC} 是否使用国内代理加速 GitHub 下载？[y/N]: ")" answer || true
+  case "$(echo "${answer:-}" | tr '[:upper:]' '[:lower:]')" in
+    y|yes|1) EMOSUP_PROXY="1" ;;
+    *)       EMOSUP_PROXY="0" ;;
+  esac
+}
+
 # Update EMOSUP_PORT in env file if the file already existed with another port.
 sync_env_port() {
   local dest="$1"
@@ -293,7 +336,8 @@ cmd_install() {
   arch="$(detect_arch)"
   version="$(resolve_version)"
   prompt_port
-  log "架构=${arch} 版本=${version} 目录=${INSTALL_DIR} 端口=${PORT}"
+  prompt_proxy
+  log "架构=${arch} 版本=${version} 目录=${INSTALL_DIR} 端口=${PORT}${EMOSUP_PROXY:+ 代理=${EMOSUP_PROXY}}"
 
   if [[ -x "${INSTALL_DIR}/emosup-server" ]]; then
     warn "检测到已有安装，将覆盖程序文件并保留 data/"
@@ -382,9 +426,9 @@ usage() {
 emosup 安装脚本
 
 用法:
-  $0 install   [--dir DIR] [--version TAG] [--port PORT]
+  $0 install   [--dir DIR] [--version TAG] [--port PORT] [--proxy URL|1]
   $0 install   [--bundle /path/to/emosup-linux-amd64.tar.gz] [--dir DIR] [--port PORT]
-  $0 update    [--dir DIR] [--version TAG] [--port PORT] [--bundle FILE]
+  $0 update    [--dir DIR] [--version TAG] [--port PORT] [--bundle FILE] [--proxy URL|1]
   $0 uninstall [--dir DIR] [--keep-data]
   $0 status    [--dir DIR]
   $0 restart
@@ -397,6 +441,11 @@ emosup 安装脚本
 
 非交互（跳过询问）:
   curl -fsSL .../install.sh | sudo EMOSUP_PORT=9090 EMOSUP_NONINTERACTIVE=1 bash
+
+国内代理（加速 GitHub 下载）:
+  curl -fsSL .../install.sh | sudo EMOSUP_PROXY=1 bash              # 使用 gh-proxy.com
+  curl -fsSL .../install.sh | sudo EMOSUP_PROXY=https://gh-proxy.com/ bash
+  curl -fsSL .../install.sh | sudo bash -s -- install --proxy 1
 
 更新 / 卸载:
   sudo bash install.sh update
@@ -414,6 +463,7 @@ main() {
       --version)  VERSION="$2"; shift 2 ;;
       --port)     PORT="$2"; PORT_FROM_CLI=1; shift 2 ;;
       --bundle)   BUNDLE="$2"; shift 2 ;;
+      --proxy)    EMOSUP_PROXY="$2"; shift 2 ;;
       --keep-data) KEEP_DATA=1; shift ;;
       -y|--yes)   NONINTERACTIVE=1; shift ;;
       -h|--help)  usage; exit 0 ;;
