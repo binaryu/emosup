@@ -1,6 +1,7 @@
 import type { ApiResponse } from '@/types/api'
 
 const TOKEN_KEY = 'emosup_token'
+const REQUEST_TIMEOUT_MS = 90_000
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -36,7 +37,32 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(input, { ...init, headers })
+  const controller = new AbortController()
+  const externalSignal = init.signal
+  const onExternalAbort = () => controller.abort()
+  let timedOut = false
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, REQUEST_TIMEOUT_MS)
+  if (externalSignal?.aborted) {
+    controller.abort()
+  } else {
+    externalSignal?.addEventListener('abort', onExternalAbort, { once: true })
+  }
+
+  let response: Response
+  try {
+    response = await fetch(input, { ...init, headers, signal: controller.signal })
+  } catch (error) {
+    if (timedOut) {
+      throw new Error('请求超时，请稍后重试')
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
+    externalSignal?.removeEventListener('abort', onExternalAbort)
+  }
 
   if (response.status === 401) {
     const isLoginRequest = input.includes('/api/auth/login')

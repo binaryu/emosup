@@ -80,6 +80,13 @@ func TestBatchCreateTasksPreventsDuplicateActiveTask(t *testing.T) {
 	if len(first.Created) != 1 {
 		t.Fatalf("expected first task creation to succeed")
 	}
+	remaining, err := fileStore.GetScan(scan.ID)
+	if err != nil {
+		t.Fatalf("expected scan to remain when not all items were created, got err=%v", err)
+	}
+	if len(remaining.Items) != 1 || remaining.Items[0].ID != "item-unconfirmed" {
+		t.Fatalf("expected only the unconfirmed scan item to remain, got %#v", remaining.Items)
+	}
 
 	// BatchCreate auto-removes scan items; re-seed the same item so duplicate
 	// detection is exercised against the still-active task.

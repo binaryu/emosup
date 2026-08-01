@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"emosup/backend/internal/model"
@@ -19,8 +21,9 @@ import (
 // FileStore is the persistence layer (SQLite under the hood).
 // The name is kept for call-site compatibility after the JSON→SQLite refactor.
 type FileStore struct {
-	root string
-	db   *sql.DB
+	root    string
+	db      *sql.DB
+	writeMu sync.Mutex
 }
 
 func NewFileStore(root string) *FileStore {
@@ -33,6 +36,34 @@ func (s *FileStore) Root() string {
 
 func (s *FileStore) DB() *sql.DB {
 	return s.db
+}
+
+type writeTx struct {
+	*sql.Tx
+	unlockOnce sync.Once
+	unlock     func()
+}
+
+func (s *FileStore) beginWrite(ctx context.Context) (*writeTx, error) {
+	s.writeMu.Lock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		s.writeMu.Unlock()
+		return nil, err
+	}
+	return &writeTx{Tx: tx, unlock: s.writeMu.Unlock}, nil
+}
+
+func (tx *writeTx) Commit() error {
+	err := tx.Tx.Commit()
+	tx.unlockOnce.Do(tx.unlock)
+	return err
+}
+
+func (tx *writeTx) Rollback() error {
+	err := tx.Tx.Rollback()
+	tx.unlockOnce.Do(tx.unlock)
+	return err
 }
 
 func (s *FileStore) Init() error {
@@ -53,8 +84,11 @@ func (s *FileStore) Init() error {
 	if err != nil {
 		return fmt.Errorf("open sqlite: %w", err)
 	}
-	db.SetMaxOpenConns(1) // SQLite: single writer; modernc handles this best with 1 open conn + WAL
-	db.SetMaxIdleConns(1)
+	// SQLite still has a single writer, but a long-lived writer transaction must
+	// not freeze unrelated reads (login, config, task list). WAL allows readers to
+	// see the last committed snapshot while the writer connection is busy.
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(8)
 	db.SetConnMaxLifetime(0)
 
 	if err := db.Ping(); err != nil {
@@ -278,6 +312,8 @@ func (s *FileStore) SaveConfig(cfg model.AppConfig) error {
 	if err != nil {
 		return err
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	_, err = s.db.Exec(`INSERT INTO config(id, data) VALUES (1, ?)
 		ON CONFLICT(id) DO UPDATE SET data = excluded.data`, string(raw))
 	return err
@@ -333,7 +369,7 @@ func (s *FileStore) normalizeConfig(cfg model.AppConfig) model.AppConfig {
 // ---------- scans ----------
 
 func (s *FileStore) SaveScan(scan model.ScanSession) error {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background())
 	if err != nil {
 		return err
 	}
@@ -358,14 +394,14 @@ ON CONFLICT(id) DO UPDATE SET
 		return err
 	}
 	for _, item := range scan.Items {
-		if err := insertScanItem(tx, item); err != nil {
+		if err := insertScanItem(context.Background(), tx.Tx, item); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-func insertScanItem(tx *sql.Tx, item model.ScanItem) error {
+func insertScanItem(ctx context.Context, tx *sql.Tx, item model.ScanItem) error {
 	parsed, _ := json.Marshal(item.Parsed)
 	cands, _ := json.Marshal(item.MatchCandidates)
 	if cands == nil {
@@ -379,7 +415,7 @@ func insertScanItem(tx *sql.Tx, item model.ScanItem) error {
 			hasMedia = 0
 		}
 	}
-	_, err := tx.Exec(`
+	_, err := tx.ExecContext(ctx, `
 INSERT INTO scan_items(
   id, scan_session_id, openlist_path, file_name, file_size, raw_url, is_video, has_media,
   parsed_json, match_status, match_reason, match_candidates_json,
@@ -486,13 +522,13 @@ func scanItemFromRow(row scannable) (model.ScanItem, error) {
 }
 
 func (s *FileStore) UpdateScanItem(scanID, itemID string, updater func(*model.ScanItem) error) (model.ScanSession, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background())
 	if err != nil {
 		return model.ScanSession{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	item, err := getScanItemTx(tx, scanID, itemID)
+	item, err := getScanItemTx(context.Background(), tx.Tx, scanID, itemID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.ScanSession{}, os.ErrNotExist
@@ -503,10 +539,10 @@ func (s *FileStore) UpdateScanItem(scanID, itemID string, updater func(*model.Sc
 		return model.ScanSession{}, err
 	}
 	item.UpdatedAt = time.Now()
-	if err := replaceScanItemTx(tx, item); err != nil {
+	if err := replaceScanItemTx(context.Background(), tx.Tx, item); err != nil {
 		return model.ScanSession{}, err
 	}
-	if err := refreshScanCountsTx(tx, scanID); err != nil {
+	if err := refreshScanCountsTx(context.Background(), tx.Tx, scanID); err != nil {
 		return model.ScanSession{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -515,8 +551,8 @@ func (s *FileStore) UpdateScanItem(scanID, itemID string, updater func(*model.Sc
 	return s.GetScan(scanID)
 }
 
-func getScanItemTx(tx *sql.Tx, scanID, itemID string) (model.ScanItem, error) {
-	row := tx.QueryRow(`
+func getScanItemTx(ctx context.Context, tx *sql.Tx, scanID, itemID string) (model.ScanItem, error) {
+	row := tx.QueryRowContext(ctx, `
 SELECT id, scan_session_id, openlist_path, file_name, file_size, raw_url, is_video, has_media,
        parsed_json, match_status, match_reason, match_candidates_json,
        selected_item_type, selected_item_id, selected_title, confirmed, created_at, updated_at
@@ -524,29 +560,31 @@ FROM scan_items WHERE scan_session_id = ? AND id = ?`, scanID, itemID)
 	return scanItemFromRow(row)
 }
 
-func replaceScanItemTx(tx *sql.Tx, item model.ScanItem) error {
-	if _, err := tx.Exec(`DELETE FROM scan_items WHERE id = ?`, item.ID); err != nil {
+func replaceScanItemTx(ctx context.Context, tx *sql.Tx, item model.ScanItem) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM scan_items WHERE id = ?`, item.ID); err != nil {
 		return err
 	}
-	return insertScanItem(tx, item)
+	return insertScanItem(ctx, tx, item)
 }
 
-func refreshScanCountsTx(tx *sql.Tx, scanID string) error {
+func refreshScanCountsTx(ctx context.Context, tx *sql.Tx, scanID string) error {
 	var total, matched int
-	if err := tx.QueryRow(`SELECT COUNT(1) FROM scan_items WHERE scan_session_id = ?`, scanID).Scan(&total); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM scan_items WHERE scan_session_id = ?`, scanID).Scan(&total); err != nil {
 		return err
 	}
-	if err := tx.QueryRow(`SELECT COUNT(1) FROM scan_items WHERE scan_session_id = ? AND match_status = ?`,
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM scan_items WHERE scan_session_id = ? AND match_status = ?`,
 		scanID, string(model.MatchStatusMatched)).Scan(&matched); err != nil {
 		return err
 	}
 	unmatched := total - matched
-	_, err := tx.Exec(`UPDATE scans SET total_count=?, matched_count=?, unmatched_count=?, updated_at=? WHERE id=?`,
+	_, err := tx.ExecContext(ctx, `UPDATE scans SET total_count=?, matched_count=?, unmatched_count=?, updated_at=? WHERE id=?`,
 		total, matched, unmatched, formatTime(time.Now()), scanID)
 	return err
 }
 
 func (s *FileStore) DeleteScan(id string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	res, err := s.db.Exec(`DELETE FROM scans WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -559,7 +597,7 @@ func (s *FileStore) DeleteScan(id string) error {
 }
 
 func (s *FileStore) DeleteScanItem(scanID, itemID string) (model.ScanSession, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background())
 	if err != nil {
 		return model.ScanSession{}, err
 	}
@@ -573,7 +611,7 @@ func (s *FileStore) DeleteScanItem(scanID, itemID string) (model.ScanSession, er
 	if n == 0 {
 		return model.ScanSession{}, os.ErrNotExist
 	}
-	if err := refreshScanCountsTx(tx, scanID); err != nil {
+	if err := refreshScanCountsTx(context.Background(), tx.Tx, scanID); err != nil {
 		return model.ScanSession{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -645,6 +683,8 @@ func (s *FileStore) upsertTask(task model.Task) error {
 		partsJSON = []byte("[]")
 	}
 
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	_, err := s.db.Exec(`
 INSERT INTO tasks(
   id, scan_session_id, scan_item_id, status, paused, retry_count,
@@ -789,7 +829,7 @@ func scanTask(row scannable) (model.Task, error) {
 
 func (s *FileStore) UpdateTask(id string, updater func(*model.Task) error) (model.Task, error) {
 	// Transactional read-modify-write: much cheaper than rewriting whole JSON files.
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background())
 	if err != nil {
 		return model.Task{}, err
 	}
@@ -806,7 +846,7 @@ func (s *FileStore) UpdateTask(id string, updater func(*model.Task) error) (mode
 	if err := updater(&task); err != nil {
 		return model.Task{}, err
 	}
-	if err := upsertTaskTx(tx, task); err != nil {
+	if err := upsertTaskTx(context.Background(), tx.Tx, task); err != nil {
 		return model.Task{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -815,7 +855,7 @@ func (s *FileStore) UpdateTask(id string, updater func(*model.Task) error) (mode
 	return task, nil
 }
 
-func upsertTaskTx(tx *sql.Tx, task model.Task) error {
+func upsertTaskTx(ctx context.Context, tx *sql.Tx, task model.Task) error {
 	var finished any
 	if task.FinishedAt != nil {
 		finished = formatTime(*task.FinishedAt)
@@ -840,7 +880,7 @@ func upsertTaskTx(tx *sql.Tx, task model.Task) error {
 		partsJSON = []byte("[]")
 	}
 
-	_, err := tx.Exec(`
+	_, err := tx.ExecContext(ctx, `
 INSERT INTO tasks(
   id, scan_session_id, scan_item_id, status, paused, retry_count,
   source_type, source_path, source_raw_url, source_file_name, source_file_size,
@@ -920,6 +960,8 @@ func (s *FileStore) ListTasks() ([]model.Task, error) {
 }
 
 func (s *FileStore) DeleteTask(id string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	res, err := s.db.Exec(`DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -935,7 +977,7 @@ func (s *FileStore) DeleteTask(id string) error {
 // ---------- task logs ----------
 
 func (s *FileStore) SaveTaskLog(log model.TaskLog) error {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background())
 	if err != nil {
 		return err
 	}
@@ -945,19 +987,19 @@ func (s *FileStore) SaveTaskLog(log model.TaskLog) error {
 		return err
 	}
 	for _, item := range log.Items {
-		if err := insertLogTx(tx, log.TaskID, item); err != nil {
+		if err := insertLogTx(context.Background(), tx.Tx, log.TaskID, item); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-func insertLogTx(tx *sql.Tx, taskID string, item model.TaskLogItem) error {
+func insertLogTx(ctx context.Context, tx *sql.Tx, taskID string, item model.TaskLogItem) error {
 	id := item.ID
 	if id == "" {
 		id = utils.NewID("log")
 	}
-	_, err := tx.Exec(`INSERT INTO task_logs(id, task_id, level, message, time) VALUES (?,?,?,?,?)`,
+	_, err := tx.ExecContext(ctx, `INSERT INTO task_logs(id, task_id, level, message, time) VALUES (?,?,?,?,?)`,
 		id, taskID, item.Level, item.Message, formatTime(item.Time))
 	return err
 }
@@ -990,6 +1032,8 @@ func (s *FileStore) AppendTaskLog(taskID string, item model.TaskLogItem) error {
 	if item.Time.IsZero() {
 		item.Time = time.Now()
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	_, err := s.db.Exec(`INSERT INTO task_logs(id, task_id, level, message, time) VALUES (?,?,?,?,?)`,
 		item.ID, taskID, item.Level, item.Message, formatTime(item.Time))
 	return err

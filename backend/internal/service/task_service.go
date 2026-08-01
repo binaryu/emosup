@@ -72,48 +72,43 @@ func NewTaskService(store *store.FileStore, aria2Client client.Aria2Client, open
 	}
 }
 
-func (s *TaskService) BatchCreateTasks(_ context.Context, req BatchCreateTasksRequest) (BatchCreateTasksResult, error) {
+func (s *TaskService) BatchCreateTasks(ctx context.Context, req BatchCreateTasksRequest) (result BatchCreateTasksResult, err error) {
+	started := time.Now()
+	log.Printf("batch-create started: scan=%s items=%d", req.ScanSessionID, len(req.ItemIDs))
+	defer func() {
+		log.Printf("batch-create finished: scan=%s created=%d failed=%d elapsed=%s",
+			req.ScanSessionID, len(result.Created), len(result.Failed), time.Since(started))
+		if err != nil {
+			log.Printf("batch-create error: scan=%s err=%v", req.ScanSessionID, err)
+		}
+	}()
+
 	if strings.TrimSpace(req.ScanSessionID) == "" {
-		return BatchCreateTasksResult{}, newTaskServiceError(http.StatusBadRequest, "scan_session_id is required")
+		return result, newTaskServiceError(http.StatusBadRequest, "scan_session_id is required")
 	}
 	if len(req.ItemIDs) == 0 {
-		return BatchCreateTasksResult{}, newTaskServiceError(http.StatusBadRequest, "item_ids is required")
+		return result, newTaskServiceError(http.StatusBadRequest, "item_ids is required")
 	}
 
 	scan, err := s.store.GetScan(req.ScanSessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return BatchCreateTasksResult{}, newTaskServiceError(http.StatusNotFound, "scan session not found")
+			return result, newTaskServiceError(http.StatusNotFound, "scan session not found")
 		}
-		return BatchCreateTasksResult{}, err
+		return result, err
 	}
 
 	cfg, err := s.store.LoadConfig()
 	if err != nil {
-		return BatchCreateTasksResult{}, err
+		return result, err
 	}
 
-	existingTasks, err := s.store.ListTasks()
-	if err != nil {
-		return BatchCreateTasksResult{}, err
-	}
-
-	activeTaskByItemID := make(map[string]struct{})
-	for _, task := range existingTasks {
-		if task.ScanSessionID != scan.ID || task.ScanItemID == "" {
-			continue
-		}
-		if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusCanceled {
-			continue
-		}
-		activeTaskByItemID[task.ScanItemID] = struct{}{}
-	}
-
-	result := BatchCreateTasksResult{
+	result = BatchCreateTasksResult{
 		Created: make([]CreatedTaskItem, 0, len(req.ItemIDs)),
 		Failed:  make([]FailedTaskItem, 0),
 	}
 	seen := make(map[string]struct{}, len(req.ItemIDs))
+	tasksToCreate := make([]model.Task, 0, len(req.ItemIDs))
 
 	for _, rawItemID := range req.ItemIDs {
 		itemID := strings.TrimSpace(rawItemID)
@@ -136,37 +131,22 @@ func (s *TaskService) BatchCreateTasks(_ context.Context, req BatchCreateTasksRe
 			result.Failed = append(result.Failed, FailedTaskItem{ItemID: itemID, Reason: reason})
 			continue
 		}
-		if _, ok := activeTaskByItemID[itemID]; ok {
-			result.Failed = append(result.Failed, FailedTaskItem{ItemID: itemID, Reason: "active task already exists for scan item"})
-			continue
-		}
-
-		task := newTaskFromScan(scan, scanItem, cfg.Emos.Storage, cfg.Local.Root, cfg.Aria2.DownloadDir)
-		if err := s.store.SaveTask(task); err != nil {
-			return BatchCreateTasksResult{}, err
-		}
-		if err := s.appendTaskLog(task.ID, "info", "task created from scan item"); err != nil {
-			return BatchCreateTasksResult{}, err
-		}
-
-		activeTaskByItemID[itemID] = struct{}{}
-		result.Created = append(result.Created, CreatedTaskItem{TaskID: task.ID, ItemID: itemID})
+		tasksToCreate = append(tasksToCreate, newTaskFromScan(scan, scanItem, cfg.Emos.Storage, cfg.Local.Root, cfg.Aria2.DownloadDir))
 	}
 
-	// Auto-remove successfully processed items from the scan session
-	for _, created := range result.Created {
-		if _, err := s.store.DeleteScanItem(scan.ID, created.ItemID); err != nil {
-			log.Printf("auto-cleanup scan item failed: scan=%s item=%s err=%v", scan.ID, created.ItemID, err)
+	if len(tasksToCreate) > 0 {
+		stored, storeErr := s.store.CreateTasksForScan(ctx, scan.ID, tasksToCreate)
+		if storeErr != nil {
+			if errors.Is(storeErr, os.ErrNotExist) {
+				return result, newTaskServiceError(http.StatusNotFound, "scan session not found")
+			}
+			return result, storeErr
 		}
-	}
-
-	// If scan is now empty, delete the whole scan session
-	updatedScan, err := s.store.GetScan(scan.ID)
-	if err == nil && updatedScan.TotalCount == 0 {
-		if delErr := s.store.DeleteScan(scan.ID); delErr != nil {
-			log.Printf("auto-cleanup empty scan failed: scan=%s err=%v", scan.ID, delErr)
-		} else {
-			log.Printf("auto-cleanup empty scan deleted: scan=%s", scan.ID)
+		for _, task := range stored.Created {
+			result.Created = append(result.Created, CreatedTaskItem{TaskID: task.ID, ItemID: task.ScanItemID})
+		}
+		for _, failure := range stored.Failed {
+			result.Failed = append(result.Failed, FailedTaskItem{ItemID: failure.ItemID, Reason: failure.Reason})
 		}
 	}
 

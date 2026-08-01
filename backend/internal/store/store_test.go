@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,6 +82,39 @@ func TestTaskProgressUpdateAndList(t *testing.T) {
 	}
 }
 
+func TestDBReadsDoNotBlockOnHeldWriteTransaction(t *testing.T) {
+	s := NewFileStore(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	tx, err := s.DB().Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Hold the SQLite write transaction open. This simulates a stuck/long task
+	// writer: reads must still complete from the WAL snapshot on another conn.
+	if _, err := tx.Exec(`UPDATE config SET data = data WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var raw string
+	if err := s.DB().QueryRowContext(ctx, `SELECT data FROM config WHERE id = 1`).Scan(&raw); err != nil {
+		t.Fatalf("read while write tx held: %v", err)
+	}
+	if raw == "" {
+		t.Fatal("expected config row to be readable")
+	}
+}
+
 func TestScanItemsCRUD(t *testing.T) {
 	s := NewFileStore(t.TempDir())
 	if err := s.Init(); err != nil {
@@ -95,7 +129,7 @@ func TestScanItemsCRUD(t *testing.T) {
 		Items: []model.ScanItem{{
 			ID: "item_1", ScanSessionID: "scan_1", FileName: "S01E02.mkv",
 			IsVideo: true, MatchStatus: model.MatchStatusMatched,
-			Parsed: model.ParsedEpisodeInfo{Season: &season, Episode: &ep},
+			Parsed:    model.ParsedEpisodeInfo{Season: &season, Episode: &ep},
 			CreatedAt: now, UpdatedAt: now,
 		}},
 		TotalCount: 1, MatchedCount: 1, CreatedAt: now, UpdatedAt: now,

@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -42,7 +44,10 @@ func (h *TaskHandler) batchCreateTasks(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.BatchCreateTasks(c.Request.Context(), req)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Minute)
+	defer cancel()
+
+	result, err := h.service.BatchCreateTasks(ctx, req)
 	if err != nil {
 		respondTaskError(c, err)
 		return
