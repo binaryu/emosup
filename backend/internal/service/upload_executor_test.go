@@ -453,6 +453,183 @@ func TestUploadExecutorMultipartResumeSkipsUploadedParts(t *testing.T) {
 	}
 }
 
+func TestUploadExecutorMultipartStalePresignCountRefreshesUploadContext(t *testing.T) {
+	t.Parallel()
+
+	const fileSize = 3 * 1024 * 1024
+	fileStore := newTaskTestStore(t)
+	cfg, err := fileStore.LoadConfig()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Worker.UploadChunkSizeMB = 1
+	cfg.Emos.Token = "demo-token"
+	cfg.Emos.Storage = "zn_r2_upload"
+	if err := fileStore.SaveConfig(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	presigns := []client.EmosMultipartPart{
+		{Number: 1, UploadURL: "https://upload.example/new/1"},
+		{Number: 2, UploadURL: "https://upload.example/new/2"},
+		{Number: 3, UploadURL: "https://upload.example/new/3"},
+	}
+	emosClient := &stubEmosUploadClient{
+		tokenResult: client.EmosUploadTokenResult{
+			Storage:          "r2",
+			FileID:           "file-new",
+			UploadType:       "multipart",
+			MultipartSizeMin: 1024 * 1024,
+			MultipartSizeMax: 1024 * 1024,
+		},
+		presigns: presigns,
+	}
+	executor := NewUploadExecutor(taskService, emosClient, nil)
+	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
+
+	if _, err := fileStore.UpdateTask(taskID, func(task *model.Task) error {
+		task.Upload = model.TaskUpload{
+			Storage:          "r2",
+			FileID:           "file-old",
+			UploadType:       "multipart",
+			MultipartSizeMin: 1024 * 1024,
+			MultipartSizeMax: 1024 * 1024,
+			MultipartPresigns: []model.UploadMultipartPart{
+				{Number: 1, UploadURL: "https://upload.example/old/1"},
+				{Number: 2, UploadURL: "https://upload.example/old/2"},
+			},
+			MultipartParts: []model.UploadMultipartPart{
+				{Number: 1, UploadURL: "https://upload.example/old/1", ETag: "stale-etag-1"},
+			},
+			TotalBytes:    fileSize,
+			UploadedBytes: 1024 * 1024,
+			Progress:      33,
+			Status:        "pending",
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed stale multipart context: %v", err)
+	}
+
+	if err := executor.Execute(context.Background(), taskID); err != nil {
+		t.Fatalf("execute multipart upload with stale presign count: %v", err)
+	}
+
+	if emosClient.tokenCalls != 1 {
+		t.Fatalf("expected one refreshed upload token, got %d", emosClient.tokenCalls)
+	}
+	if emosClient.presignCalls != 1 {
+		t.Fatalf("expected one presign request after refresh, got %d", emosClient.presignCalls)
+	}
+	uploadedParts := emosClient.uploadedPartNumbersSnapshot()
+	sort.Ints(uploadedParts)
+	if !intSliceEqual(uploadedParts, []int{1, 2, 3}) {
+		t.Fatalf("expected uploaded parts 1,2,3, got %v", emosClient.uploadedPartNumbers)
+	}
+	if emosClient.completeCalls != 1 {
+		t.Fatalf("expected one complete call, got %d", emosClient.completeCalls)
+	}
+
+	task, err := taskService.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.Status != model.TaskStatusCompleted {
+		t.Fatalf("expected completed status, got %s", task.Status)
+	}
+	if task.Upload.FileID != "file-new" {
+		t.Fatalf("expected refreshed file id file-new, got %s", task.Upload.FileID)
+	}
+	if len(task.Upload.MultipartParts) != 3 {
+		t.Fatalf("expected three persisted multipart parts, got %d", len(task.Upload.MultipartParts))
+	}
+}
+
+func TestUploadExecutorMultipartStaleFileIDRefreshesUploadContext(t *testing.T) {
+	t.Parallel()
+
+	const fileSize = 3 * 1024 * 1024
+	fileStore := newTaskTestStore(t)
+	cfg, err := fileStore.LoadConfig()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Worker.UploadChunkSizeMB = 1
+	cfg.Emos.Token = "demo-token"
+	cfg.Emos.Storage = "zn_r2_upload"
+	if err := fileStore.SaveConfig(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	presigns := []client.EmosMultipartPart{
+		{Number: 1, UploadURL: "https://upload.example/new/1"},
+		{Number: 2, UploadURL: "https://upload.example/new/2"},
+		{Number: 3, UploadURL: "https://upload.example/new/3"},
+	}
+	base := &stubEmosUploadClient{
+		tokenResult: client.EmosUploadTokenResult{
+			Storage:          "r2",
+			FileID:           "file-new",
+			UploadType:       "multipart",
+			MultipartSizeMin: 1024 * 1024,
+			MultipartSizeMax: 1024 * 1024,
+		},
+		presigns: presigns,
+	}
+	emosClient := &stalePresignUploadClient{
+		stubEmosUploadClient: base,
+		staleFileID:          "file-old",
+	}
+	executor := NewUploadExecutor(taskService, emosClient, nil)
+	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
+
+	if _, err := fileStore.UpdateTask(taskID, func(task *model.Task) error {
+		task.Upload = model.TaskUpload{
+			Storage:          "r2",
+			FileID:           "file-old",
+			UploadURL:        "https://upload.example/old-session",
+			UploadType:       "multipart",
+			MultipartSizeMin: 1024 * 1024,
+			MultipartSizeMax: 1024 * 1024,
+			TotalBytes:       fileSize,
+			Status:           "pending",
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed stale multipart file id: %v", err)
+	}
+
+	if err := executor.Execute(context.Background(), taskID); err != nil {
+		t.Fatalf("execute multipart upload with stale file id: %v", err)
+	}
+
+	if base.tokenCalls != 1 {
+		t.Fatalf("expected one refreshed upload token, got %d", base.tokenCalls)
+	}
+	if emosClient.presignCalls != 2 {
+		t.Fatalf("expected old and new presign requests, got %d", emosClient.presignCalls)
+	}
+	if base.completeCalls != 1 {
+		t.Fatalf("expected one complete call, got %d", base.completeCalls)
+	}
+
+	task, err := taskService.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.Status != model.TaskStatusCompleted {
+		t.Fatalf("expected completed status, got %s", task.Status)
+	}
+	if task.Upload.FileID != "file-new" {
+		t.Fatalf("expected refreshed file id file-new, got %s", task.Upload.FileID)
+	}
+	if len(task.Upload.MultipartParts) != 3 {
+		t.Fatalf("expected three persisted multipart parts, got %d", len(task.Upload.MultipartParts))
+	}
+}
+
 func TestUploadExecutorCancelThenRetryDoesNotFailTask(t *testing.T) {
 	t.Parallel()
 
@@ -664,6 +841,7 @@ type stubSaveAttempt struct {
 type stubEmosUploadClient struct {
 	tokenResult    client.EmosUploadTokenResult
 	tokenErr       error
+	tokenCalls     int
 	uploadProgress []client.EmosUploadProgress
 	uploadErr      error
 	saveAttempts   []stubSaveAttempt
@@ -688,6 +866,7 @@ func (c *stubEmosUploadClient) GetVideoBase(context.Context, client.EmosAccess, 
 }
 
 func (c *stubEmosUploadClient) GetUploadToken(_ context.Context, _ client.EmosAccess, req client.EmosUploadTokenRequest) (client.EmosUploadTokenResult, error) {
+	c.tokenCalls++
 	c.uploadTokenRequests = append(c.uploadTokenRequests, req)
 	return c.tokenResult, c.tokenErr
 }
@@ -751,6 +930,20 @@ type cancelableMultipartClient struct {
 	*stubEmosUploadClient
 	firstStarted chan struct{}
 	releaseFirst chan struct{}
+}
+
+type stalePresignUploadClient struct {
+	*stubEmosUploadClient
+	staleFileID  string
+	presignCalls int
+}
+
+func (c *stalePresignUploadClient) RequestMultipartPresigns(ctx context.Context, access client.EmosAccess, fileID string, numChunks int) ([]client.EmosMultipartPart, error) {
+	c.presignCalls++
+	if fileID == c.staleFileID {
+		return nil, fmt.Errorf("emos multipart presign request failed: 404 Not Found")
+	}
+	return c.stubEmosUploadClient.presigns, nil
 }
 
 func (c *cancelableMultipartClient) UploadMultipartPart(ctx context.Context, part client.EmosMultipartPart, filePath string, startByte, partSize int64) (string, error) {

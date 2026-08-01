@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"mime"
 	"os"
@@ -191,7 +192,7 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 			return model.Task{}, firstNonNil(markErr, err)
 		}
 	case "multipart":
-		if err := e.uploadMultipart(ctx, task, access, chunkSize, info.Size(), localPath, maxWorkers, task.RetryCount); err != nil {
+		if err := e.uploadMultipart(ctx, task, access, chunkSize, info.Size(), localPath, maxWorkers, task.RetryCount, resuming); err != nil {
 			if errors.Is(err, errTaskCanceled) || e.isCanceledUpload(ctx, task.ID) {
 				return task, errTaskCanceled
 			}
@@ -210,41 +211,47 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 	return task, nil
 }
 
-func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, access client.EmosAccess, configuredChunkSize, fileSize int64, localPath string, maxWorkers int, retryCount int) error {
-	chunkSize := configuredChunkSize
-	if task.Upload.MultipartSizeMin > 0 || task.Upload.MultipartSizeMax > 0 {
-		if task.Upload.MultipartSizeMin > 0 && chunkSize < task.Upload.MultipartSizeMin {
-			chunkSize = task.Upload.MultipartSizeMin
-		}
-		if task.Upload.MultipartSizeMax > 0 && chunkSize > task.Upload.MultipartSizeMax {
-			chunkSize = task.Upload.MultipartSizeMax
-		}
-	}
-	if chunkSize <= 0 {
-		return errors.New("multipart chunk size must be positive")
+func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, access client.EmosAccess, configuredChunkSize, fileSize int64, localPath string, maxWorkers int, retryCount int, resuming bool) error {
+	chunkSize, numChunks, err := resolveMultipartChunkSize(task, configuredChunkSize, fileSize)
+	if err != nil {
+		return err
 	}
 
-	numChunks := int((fileSize + chunkSize - 1) / chunkSize)
 	presigns := task.Upload.MultipartPresigns
-	if len(presigns) == 0 {
-		clientPresigns, err := e.emosClient.RequestMultipartPresigns(ctx, access, task.Upload.FileID, numChunks)
-		if err != nil {
-			return err
-		}
-		presigns = make([]model.UploadMultipartPart, 0, len(clientPresigns))
-		for _, part := range clientPresigns {
-			presigns = append(presigns, model.UploadMultipartPart{
-				Number:    part.Number,
-				UploadURL: part.UploadURL,
-				ETag:      part.ETag,
-			})
-		}
-		updated, err := e.taskService.SetMultipartPresigns(ctx, task.ID, presigns)
-		if err != nil {
-			return err
+	allowTokenRefresh := resuming
+
+	if len(presigns) > 0 && len(presigns) != numChunks {
+		log.Printf("multipart presign count stale: task=%s stored=%d expected=%d, refreshing upload context", task.ID, len(presigns), numChunks)
+		updated, refreshedChunkSize, refreshedChunkCount, refreshErr := e.refreshMultipartUploadContext(ctx, task, access, configuredChunkSize, fileSize, localPath)
+		if refreshErr != nil {
+			return refreshErr
 		}
 		task = updated
+		chunkSize = refreshedChunkSize
+		numChunks = refreshedChunkCount
 		presigns = task.Upload.MultipartPresigns
+		allowTokenRefresh = false
+	}
+
+	if len(presigns) == 0 {
+		refreshed, _, requestErr := e.requestMultipartPresigns(ctx, task, access, numChunks)
+		if requestErr != nil {
+			if !allowTokenRefresh {
+				return requestErr
+			}
+			log.Printf("multipart presign request failed for saved context: task=%s err=%v, refreshing upload context", task.ID, requestErr)
+			refreshed, refreshedChunkSize, refreshedChunkCount, refreshErr := e.refreshMultipartUploadContext(ctx, task, access, configuredChunkSize, fileSize, localPath)
+			if refreshErr != nil {
+				return fmt.Errorf("refresh upload context after presign failure: %w", refreshErr)
+			}
+			task = refreshed
+			chunkSize = refreshedChunkSize
+			numChunks = refreshedChunkCount
+			presigns = task.Upload.MultipartPresigns
+		} else {
+			task = refreshed
+			presigns = task.Upload.MultipartPresigns
+		}
 	}
 
 	if len(presigns) != numChunks {
@@ -424,6 +431,77 @@ func clampUploadPartConcurrency(value int) int {
 		return maxMultipartUploadWorkers
 	}
 	return value
+}
+
+func resolveMultipartChunkSize(task model.Task, configuredChunkSize, fileSize int64) (int64, int, error) {
+	chunkSize := configuredChunkSize
+	if task.Upload.MultipartSizeMin > 0 || task.Upload.MultipartSizeMax > 0 {
+		if task.Upload.MultipartSizeMin > 0 && chunkSize < task.Upload.MultipartSizeMin {
+			chunkSize = task.Upload.MultipartSizeMin
+		}
+		if task.Upload.MultipartSizeMax > 0 && chunkSize > task.Upload.MultipartSizeMax {
+			chunkSize = task.Upload.MultipartSizeMax
+		}
+	}
+	if chunkSize <= 0 {
+		return 0, 0, errors.New("multipart chunk size must be positive")
+	}
+	numChunks := int((fileSize + chunkSize - 1) / chunkSize)
+	if numChunks <= 0 {
+		return 0, 0, errors.New("multipart file chunk count must be positive")
+	}
+	return chunkSize, numChunks, nil
+}
+
+func (e *UploadExecutor) requestMultipartPresigns(ctx context.Context, task model.Task, access client.EmosAccess, numChunks int) (model.Task, []model.UploadMultipartPart, error) {
+	clientPresigns, err := e.emosClient.RequestMultipartPresigns(ctx, access, task.Upload.FileID, numChunks)
+	if err != nil {
+		return model.Task{}, nil, err
+	}
+	presigns := make([]model.UploadMultipartPart, 0, len(clientPresigns))
+	for _, part := range clientPresigns {
+		presigns = append(presigns, model.UploadMultipartPart{
+			Number:    part.Number,
+			UploadURL: part.UploadURL,
+			ETag:      part.ETag,
+		})
+	}
+	updated, err := e.taskService.SetMultipartPresigns(ctx, task.ID, presigns)
+	if err != nil {
+		return model.Task{}, nil, err
+	}
+	return updated, updated.Upload.MultipartPresigns, nil
+}
+
+func (e *UploadExecutor) refreshMultipartUploadContext(ctx context.Context, task model.Task, access client.EmosAccess, configuredChunkSize, fileSize int64, localPath string) (model.Task, int64, int, error) {
+	tokenResult, tokenErr := e.emosClient.GetUploadToken(ctx, access, client.EmosUploadTokenRequest{
+		ResourceType: "video",
+		FileType:     detectUploadMimeType(localPath),
+		FileName:     filepath.Base(localPath),
+		FileSize:     fileSize,
+		FileStorage:  task.Upload.Storage,
+	})
+	if tokenErr != nil {
+		return model.Task{}, 0, 0, fmt.Errorf("upload token refresh failed: %w", tokenErr)
+	}
+
+	updated, err := e.taskService.SetUploadContext(ctx, task.ID, tokenResult)
+	if err != nil {
+		return model.Task{}, 0, 0, err
+	}
+	if strings.ToLower(strings.TrimSpace(updated.Upload.UploadType)) != "multipart" {
+		return model.Task{}, 0, 0, fmt.Errorf("refreshed upload type is %q, expected multipart", updated.Upload.UploadType)
+	}
+
+	chunkSize, numChunks, err := resolveMultipartChunkSize(updated, configuredChunkSize, fileSize)
+	if err != nil {
+		return model.Task{}, 0, 0, err
+	}
+	requested, _, requestErr := e.requestMultipartPresigns(ctx, updated, access, numChunks)
+	if requestErr != nil {
+		return model.Task{}, 0, 0, fmt.Errorf("multipart presign request after token refresh failed: %w", requestErr)
+	}
+	return requested, chunkSize, numChunks, nil
 }
 
 func partSizeForMultipartPresign(number int, chunkSize, fileSize int64) int64 {

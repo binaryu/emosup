@@ -742,16 +742,16 @@ func (s *TaskService) SetUploadContext(_ context.Context, taskID string, result 
 			return newTaskServiceError(http.StatusBadRequest, fmt.Sprintf("task status %q cannot attach upload context", task.Status))
 		}
 		task.Upload.Storage = firstNonEmptyTaskString(result.Storage, task.Upload.Storage, "default")
-		previousFileID := task.Upload.FileID
 		task.Upload.FileID = strings.TrimSpace(result.FileID)
 		task.Upload.UploadURL = strings.TrimSpace(result.UploadURL)
 		task.Upload.UploadType = firstNonEmptyTaskString(result.UploadType, task.Upload.UploadType, "onedrive")
-		task.Upload.MultipartSizeMin = maxInt64(task.Upload.MultipartSizeMin, result.MultipartSizeMin)
-		task.Upload.MultipartSizeMax = maxInt64(task.Upload.MultipartSizeMax, result.MultipartSizeMax)
-		if len(task.Upload.MultipartPresigns) == 0 || previousFileID != task.Upload.FileID {
-			task.Upload.MultipartPresigns = nil
-			task.Upload.MultipartParts = nil
-		}
+		task.Upload.MultipartSizeMin = result.MultipartSizeMin
+		task.Upload.MultipartSizeMax = result.MultipartSizeMax
+		task.Upload.MultipartPresigns = nil
+		task.Upload.MultipartParts = nil
+		task.Upload.UploadedBytes = 0
+		task.Upload.Progress = 0
+		task.Upload.MediaID = ""
 		task.Upload.Status = "uploading"
 		task.UpdatedAt = now
 		return nil
