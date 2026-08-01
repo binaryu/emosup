@@ -4,10 +4,8 @@
     <PageHeaderCard title="任务详情" subtitle="查看任务的完整执行上下文、来源快照与实时流转日志。">
       <div class="header-actions">
         <el-button :loading="taskStore.loading" @click="loadDetail" round>
-          <template #icon>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-          </template>
-          刷新数据
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          <span class="btn-label">刷新数据</span>
         </el-button>
       </div>
     </PageHeaderCard>
@@ -577,5 +575,11 @@ onUnmounted(() => {
   .info-grid {
     grid-template-columns: 1fr !important;
   }
+  .btn-label { display: none; }
+  .header-actions .el-button { padding: 8px 12px; min-width: unset; }
+  .exec-block { padding: 12px; }
+  .logs-container { max-height: 300px; }
+  .task-detail-view { gap: 10px; }
+  .error-banner { flex-direction: column; }
 }
 </style>

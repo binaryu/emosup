@@ -24,20 +24,23 @@ defineProps<{
   gap: 16px;
   align-items: center;
   padding: 24px;
-  margin-bottom: 20px;
 }
 
 .header-extra {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 768px) {
   .header-card {
     flex-direction: column;
     align-items: flex-start;
+    padding: 16px;
+    gap: 12px;
   }
+  .header-extra { width: 100%; }
 }
 </style>
 

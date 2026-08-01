@@ -49,7 +49,7 @@
       </div>
     </aside>
 
-    <div v-if="sidebarOpen" class="sidebar-overlay" @click="closeSidebar"></div>
+    <div v-if="sidebarOpen" class="sidebar-overlay" @click="closeSidebar" @touchmove.prevent></div>
 
     <main class="page-main">
       <div class="mobile-bar" v-if="isMobile">
@@ -317,24 +317,29 @@ onUnmounted(() => {
   display: none;
   align-items: center;
   gap: 16px;
-  padding: 16px;
+  padding: 12px 16px;
   background: var(--bg-sidebar);
   border-bottom: 1px solid var(--line-soft);
   position: sticky;
   top: 0;
   z-index: 10;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .menu-toggle {
   background: none;
   border: none;
-  padding: 4px;
+  padding: 6px;
   cursor: pointer;
   color: var(--text-main);
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: 8px;
+  transition: background 0.15s;
 }
+.menu-toggle:active { background: var(--bg-hover); }
 
 .mobile-title {
   font-weight: 700;
@@ -389,7 +394,13 @@ onUnmounted(() => {
   }
   
   .content-wrapper {
-    padding: 16px;
+    padding: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .content-wrapper {
+    padding: 8px;
   }
 }
 </style>

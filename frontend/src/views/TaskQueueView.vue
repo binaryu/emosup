@@ -5,41 +5,61 @@
       subtitle="实时追踪所有离线下载与转存任务的执行状态、进度与错误信息。"
     >
       <div class="toolbar">
-        <el-select v-model="filterStatus" placeholder="筛选状态" clearable style="width: 160px" @change="reload">
+        <el-select v-model="filterStatus" placeholder="筛选状态" clearable class="filter-select" @change="reload">
           <el-option v-for="status in statuses" :key="status" :label="status" :value="status" />
         </el-select>
-        <el-button :loading="taskStore.loading" @click="reload">刷新</el-button>
+        <el-button :loading="taskStore.loading" @click="reload" class="tool-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          <span class="btn-label">刷新</span>
+        </el-button>
         <el-button
           v-if="selectedTaskIds.length > 0"
           type="warning"
           plain
+          class="tool-btn"
           @click="handleBatchPause"
         >
-          暂停所选 ({{ selectedTaskIds.length }})
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          <span class="btn-label">暂停 ({{ selectedTaskIds.length }})</span>
         </el-button>
         <el-button
           v-if="selectedTaskIds.length > 0"
           type="success"
           plain
+          class="tool-btn"
           @click="handleBatchResume"
         >
-          恢复所选 ({{ selectedTaskIds.length }})
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span class="btn-label">恢复 ({{ selectedTaskIds.length }})</span>
         </el-button>
         <el-button
           v-if="selectedTaskIds.length > 0"
           type="danger"
           plain
+          class="tool-btn"
           @click="handleBatchDelete"
         >
-          批量删除 ({{ selectedTaskIds.length }})
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span class="btn-label">删除 ({{ selectedTaskIds.length }})</span>
         </el-button>
         <el-button
           v-if="taskStore.total > 0"
           link
           type="primary"
+          class="tool-btn"
           @click="selectAllTasks"
         >
           {{ allSelected ? '取消全选' : '全选所有' }}
+        </el-button>
+        <div class="toolbar-spacer"></div>
+        <el-button
+          link
+          class="view-toggle"
+          @click="viewMode = viewMode === 'table' ? 'card' : 'table'"
+          :title="viewMode === 'table' ? '切换到卡片布局' : '切换到列表布局'"
+        >
+          <svg v-if="viewMode === 'table'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         </el-button>
       </div>
     </PageHeaderCard>
@@ -78,7 +98,8 @@
       </div>
     </div>
 
-    <el-card class="queue-card" :body-style="{ padding: '0' }">
+    <!-- Table View (Desktop) -->
+    <el-card v-if="viewMode === 'table'" class="queue-card" :body-style="{ padding: '0' }">
       <el-table
         :data="taskStore.tasks"
         row-key="id"
@@ -179,6 +200,102 @@
         />
       </div>
     </el-card>
+
+    <!-- Card View (Mobile) -->
+    <div v-else class="card-list">
+      <el-empty v-if="!taskStore.tasks.length" description="暂无任务" />
+      <div v-for="row in taskStore.tasks" :key="row.id" class="task-card" @click="goDetail(row.id)">
+        <div class="card-header">
+          <div class="card-status-row">
+            <StatusTag :status="row.status" />
+            <StatusTag v-if="isActive(row.status) && (row.upload.status || row.download.status)" :status="row.upload.status || row.download.status" size="small" />
+            <span v-if="row.parsed.season != null || row.parsed.episode != null" class="card-ep">S{{ row.parsed.season ?? '?' }}E{{ row.parsed.episode ?? '?' }}</span>
+          </div>
+          <svg class="card-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+
+        <div class="card-body">
+          <div class="card-filename">{{ row.source.file_name }}</div>
+          <div class="card-meta">
+            <span class="card-task-id">{{ row.id }}</span>
+            <span class="card-time">{{ formatTime(row.updated_at) }}</span>
+          </div>
+
+          <template v-if="row.status === 'downloading' && row.download.progress != null">
+            <div class="card-progress">
+              <div class="progress-header">
+                <span>下载</span>
+                <span>{{ Math.round(row.download.progress) }}%</span>
+              </div>
+              <el-progress :percentage="Math.round(row.download.progress)" :stroke-width="6" :show-text="false" />
+              <div class="progress-stats">
+                <span>{{ formatBytes(row.download.completed_bytes) }} / {{ formatBytes(row.download.total_bytes) }}</span>
+                <span>{{ formatSpeed(row.download.speed) }}</span>
+              </div>
+            </div>
+          </template>
+          <template v-else-if="['uploading', 'saving'].includes(row.status) && row.upload.progress != null">
+            <div class="card-progress">
+              <div class="progress-header">
+                <span>上传</span>
+                <span>{{ Math.round(row.upload.progress) }}%</span>
+              </div>
+              <el-progress :percentage="Math.round(row.upload.progress)" :stroke-width="6" :show-text="false" status="success" />
+              <div class="progress-stats">
+                <span>{{ formatBytes(row.upload.uploaded_bytes) }} / {{ formatBytes(row.upload.total_bytes) }}</span>
+                <span>{{ formatSpeed(row.upload.speed) }}</span>
+              </div>
+            </div>
+          </template>
+          <template v-else-if="row.status === 'completed'">
+            <el-progress :percentage="100" :stroke-width="6" status="success" />
+          </template>
+
+          <div v-if="row.result.error_message || row.upload.last_save_error" class="card-error">
+            {{ row.upload.last_save_error || row.result.error_message }}
+          </div>
+        </div>
+
+        <div class="card-actions" @click.stop>
+          <button class="card-action-btn" @click="goDetail(row.id)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            详情
+          </button>
+          <button v-if="!row.paused && canCancel(row.status)" class="card-action-btn" @click="handlePause(row.id)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            暂停
+          </button>
+          <button v-if="row.paused" class="card-action-btn" @click="handleResume(row.id)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            恢复
+          </button>
+          <button class="card-action-btn" :class="{ disabled: !canCancel(row.status) }" :disabled="!canCancel(row.status)" @click="canCancel(row.status) && handleCancel(row.id)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            取消
+          </button>
+          <button class="card-action-btn" :class="{ disabled: !canRetry(row.status) }" :disabled="!canRetry(row.status)" @click="canRetry(row.status) && handleRetry(row.id)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+            重试
+          </button>
+          <button class="card-action-btn danger" :class="{ disabled: isActive(row.status) }" :disabled="isActive(row.status)" @click="!isActive(row.status) && handleDelete(row.id)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            删除
+          </button>
+        </div>
+      </div>
+
+      <div v-if="taskStore.tasks.length > 0" class="pagination-container">
+        <el-pagination
+          background
+          small
+          layout="prev, pager, next"
+          :current-page="taskStore.page"
+          :page-size="taskStore.pageSize"
+          :total="taskStore.total"
+          @current-change="handlePageChange"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -201,10 +318,16 @@ const filterStatus = ref<TaskStatus | ''>('')
 const selectedTaskIds = ref<string[]>([])
 const allSelected = ref(false)
 const diskInfo = ref<{ total_bytes: number; used_bytes: number; free_bytes: number } | null>(null)
+const viewMode = ref<'table' | 'card'>(typeof window !== 'undefined' && window.innerWidth < 768 ? 'card' : 'table')
 const statuses: TaskStatus[] = [
   'queued', 'downloading', 'download_failed', 'download_completed',
   'upload_pending', 'uploading', 'saving', 'upload_failed', 'completed', 'canceled',
 ]
+
+function syncViewMode() {
+  if (typeof window === 'undefined') return
+  viewMode.value = window.innerWidth < 768 ? 'card' : 'table'
+}
 
 const runtimeDescription = computed(() => {
   if (!taskStore.runtime) return ''
@@ -258,13 +381,11 @@ function connectSSE() {
 
 function scheduleFlush() {
   if (flushTimer) return
-  // Batch UI patches ~4fps — enough for smooth progress, cheap for Vue/table.
   flushTimer = window.setTimeout(() => {
     flushTimer = undefined
     const events = pendingEvents.splice(0)
     if (!events.length) return
 
-    // Keep only the latest event per task within this batch.
     const latest = new Map<string, LiveTaskEvent>()
     for (const evt of events) {
       if (!evt?.task_id) continue
@@ -279,7 +400,6 @@ function scheduleFlush() {
         continue
       }
       if (!applyLiveEvent(evt)) {
-        // Task not on current page (or just created) — refresh list soon.
         needSoftRefresh = true
       }
     }
@@ -287,7 +407,6 @@ function scheduleFlush() {
   }, 250)
 }
 
-/** Map scheduler stage names + progress payloads onto local task rows. */
 function applyLiveEvent(evt: LiveTaskEvent): boolean {
   const hasDownload =
     evt.dl_prog !== undefined ||
@@ -341,7 +460,6 @@ function applyLiveEvent(evt: LiveTaskEvent): boolean {
   })
 }
 
-/** Coalesce full list/stats reloads so many task completions don't thrash the UI. */
 function scheduleSoftRefresh() {
   if (softRefreshTimer) return
   softRefreshTimer = window.setTimeout(async () => {
@@ -358,7 +476,6 @@ function scheduleSoftRefresh() {
 
 function startBackupPoll() {
   stopBackupPoll()
-  // Safety net when SSE misses events; only useful while something is running.
   backupTimer = window.setInterval(() => {
     if (!pageVisible) return
     if (!taskStore.hasActiveTasks() && !taskStore.runtime?.current_task_ids?.length) return
@@ -508,6 +625,8 @@ async function handlePageChange(page: number) {
 }
 
 onMounted(() => {
+  syncViewMode()
+  window.addEventListener('resize', syncViewMode)
   reload()
   connectSSE()
   startBackupPoll()
@@ -537,15 +656,39 @@ onMounted(() => {
     if (softRefreshTimer) { window.clearTimeout(softRefreshTimer); softRefreshTimer = undefined }
     pendingEvents = []
     document.removeEventListener('visibilitychange', onVisibilityChange)
+    window.removeEventListener('resize', syncViewMode)
   })
 })
 </script>
 
 <style scoped>
 .task-queue-view { display: flex; flex-direction: column; gap: 16px; }
-.toolbar { display: flex; gap: 12px; align-items: center; }
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.toolbar-spacer { flex: 1; }
+
+.filter-select { width: 140px; }
+
+.tool-btn { display: flex; align-items: center; gap: 4px; }
+.view-toggle { padding: 6px; min-width: unset; }
+.btn-label {}
+
+@media (max-width: 640px) {
+  .toolbar { gap: 4px; }
+  .filter-select { width: 120px; }
+  .btn-label { display: none; }
+  .tool-btn { padding: 8px 10px; min-width: unset; }
+}
+
 .runtime-alert { margin-bottom: 0; }
 
+/* Stats Dashboard */
 .stats-dashboard { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
 .stat-widget { background: var(--bg-panel); border: 1px solid var(--line-soft); border-radius: 12px; padding: 16px 20px; text-align: center; }
 .stat-widget.primary { border-left: 3px solid var(--brand); }
@@ -556,6 +699,7 @@ onMounted(() => {
 .stat-label { display: block; color: var(--text-subtle); font-size: 12px; margin-bottom: 4px; }
 .stat-content strong { font-size: 22px; color: var(--text-main); }
 
+/* Table View */
 .task-target { display: flex; flex-direction: column; gap: 2px; }
 .file-name { font-weight: 600; color: var(--text-main); }
 .task-id { font-size: 11px; color: var(--text-muted); font-family: monospace; }
@@ -580,10 +724,117 @@ onMounted(() => {
 .popover-item.disabled { opacity: 0.35; cursor: not-allowed; }
 .popover-divider { height: 1px; background: var(--line-soft); margin: 4px 0; }
 
+/* Card View (Mobile) */
+.card-list { display: flex; flex-direction: column; gap: 10px; }
+
+.task-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  cursor: pointer;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.task-card:active { box-shadow: var(--shadow-md); }
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-hover);
+}
+.card-status-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.card-ep {
+  font-size: 12px;
+  color: var(--brand);
+  font-weight: 600;
+  font-family: monospace;
+  background: var(--brand-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.card-chevron { color: var(--text-muted); flex-shrink: 0; }
+
+.card-body {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.card-filename {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-main);
+  word-break: break-all;
+  line-height: 1.4;
+}
+.card-meta { display: flex; justify-content: space-between; align-items: center; }
+.card-task-id { font-size: 11px; color: var(--text-muted); font-family: monospace; }
+.card-time { font-size: 11px; color: var(--text-muted); }
+
+.card-progress { display: flex; flex-direction: column; gap: 6px; }
+.progress-header { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-subtle); font-weight: 500; }
+.progress-stats { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); }
+
+.card-error {
+  font-size: 12px;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.06);
+  padding: 8px 12px;
+  border-radius: 8px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.card-actions {
+  display: flex;
+  border-top: 1px solid var(--line-soft);
+  padding: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.card-action-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+  min-width: 56px;
+}
+.card-action-btn:not(:last-child) { border-right: 1px solid var(--line-soft); }
+.card-action-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-main); }
+.card-action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.card-action-btn.danger:hover:not(:disabled) { color: #ef4444; background: rgba(239, 68, 68, 0.06); }
+
+/* Pagination */
 .pagination-container { padding: 14px 20px; display: flex; justify-content: flex-end; border-top: 1px solid var(--line-soft); }
 
+/* Shared */
 .muted-text { color: var(--text-subtle); font-size: 12px; }
 
+/* Responsive */
 @media (max-width: 960px) { .stats-dashboard { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 600px) { .stats-dashboard { grid-template-columns: 1fr; } .toolbar { flex-wrap: wrap; } }
+@media (max-width: 600px) {
+  .stats-dashboard { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat-widget { padding: 12px 14px; }
+  .stat-content strong { font-size: 18px; }
+  .pagination-container { padding: 12px; justify-content: center; }
+}
+
+@media (max-width: 480px) {
+  .task-queue-view { gap: 10px; }
+  .stats-dashboard { grid-template-columns: 1fr 1fr; gap: 6px; }
+}
 </style>
