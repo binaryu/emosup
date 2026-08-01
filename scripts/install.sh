@@ -234,6 +234,17 @@ stop_service() {
     systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
   fi
   pkill -f "${INSTALL_DIR}/emosup-server" 2>/dev/null || true
+  # Wait for the process to actually exit before releasing the port.
+  local waited=0
+  while (( waited < 5 )); do
+    if ! pgrep -f "${INSTALL_DIR}/emosup-server" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+    (( waited++ ))
+  done
+  # Force kill if still alive after 2.5s.
+  pkill -9 -f "${INSTALL_DIR}/emosup-server" 2>/dev/null || true
   sleep 0.5
 }
 
