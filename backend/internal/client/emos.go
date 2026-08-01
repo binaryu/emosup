@@ -59,9 +59,18 @@ type EmosUploadTokenRequest struct {
 }
 
 type EmosUploadTokenResult struct {
-	Storage   string
-	FileID    string
-	UploadURL string
+	Storage          string
+	FileID           string
+	UploadURL        string
+	UploadType       string
+	MultipartSizeMin int64
+	MultipartSizeMax int64
+}
+
+type EmosMultipartPart struct {
+	Number    int    `json:"number"`
+	UploadURL string `json:"upload_url,omitempty"`
+	ETag      string `json:"etag,omitempty"`
 }
 
 type EmosSaveVideoRequest struct {
@@ -86,6 +95,11 @@ type EmosSaveError struct {
 	StatusCode int
 	Message    string
 }
+
+const (
+	uploadRetryMaxAttempts = 5
+	uploadRetryBackoff     = 500 * time.Millisecond
+)
 
 func (e *EmosSaveError) Error() string {
 	if e == nil {
@@ -136,7 +150,10 @@ type EmosClient interface {
 	GetVideoTree(ctx context.Context, access EmosAccess, tmdbID int64, videoType string) (EmosVideoTree, error)
 	GetVideoBase(ctx context.Context, access EmosAccess, itemType string, itemID int64) (EmosVideoBase, error)
 	GetUploadToken(ctx context.Context, access EmosAccess, req EmosUploadTokenRequest) (EmosUploadTokenResult, error)
-	UploadFile(ctx context.Context, uploadURL, filePath string, chunkSize int64, offset int64, onProgress func(EmosUploadProgress) error) error
+	UploadFile(ctx context.Context, uploadType, uploadURL, filePath string, chunkSize int64, offset int64, onProgress func(EmosUploadProgress) error) error
+	UploadMultipartPart(ctx context.Context, part EmosMultipartPart, filePath string, startByte, partSize int64) (string, error)
+	RequestMultipartPresigns(ctx context.Context, access EmosAccess, fileID string, numChunks int) ([]EmosMultipartPart, error)
+	CompleteMultipart(ctx context.Context, access EmosAccess, fileID string, parts []EmosMultipartPart) error
 	SaveVideo(ctx context.Context, access EmosAccess, req EmosSaveVideoRequest) (EmosSaveVideoResult, error)
 }
 
@@ -147,8 +164,8 @@ type HTTPEmosClient struct {
 
 func NewHTTPEmosClient() *HTTPEmosClient {
 	return &HTTPEmosClient{
-		apiClient:    &http.Client{Timeout: 20 * time.Second},
-		uploadClient: &http.Client{Timeout: 2 * time.Minute},
+		apiClient:    &http.Client{Timeout: 60 * time.Second},
+		uploadClient: &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
@@ -278,38 +295,74 @@ func (c *HTTPEmosClient) GetUploadToken(ctx context.Context, access EmosAccess, 
 	}
 
 	var raw struct {
-		Type      string         `json:"type"`
-		Storage   string         `json:"storage"`
-		FileID    string         `json:"file_id"`
-		UploadURL string         `json:"upload_url"`
-		Data      map[string]any `json:"data"`
+		Type      string          `json:"type"`
+		Storage   string          `json:"storage"`
+		FileID    string          `json:"file_id"`
+		UploadURL string          `json:"upload_url"`
+		Data      json.RawMessage `json:"data"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&raw); err != nil {
 		return EmosUploadTokenResult{}, err
 	}
 
+	type tokenData struct {
+		UploadURL     string          `json:"upload_url"`
+		URL           string          `json:"url"`
+		PutURL        string          `json:"put_url"`
+		FileID        string          `json:"file_id"`
+		MultipartSize json.RawMessage `json:"multipart_size"`
+	}
+	var data tokenData
+	if len(raw.Data) > 0 {
+		if err := json.Unmarshal(raw.Data, &data); err != nil {
+			var dataURL string
+			if stringErr := json.Unmarshal(raw.Data, &dataURL); stringErr == nil {
+				data.UploadURL = dataURL
+			}
+		}
+	}
+
+	uploadType := strings.ToLower(strings.TrimSpace(raw.Type))
+	if uploadType == "" {
+		uploadType = "onedrive"
+	}
+	fileID := firstNonEmptyString(raw.FileID, data.FileID)
 	uploadURL := strings.TrimSpace(raw.UploadURL)
 	if uploadURL == "" {
 		uploadURL = firstNonEmptyString(
-			stringValue(raw.Data["upload_url"]),
-			stringValue(raw.Data["url"]),
-			stringValue(raw.Data["put_url"]),
+			data.UploadURL,
+			data.URL,
+			data.PutURL,
 		)
 	}
+	minSize, maxSize := multipartSizeBounds(data.MultipartSize)
 
 	result := EmosUploadTokenResult{
-		Storage:   firstNonEmptyString(raw.Storage, raw.Type, req.FileStorage, "default"),
-		FileID:    strings.TrimSpace(raw.FileID),
-		UploadURL: uploadURL,
+		Storage:          firstNonEmptyString(raw.Storage, req.FileStorage, "default"),
+		FileID:           fileID,
+		UploadURL:        uploadURL,
+		UploadType:       uploadType,
+		MultipartSizeMin: minSize,
+		MultipartSizeMax: maxSize,
 	}
-	if result.FileID == "" || result.UploadURL == "" {
-		return EmosUploadTokenResult{}, errors.New("emos upload token response missing file_id or upload_url")
+	if result.FileID == "" {
+		return EmosUploadTokenResult{}, errors.New("emos upload token response missing file_id")
+	}
+	if uploadType != "multipart" && result.UploadURL == "" {
+		return EmosUploadTokenResult{}, errors.New("emos upload token response missing upload_url")
 	}
 
 	return result, nil
 }
 
-func (c *HTTPEmosClient) UploadFile(ctx context.Context, uploadURL, filePath string, chunkSize int64, offset int64, onProgress func(EmosUploadProgress) error) error {
+func (c *HTTPEmosClient) UploadFile(ctx context.Context, uploadType, uploadURL, filePath string, chunkSize int64, offset int64, onProgress func(EmosUploadProgress) error) error {
+	uploadType = strings.ToLower(strings.TrimSpace(uploadType))
+	if uploadType == "" {
+		uploadType = "onedrive"
+	}
+	if uploadType != "onedrive" && uploadType != "r2" {
+		return fmt.Errorf("unsupported upload type %q", uploadType)
+	}
 	if strings.TrimSpace(uploadURL) == "" {
 		return errors.New("upload url is required")
 	}
@@ -335,7 +388,6 @@ func (c *HTTPEmosClient) UploadFile(ctx context.Context, uploadURL, filePath str
 	}
 
 	totalBytes := info.Size()
-	contentType := detectContentType(filePath)
 
 	var uploadedBytes int64 = offset
 	for uploadedBytes < totalBytes {
@@ -347,33 +399,27 @@ func (c *HTTPEmosClient) UploadFile(ctx context.Context, uploadURL, filePath str
 		startByte := uploadedBytes
 		endByte := uploadedBytes + partSize - 1
 
-		request, err := http.NewRequestWithContext(
-			ctx,
-			http.MethodPut,
-			uploadURL,
-			io.NewSectionReader(file, startByte, partSize),
-		)
-		if err != nil {
-			return err
+		contentRange := ""
+		if uploadType == "onedrive" {
+			contentRange = fmt.Sprintf("bytes %d-%d/%d", startByte, endByte, totalBytes)
 		}
-		request.ContentLength = partSize
-		request.Header.Set("Content-Type", contentType)
-		request.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", startByte, endByte, totalBytes))
 
 		startedAt := time.Now()
-		response, err := c.uploadClient.Do(request)
-		if err != nil {
-			return err
-		}
-
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		response.Body.Close()
-		if response.StatusCode >= http.StatusMultipleChoices {
-			message := strings.TrimSpace(string(body))
-			if message == "" {
-				message = response.Status
-			}
-			return fmt.Errorf("upload chunk failed: %s", message)
+		_, uploadErr := c.putFileSectionWithRetry(
+			ctx,
+			uploadType+" upload chunk",
+			uploadURL,
+			file,
+			startByte,
+			partSize,
+			"application/octet-stream",
+			contentRange,
+			func(statusCode int) bool {
+				return acceptedUploadStatus(statusCode, uploadType == "r2")
+			},
+		)
+		if uploadErr != nil {
+			return uploadErr
 		}
 
 		uploadedBytes += partSize
@@ -395,6 +441,261 @@ func (c *HTTPEmosClient) UploadFile(ctx context.Context, uploadURL, filePath str
 	}
 
 	return nil
+}
+
+func (c *HTTPEmosClient) UploadMultipartPart(ctx context.Context, part EmosMultipartPart, filePath string, startByte, partSize int64) (string, error) {
+	if part.Number <= 0 {
+		return "", errors.New("multipart part number must be positive")
+	}
+	if strings.TrimSpace(part.UploadURL) == "" {
+		return "", errors.New("multipart part upload url is required")
+	}
+	if strings.TrimSpace(filePath) == "" {
+		return "", errors.New("local file path is required")
+	}
+	if startByte < 0 || partSize <= 0 {
+		return "", errors.New("multipart part range is invalid")
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	return c.putFileSectionWithRetry(
+		ctx,
+		fmt.Sprintf("multipart part %d upload", part.Number),
+		part.UploadURL,
+		file,
+		startByte,
+		partSize,
+		"application/octet-stream",
+		"",
+		func(statusCode int) bool {
+			return statusCode == http.StatusOK ||
+				statusCode == http.StatusCreated ||
+				statusCode == http.StatusNoContent
+		},
+	)
+}
+
+func (c *HTTPEmosClient) putFileSectionWithRetry(
+	ctx context.Context,
+	operation, uploadURL string,
+	file *os.File,
+	startByte, partSize int64,
+	contentType, contentRange string,
+	isSuccess func(int) bool,
+) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= uploadRetryMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
+		request, err := http.NewRequestWithContext(
+			ctx,
+			http.MethodPut,
+			uploadURL,
+			io.NewSectionReader(file, startByte, partSize),
+		)
+		if err != nil {
+			return "", err
+		}
+		request.ContentLength = partSize
+		request.Header.Set("Content-Type", contentType)
+		if contentRange != "" {
+			request.Header.Set("Content-Range", contentRange)
+		}
+
+		response, err := c.uploadClient.Do(request)
+		if err != nil {
+			lastErr = err
+			if attempt < uploadRetryMaxAttempts {
+				if waitErr := waitUploadRetry(ctx, attempt); waitErr != nil {
+					return "", waitErr
+				}
+			}
+			continue
+		}
+
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 4096))
+		response.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			if attempt < uploadRetryMaxAttempts {
+				if waitErr := waitUploadRetry(ctx, attempt); waitErr != nil {
+					return "", waitErr
+				}
+			}
+			continue
+		}
+
+		if isSuccess(response.StatusCode) {
+			return strings.Trim(response.Header.Get("ETag"), `"`), nil
+		}
+
+		message := strings.TrimSpace(string(body))
+		if message == "" {
+			message = response.Status
+		}
+		lastErr = fmt.Errorf("%s failed: %s", operation, message)
+		if !retryableUploadStatus(response.StatusCode) || attempt == uploadRetryMaxAttempts {
+			return "", lastErr
+		}
+		if waitErr := waitUploadRetry(ctx, attempt); waitErr != nil {
+			return "", waitErr
+		}
+	}
+	return "", lastErr
+}
+
+func retryableUploadStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
+}
+
+func waitUploadRetry(ctx context.Context, attempt int) error {
+	delay := time.Duration(attempt) * uploadRetryBackoff
+	if delay > 2*time.Second {
+		delay = 2 * time.Second
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(delay):
+		return nil
+	}
+}
+
+func (c *HTTPEmosClient) RequestMultipartPresigns(ctx context.Context, access EmosAccess, fileID string, numChunks int) ([]EmosMultipartPart, error) {
+	if err := validateEmosAccess(access); err != nil {
+		return nil, err
+	}
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return nil, errors.New("file id is required for multipart presigns")
+	}
+	if numChunks <= 0 {
+		return nil, errors.New("multipart part count must be positive")
+	}
+
+	path := "/api/upload/multipart/" + url.PathEscape(fileID) + "/presign"
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		response, err := c.doAuthorizedJSON(ctx, access, http.MethodPost, path, map[string]int{"number": numChunks})
+		if err != nil {
+			lastErr = err
+			if attempt < 3 {
+				if waitErr := waitUploadRetry(ctx, attempt); waitErr != nil {
+					return nil, waitErr
+				}
+			}
+			continue
+		}
+
+		if response.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+			response.Body.Close()
+			lastErr = fmt.Errorf("emos multipart presign request failed: %s", strings.TrimSpace(string(body)))
+			if attempt < 3 {
+				if waitErr := waitUploadRetry(ctx, attempt); waitErr != nil {
+					return nil, waitErr
+				}
+			}
+			continue
+		}
+
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+		response.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			if attempt < 3 {
+				if waitErr := waitUploadRetry(ctx, attempt); waitErr != nil {
+					return nil, waitErr
+				}
+			}
+			continue
+		}
+
+		var parts []EmosMultipartPart
+		if err := json.Unmarshal(body, &parts); err != nil {
+			var wrapper struct {
+				Data []EmosMultipartPart `json:"data"`
+			}
+			if wrapErr := json.Unmarshal(body, &wrapper); wrapErr != nil {
+				return nil, errors.New("emos multipart presign response format unexpected")
+			}
+			parts = wrapper.Data
+		}
+		if len(parts) == 0 {
+			return nil, errors.New("emos multipart presign response is empty")
+		}
+		for _, part := range parts {
+			if part.Number <= 0 || strings.TrimSpace(part.UploadURL) == "" {
+				return nil, errors.New("emos multipart presign response contains invalid part")
+			}
+		}
+		return parts, nil
+	}
+	return nil, lastErr
+}
+
+func (c *HTTPEmosClient) CompleteMultipart(ctx context.Context, access EmosAccess, fileID string, parts []EmosMultipartPart) error {
+	if err := validateEmosAccess(access); err != nil {
+		return err
+	}
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return errors.New("file id is required for multipart complete")
+	}
+	if len(parts) == 0 {
+		return errors.New("multipart complete requires uploaded parts")
+	}
+
+	path := "/api/upload/multipart/" + url.PathEscape(fileID) + "/complete"
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		completeParts := make([]struct {
+			Number int    `json:"number"`
+			ETag   string `json:"etag"`
+		}, len(parts))
+		for i, part := range parts {
+			completeParts[i] = struct {
+				Number int    `json:"number"`
+				ETag   string `json:"etag"`
+			}{
+				Number: part.Number,
+				ETag:   part.ETag,
+			}
+		}
+		response, err := c.doAuthorizedJSON(ctx, access, http.MethodPost, path, map[string]any{"parts": completeParts})
+		if err != nil {
+			lastErr = err
+			if attempt < 3 {
+				if waitErr := waitUploadRetry(ctx, attempt); waitErr != nil {
+					return waitErr
+				}
+			}
+			continue
+		}
+
+		if response.StatusCode == http.StatusOK || response.StatusCode == http.StatusCreated {
+			response.Body.Close()
+			return nil
+		}
+
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		response.Body.Close()
+		lastErr = fmt.Errorf("emos multipart complete failed: %s", strings.TrimSpace(string(body)))
+		if !retryableUploadStatus(response.StatusCode) || attempt == 3 {
+			return lastErr
+		}
+		if waitErr := waitUploadRetry(ctx, attempt); waitErr != nil {
+			return waitErr
+		}
+	}
+	return lastErr
 }
 
 func (c *HTTPEmosClient) SaveVideo(ctx context.Context, access EmosAccess, req EmosSaveVideoRequest) (EmosSaveVideoResult, error) {
@@ -505,6 +806,51 @@ func defaultString(value string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func multipartSizeBounds(raw json.RawMessage) (int64, int64) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, 0
+	}
+
+	var number int64
+	if err := json.Unmarshal(raw, &number); err == nil && number > 0 {
+		return number, number
+	}
+
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		if number, err := strconv.ParseInt(strings.TrimSpace(text), 10, 64); err == nil && number > 0 {
+			return number, number
+		}
+	}
+
+	var bounds struct {
+		Min int64 `json:"min"`
+		Max int64 `json:"max"`
+	}
+	if err := json.Unmarshal(raw, &bounds); err == nil {
+		return maxInt64(0, bounds.Min), maxInt64(0, bounds.Max)
+	}
+	return 0, 0
+}
+
+func acceptedUploadStatus(statusCode int, r2 bool) bool {
+	switch statusCode {
+	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
+		return true
+	case http.StatusPermanentRedirect:
+		return !r2
+	default:
+		return false
+	}
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func minInt64(a, b int64) int64 {

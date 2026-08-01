@@ -118,6 +118,7 @@
                   <el-option label="默认" value="default" />
                   <el-option label="国际" value="global" />
                   <el-option label="国内" value="internal" />
+                  <el-option label="Zn存档服R2" value="zn_r2_upload" />
                 </el-select>
               </el-form-item>
             </el-col>
@@ -177,6 +178,10 @@
             </el-form-item>
             <el-form-item label="分片(MB)">
               <el-input-number v-model="configStore.config.worker.upload_chunk_size_mb" :min="1" :max="512" class="full-width" :controls="false" />
+            </el-form-item>
+            <el-form-item label="分片并发">
+              <el-input-number v-model="configStore.config.worker.upload_part_concurrency" :min="1" :max="10" class="full-width" :controls="false" />
+              <span style="font-size:11px;color:var(--text-subtle)">multipart 预签名分片并发上传</span>
             </el-form-item>
             <el-form-item label="重试间隔(s)">
               <el-input-number v-model="configStore.config.worker.save_retry_interval_seconds" :min="5" class="full-width" :controls="false" />

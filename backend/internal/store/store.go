@@ -163,6 +163,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   ul_storage TEXT NOT NULL DEFAULT '',
   ul_file_id TEXT NOT NULL DEFAULT '',
   ul_upload_url TEXT NOT NULL DEFAULT '',
+  ul_upload_type TEXT NOT NULL DEFAULT '',
+  ul_multipart_size_min INTEGER NOT NULL DEFAULT 0,
+  ul_multipart_size_max INTEGER NOT NULL DEFAULT 0,
+  ul_multipart_presigns TEXT NOT NULL DEFAULT '[]',
+  ul_multipart_parts TEXT NOT NULL DEFAULT '[]',
   ul_media_id TEXT NOT NULL DEFAULT '',
   ul_total_bytes INTEGER NOT NULL DEFAULT 0,
   ul_uploaded_bytes INTEGER NOT NULL DEFAULT 0,
@@ -195,7 +200,58 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task ON task_logs(task_id, time);
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
 	}
+	if err := s.migrateTaskColumns(); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s *FileStore) migrateTaskColumns() error {
+	columns := []struct {
+		name string
+		ddl  string
+	}{
+		{name: "ul_upload_type", ddl: "ALTER TABLE tasks ADD COLUMN ul_upload_type TEXT NOT NULL DEFAULT ''"},
+		{name: "ul_multipart_size_min", ddl: "ALTER TABLE tasks ADD COLUMN ul_multipart_size_min INTEGER NOT NULL DEFAULT 0"},
+		{name: "ul_multipart_size_max", ddl: "ALTER TABLE tasks ADD COLUMN ul_multipart_size_max INTEGER NOT NULL DEFAULT 0"},
+		{name: "ul_multipart_presigns", ddl: "ALTER TABLE tasks ADD COLUMN ul_multipart_presigns TEXT NOT NULL DEFAULT '[]'"},
+		{name: "ul_multipart_parts", ddl: "ALTER TABLE tasks ADD COLUMN ul_multipart_parts TEXT NOT NULL DEFAULT '[]'"},
+	}
+	for _, column := range columns {
+		exists, err := s.columnExists("tasks", column.name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := s.db.Exec(column.ddl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *FileStore) columnExists(table, column string) (bool, error) {
+	rows, err := s.db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notNull, pk int
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // ---------- config ----------
@@ -580,6 +636,14 @@ func (s *FileStore) upsertTask(task model.Task) error {
 	if task.Parsed.Episode != nil {
 		episode = *task.Parsed.Episode
 	}
+	presignsJSON, _ := json.Marshal(task.Upload.MultipartPresigns)
+	partsJSON, _ := json.Marshal(task.Upload.MultipartParts)
+	if len(presignsJSON) == 0 {
+		presignsJSON = []byte("[]")
+	}
+	if len(partsJSON) == 0 {
+		partsJSON = []byte("[]")
+	}
 
 	_, err := s.db.Exec(`
 INSERT INTO tasks(
@@ -588,7 +652,8 @@ INSERT INTO tasks(
   parsed_season, parsed_episode, parsed_is_special,
   target_tmdb_id, target_item_type, target_item_id, target_title,
   dl_aria2_gid, dl_save_dir, dl_local_path, dl_status, dl_total_bytes, dl_completed_bytes, dl_progress, dl_speed,
-  ul_storage, ul_file_id, ul_upload_url, ul_media_id, ul_total_bytes, ul_uploaded_bytes, ul_progress, ul_speed,
+  ul_storage, ul_file_id, ul_upload_url, ul_upload_type, ul_multipart_size_min, ul_multipart_size_max,
+  ul_multipart_presigns, ul_multipart_parts, ul_media_id, ul_total_bytes, ul_uploaded_bytes, ul_progress, ul_speed,
   ul_status, ul_save_retry_count, ul_last_save_error,
   result_error_message, result_error_stage, result_error_code, result_last_error_at,
   created_at, updated_at, finished_at
@@ -598,7 +663,7 @@ INSERT INTO tasks(
   ?,?,?,
   ?,?,?,?,
   ?,?,?,?,?,?,?,?,
-  ?,?,?,?,?,?,?,?,
+  ?,?,?,?,?,?,?,?,?,?,?,?,?,
   ?,?,?,
   ?,?,?,?,
   ?,?,?
@@ -615,6 +680,9 @@ ON CONFLICT(id) DO UPDATE SET
   dl_status=excluded.dl_status, dl_total_bytes=excluded.dl_total_bytes, dl_completed_bytes=excluded.dl_completed_bytes,
   dl_progress=excluded.dl_progress, dl_speed=excluded.dl_speed,
   ul_storage=excluded.ul_storage, ul_file_id=excluded.ul_file_id, ul_upload_url=excluded.ul_upload_url,
+  ul_upload_type=excluded.ul_upload_type, ul_multipart_size_min=excluded.ul_multipart_size_min,
+  ul_multipart_size_max=excluded.ul_multipart_size_max, ul_multipart_presigns=excluded.ul_multipart_presigns,
+  ul_multipart_parts=excluded.ul_multipart_parts,
   ul_media_id=excluded.ul_media_id, ul_total_bytes=excluded.ul_total_bytes, ul_uploaded_bytes=excluded.ul_uploaded_bytes,
   ul_progress=excluded.ul_progress, ul_speed=excluded.ul_speed, ul_status=excluded.ul_status,
   ul_save_retry_count=excluded.ul_save_retry_count, ul_last_save_error=excluded.ul_last_save_error,
@@ -627,7 +695,9 @@ ON CONFLICT(id) DO UPDATE SET
 		task.Target.TMDBID, task.Target.ItemType, task.Target.ItemID, task.Target.Title,
 		task.Download.Aria2GID, task.Download.SaveDir, task.Download.LocalPath, task.Download.Status,
 		task.Download.TotalBytes, task.Download.CompletedBytes, task.Download.Progress, task.Download.Speed,
-		task.Upload.Storage, task.Upload.FileID, task.Upload.UploadURL, task.Upload.MediaID,
+		task.Upload.Storage, task.Upload.FileID, task.Upload.UploadURL, task.Upload.UploadType,
+		task.Upload.MultipartSizeMin, task.Upload.MultipartSizeMax, string(presignsJSON), string(partsJSON),
+		task.Upload.MediaID,
 		task.Upload.TotalBytes, task.Upload.UploadedBytes, task.Upload.Progress, task.Upload.Speed,
 		task.Upload.Status, task.Upload.SaveRetryCount, task.Upload.LastSaveError,
 		task.Result.ErrorMessage, task.Result.ErrorStage, task.Result.ErrorCode, lastErr,
@@ -650,7 +720,8 @@ const taskColumns = `
   parsed_season, parsed_episode, parsed_is_special,
   target_tmdb_id, target_item_type, target_item_id, target_title,
   dl_aria2_gid, dl_save_dir, dl_local_path, dl_status, dl_total_bytes, dl_completed_bytes, dl_progress, dl_speed,
-  ul_storage, ul_file_id, ul_upload_url, ul_media_id, ul_total_bytes, ul_uploaded_bytes, ul_progress, ul_speed,
+  ul_storage, ul_file_id, ul_upload_url, ul_upload_type, ul_multipart_size_min, ul_multipart_size_max,
+  ul_multipart_presigns, ul_multipart_parts, ul_media_id, ul_total_bytes, ul_uploaded_bytes, ul_progress, ul_speed,
   ul_status, ul_save_retry_count, ul_last_save_error,
   result_error_message, result_error_stage, result_error_code, result_last_error_at,
   created_at, updated_at, finished_at`
@@ -666,6 +737,7 @@ func scanTask(row scannable) (model.Task, error) {
 	var paused, special int
 	var season, episode sql.NullInt64
 	var lastErr, finished sql.NullString
+	var presignsJSON, partsJSON string
 
 	err := row.Scan(
 		&t.ID, &t.ScanSessionID, &t.ScanItemID, &status, &paused, &t.RetryCount,
@@ -674,7 +746,9 @@ func scanTask(row scannable) (model.Task, error) {
 		&t.Target.TMDBID, &t.Target.ItemType, &t.Target.ItemID, &t.Target.Title,
 		&t.Download.Aria2GID, &t.Download.SaveDir, &t.Download.LocalPath, &t.Download.Status,
 		&t.Download.TotalBytes, &t.Download.CompletedBytes, &t.Download.Progress, &t.Download.Speed,
-		&t.Upload.Storage, &t.Upload.FileID, &t.Upload.UploadURL, &t.Upload.MediaID,
+		&t.Upload.Storage, &t.Upload.FileID, &t.Upload.UploadURL, &t.Upload.UploadType,
+		&t.Upload.MultipartSizeMin, &t.Upload.MultipartSizeMax, &presignsJSON, &partsJSON,
+		&t.Upload.MediaID,
 		&t.Upload.TotalBytes, &t.Upload.UploadedBytes, &t.Upload.Progress, &t.Upload.Speed,
 		&t.Upload.Status, &t.Upload.SaveRetryCount, &t.Upload.LastSaveError,
 		&t.Result.ErrorMessage, &t.Result.ErrorStage, &t.Result.ErrorCode, &lastErr,
@@ -693,6 +767,12 @@ func scanTask(row scannable) (model.Task, error) {
 	if episode.Valid {
 		v := int(episode.Int64)
 		t.Parsed.Episode = &v
+	}
+	if err := json.Unmarshal([]byte(presignsJSON), &t.Upload.MultipartPresigns); err != nil {
+		return model.Task{}, fmt.Errorf("scan multipart presigns: %w", err)
+	}
+	if err := json.Unmarshal([]byte(partsJSON), &t.Upload.MultipartParts); err != nil {
+		return model.Task{}, fmt.Errorf("scan multipart parts: %w", err)
 	}
 	t.CreatedAt = parseTime(created)
 	t.UpdatedAt = parseTime(updated)
@@ -751,6 +831,14 @@ func upsertTaskTx(tx *sql.Tx, task model.Task) error {
 	if task.Parsed.Episode != nil {
 		episode = *task.Parsed.Episode
 	}
+	presignsJSON, _ := json.Marshal(task.Upload.MultipartPresigns)
+	partsJSON, _ := json.Marshal(task.Upload.MultipartParts)
+	if len(presignsJSON) == 0 {
+		presignsJSON = []byte("[]")
+	}
+	if len(partsJSON) == 0 {
+		partsJSON = []byte("[]")
+	}
 
 	_, err := tx.Exec(`
 INSERT INTO tasks(
@@ -759,12 +847,21 @@ INSERT INTO tasks(
   parsed_season, parsed_episode, parsed_is_special,
   target_tmdb_id, target_item_type, target_item_id, target_title,
   dl_aria2_gid, dl_save_dir, dl_local_path, dl_status, dl_total_bytes, dl_completed_bytes, dl_progress, dl_speed,
-  ul_storage, ul_file_id, ul_upload_url, ul_media_id, ul_total_bytes, ul_uploaded_bytes, ul_progress, ul_speed,
+  ul_storage, ul_file_id, ul_upload_url, ul_upload_type, ul_multipart_size_min, ul_multipart_size_max,
+  ul_multipart_presigns, ul_multipart_parts, ul_media_id, ul_total_bytes, ul_uploaded_bytes, ul_progress, ul_speed,
   ul_status, ul_save_retry_count, ul_last_save_error,
   result_error_message, result_error_stage, result_error_code, result_last_error_at,
   created_at, updated_at, finished_at
 ) VALUES (
-  ?,?,?,?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?, ?,?,?,?, ?,?,?
+  ?,?,?,?,?,?,
+  ?,?,?,?,?,
+  ?,?,?,
+  ?,?,?,?,
+  ?,?,?,?,?,?,?,?,
+  ?,?,?,?,?,?,?,?,?,?,?,?,?,
+  ?,?,?,
+  ?,?,?,?,
+  ?,?,?
 )
 ON CONFLICT(id) DO UPDATE SET
   scan_session_id=excluded.scan_session_id, scan_item_id=excluded.scan_item_id, status=excluded.status,
@@ -778,6 +875,9 @@ ON CONFLICT(id) DO UPDATE SET
   dl_status=excluded.dl_status, dl_total_bytes=excluded.dl_total_bytes, dl_completed_bytes=excluded.dl_completed_bytes,
   dl_progress=excluded.dl_progress, dl_speed=excluded.dl_speed,
   ul_storage=excluded.ul_storage, ul_file_id=excluded.ul_file_id, ul_upload_url=excluded.ul_upload_url,
+  ul_upload_type=excluded.ul_upload_type, ul_multipart_size_min=excluded.ul_multipart_size_min,
+  ul_multipart_size_max=excluded.ul_multipart_size_max, ul_multipart_presigns=excluded.ul_multipart_presigns,
+  ul_multipart_parts=excluded.ul_multipart_parts,
   ul_media_id=excluded.ul_media_id, ul_total_bytes=excluded.ul_total_bytes, ul_uploaded_bytes=excluded.ul_uploaded_bytes,
   ul_progress=excluded.ul_progress, ul_speed=excluded.ul_speed, ul_status=excluded.ul_status,
   ul_save_retry_count=excluded.ul_save_retry_count, ul_last_save_error=excluded.ul_last_save_error,
@@ -790,7 +890,9 @@ ON CONFLICT(id) DO UPDATE SET
 		task.Target.TMDBID, task.Target.ItemType, task.Target.ItemID, task.Target.Title,
 		task.Download.Aria2GID, task.Download.SaveDir, task.Download.LocalPath, task.Download.Status,
 		task.Download.TotalBytes, task.Download.CompletedBytes, task.Download.Progress, task.Download.Speed,
-		task.Upload.Storage, task.Upload.FileID, task.Upload.UploadURL, task.Upload.MediaID,
+		task.Upload.Storage, task.Upload.FileID, task.Upload.UploadURL, task.Upload.UploadType,
+		task.Upload.MultipartSizeMin, task.Upload.MultipartSizeMax, string(presignsJSON), string(partsJSON),
+		task.Upload.MediaID,
 		task.Upload.TotalBytes, task.Upload.UploadedBytes, task.Upload.Progress, task.Upload.Speed,
 		task.Upload.Status, task.Upload.SaveRetryCount, task.Upload.LastSaveError,
 		task.Result.ErrorMessage, task.Result.ErrorStage, task.Result.ErrorCode, lastErr,

@@ -55,6 +55,7 @@ type WorkerConfig struct {
 	MaxConcurrency           int    `json:"max_concurrency"`
 	DownloadThreads          int    `json:"download_threads"`
 	UploadChunkSizeMB        int    `json:"upload_chunk_size_mb"`
+	UploadPartConcurrency    int    `json:"upload_part_concurrency"`
 	SaveRetryIntervalSeconds int    `json:"save_retry_interval_seconds"`
 	SaveRetryMaxAttempts     int    `json:"save_retry_max_attempts"`
 	TMDBAPIKey               string `json:"tmdb_api_key"`
@@ -88,6 +89,7 @@ func DefaultAppConfig() AppConfig {
 			MaxConcurrency:           1,
 			DownloadThreads:          1,
 			UploadChunkSizeMB:        8,
+			UploadPartConcurrency:    3,
 			SaveRetryIntervalSeconds: 25,
 			SaveRetryMaxAttempts:     8,
 			ProxyBackends:            "quark,夸克",
@@ -152,6 +154,12 @@ func NormalizeAppConfig(cfg AppConfig) AppConfig {
 	}
 	if cfg.Worker.DownloadThreads <= 0 {
 		cfg.Worker.DownloadThreads = defaults.Worker.DownloadThreads
+	}
+	if cfg.Worker.UploadPartConcurrency <= 0 {
+		cfg.Worker.UploadPartConcurrency = defaults.Worker.UploadPartConcurrency
+	}
+	if cfg.Worker.UploadPartConcurrency > 10 {
+		cfg.Worker.UploadPartConcurrency = 10
 	}
 
 	return cfg

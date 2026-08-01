@@ -693,13 +693,22 @@ func (s *TaskService) PrepareTaskUpload(_ context.Context, taskID string, totalB
 		task.FinishedAt = nil
 		task.Upload.Status = "uploading"
 		task.Upload.MediaID = ""
-		task.Upload.FileID = ""
-		task.Upload.UploadURL = ""
-		task.Upload.UploadedBytes = 0
-		task.Upload.Progress = 0
 		task.Upload.Speed = 0
 		task.Upload.SaveRetryCount = 0
 		task.Upload.LastSaveError = ""
+		if !hasResumableUploadContext(*task) {
+			task.Upload.FileID = ""
+			task.Upload.UploadURL = ""
+			task.Upload.UploadedBytes = 0
+			task.Upload.Progress = 0
+			task.Upload.UploadType = ""
+			task.Upload.MultipartSizeMin = 0
+			task.Upload.MultipartSizeMax = 0
+			task.Upload.MultipartPresigns = nil
+			task.Upload.MultipartParts = nil
+		} else {
+			task.Upload.Progress = 0
+		}
 		task.Upload.TotalBytes = maxInt64(maxInt64(task.Source.FileSize, task.Download.TotalBytes), totalBytes)
 		return nil
 	})
@@ -719,8 +728,16 @@ func (s *TaskService) SetUploadContext(_ context.Context, taskID string, result 
 			return newTaskServiceError(http.StatusBadRequest, fmt.Sprintf("task status %q cannot attach upload context", task.Status))
 		}
 		task.Upload.Storage = firstNonEmptyTaskString(result.Storage, task.Upload.Storage, "default")
+		previousFileID := task.Upload.FileID
 		task.Upload.FileID = strings.TrimSpace(result.FileID)
 		task.Upload.UploadURL = strings.TrimSpace(result.UploadURL)
+		task.Upload.UploadType = firstNonEmptyTaskString(result.UploadType, task.Upload.UploadType, "onedrive")
+		task.Upload.MultipartSizeMin = maxInt64(task.Upload.MultipartSizeMin, result.MultipartSizeMin)
+		task.Upload.MultipartSizeMax = maxInt64(task.Upload.MultipartSizeMax, result.MultipartSizeMax)
+		if len(task.Upload.MultipartPresigns) == 0 || previousFileID != task.Upload.FileID {
+			task.Upload.MultipartPresigns = nil
+			task.Upload.MultipartParts = nil
+		}
 		task.Upload.Status = "uploading"
 		task.UpdatedAt = now
 		return nil
@@ -732,6 +749,59 @@ func (s *TaskService) SetUploadContext(_ context.Context, taskID string, result 
 		return model.Task{}, err
 	}
 	return task, nil
+}
+
+func (s *TaskService) SetMultipartPresigns(_ context.Context, taskID string, presigns []model.UploadMultipartPart) (model.Task, error) {
+	now := time.Now()
+	task, err := s.store.UpdateTask(taskID, func(task *model.Task) error {
+		if task.Status != model.TaskStatusUploading {
+			return newTaskServiceError(http.StatusBadRequest, fmt.Sprintf("task status %q cannot attach multipart presigns", task.Status))
+		}
+		if task.Upload.UploadType == "" {
+			task.Upload.UploadType = "multipart"
+		}
+		task.Upload.MultipartPresigns = presigns
+		task.Upload.Status = "uploading"
+		task.UpdatedAt = now
+		return nil
+	})
+	if err != nil {
+		return model.Task{}, err
+	}
+	if err := s.appendTaskLog(task.ID, "info", fmt.Sprintf("multipart presigns acquired: %d parts", len(presigns))); err != nil {
+		return model.Task{}, err
+	}
+	return task, nil
+}
+
+func (s *TaskService) RecordMultipartPart(_ context.Context, taskID string, part model.UploadMultipartPart, progress client.EmosUploadProgress) (model.Task, error) {
+	now := time.Now()
+	return s.store.UpdateTask(taskID, func(task *model.Task) error {
+		if task.Status != model.TaskStatusUploading {
+			return newTaskServiceError(http.StatusBadRequest, fmt.Sprintf("task status %q cannot record multipart part", task.Status))
+		}
+		parts := make([]model.UploadMultipartPart, 0, len(task.Upload.MultipartParts)+1)
+		replaced := false
+		for _, existing := range task.Upload.MultipartParts {
+			if existing.Number == part.Number {
+				parts = append(parts, part)
+				replaced = true
+				continue
+			}
+			parts = append(parts, existing)
+		}
+		if !replaced {
+			parts = append(parts, part)
+		}
+		task.Upload.MultipartParts = parts
+		task.Upload.Status = "uploading"
+		task.Upload.TotalBytes = maxInt64(task.Upload.TotalBytes, progress.TotalBytes)
+		task.Upload.UploadedBytes = maxInt64(task.Upload.UploadedBytes, progress.UploadedBytes)
+		task.Upload.Progress = calculateProgress(task.Upload.UploadedBytes, task.Upload.TotalBytes)
+		task.Upload.Speed = progress.Speed
+		task.UpdatedAt = now
+		return nil
+	})
 }
 
 func (s *TaskService) SyncUploadProgress(_ context.Context, taskID string, progress client.EmosUploadProgress) (model.Task, error) {
@@ -888,7 +958,7 @@ func (s *TaskService) RecoverInterruptedUpload(ctx context.Context, taskID strin
 	if ok, _ := hasReusableLocalFile(task); !ok {
 		return s.MarkUploadFailedWithDetails(ctx, taskID, "recovery", "local_file_missing", "local file missing after interrupted upload")
 	}
-	// Preserve upload context (FileID, UploadURL, UploadedBytes) for resumable upload
+	// Preserve resumable upload context (FileID, UploadURL, multipart presigns/parts) for retry
 	// Set status to upload_pending so the scheduler will retry with resume
 	now := time.Now()
 	task, err = s.store.UpdateTask(taskID, func(task *model.Task) error {
@@ -1006,7 +1076,7 @@ func (s *TaskService) RetryTask(ctx context.Context, id string) (model.Task, err
 		}
 
 		// Preserve upload context for resumable uploads when local file is reusable
-		if nextStatus == model.TaskStatusUploadPending && task.Upload.FileID != "" && task.Upload.UploadURL != "" {
+		if nextStatus == model.TaskStatusUploadPending && hasResumableUploadContext(*task) {
 			task.Upload.MediaID = ""
 			task.Upload.Progress = 0
 			task.Upload.Speed = 0
@@ -1016,6 +1086,11 @@ func (s *TaskService) RetryTask(ctx context.Context, id string) (model.Task, err
 		} else {
 			task.Upload.FileID = ""
 			task.Upload.UploadURL = ""
+			task.Upload.UploadType = ""
+			task.Upload.MultipartSizeMin = 0
+			task.Upload.MultipartSizeMax = 0
+			task.Upload.MultipartPresigns = nil
+			task.Upload.MultipartParts = nil
 			task.Upload.MediaID = ""
 			task.Upload.UploadedBytes = 0
 			task.Upload.Progress = 0
@@ -1425,6 +1500,13 @@ func hasReusableLocalFile(task model.Task) (bool, int64) {
 	}
 
 	return true, info.Size()
+}
+
+func hasResumableUploadContext(task model.Task) bool {
+	if strings.TrimSpace(task.Upload.FileID) == "" {
+		return false
+	}
+	return strings.TrimSpace(task.Upload.UploadURL) != "" || len(task.Upload.MultipartPresigns) > 0
 }
 
 func maxInt64(a, b int64) int64 {

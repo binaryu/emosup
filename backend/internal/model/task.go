@@ -68,17 +68,28 @@ type TaskDownload struct {
 }
 
 type TaskUpload struct {
-	Storage        string  `json:"storage"`
-	FileID         string  `json:"file_id"`
-	UploadURL      string  `json:"upload_url"`
-	MediaID        string  `json:"media_id"`
-	TotalBytes     int64   `json:"total_bytes"`
-	UploadedBytes  int64   `json:"uploaded_bytes"`
-	Progress       float64 `json:"progress"`
-	Speed          int64   `json:"speed"`
-	Status         string  `json:"status"`
-	SaveRetryCount int     `json:"save_retry_count"`
-	LastSaveError  string  `json:"last_save_error"`
+	Storage           string                `json:"storage"`
+	FileID            string                `json:"file_id"`
+	UploadURL         string                `json:"upload_url"`
+	UploadType        string                `json:"upload_type"`
+	MultipartSizeMin  int64                 `json:"multipart_size_min"`
+	MultipartSizeMax  int64                 `json:"multipart_size_max"`
+	MultipartPresigns []UploadMultipartPart `json:"multipart_presigns,omitempty"`
+	MultipartParts    []UploadMultipartPart `json:"multipart_parts,omitempty"`
+	MediaID           string                `json:"media_id"`
+	TotalBytes        int64                 `json:"total_bytes"`
+	UploadedBytes     int64                 `json:"uploaded_bytes"`
+	Progress          float64               `json:"progress"`
+	Speed             int64                 `json:"speed"`
+	Status            string                `json:"status"`
+	SaveRetryCount    int                   `json:"save_retry_count"`
+	LastSaveError     string                `json:"last_save_error"`
+}
+
+type UploadMultipartPart struct {
+	Number    int    `json:"number"`
+	UploadURL string `json:"upload_url"`
+	ETag      string `json:"etag,omitempty"`
 }
 
 type TaskResult struct {

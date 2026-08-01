@@ -40,6 +40,7 @@ const defaultConfig: AppConfig = {
     max_concurrency: 1,
     download_threads: 1,
     upload_chunk_size_mb: 8,
+    upload_part_concurrency: 3,
     save_retry_interval_seconds: 25,
     save_retry_max_attempts: 8,
     tmdb_api_key: '',

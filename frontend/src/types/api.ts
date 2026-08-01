@@ -66,6 +66,7 @@ export interface WorkerConfig {
   max_concurrency: number
   download_threads: number
   upload_chunk_size_mb: number
+  upload_part_concurrency: number
   save_retry_interval_seconds: number
   save_retry_max_attempts: number
   tmdb_api_key: string

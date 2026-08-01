@@ -7,7 +7,8 @@ OpenList / 本地文件 → Emos 异步转存面板。
 - **多源扫描** — OpenList 网盘与本机目录，递归子目录、多文件勾选
 - **TMDB 匹配** — 搜片名取 ID，进目录自动猜剧名
 - **内建下载器** — 多线程分段、断点续传、自动重试
-- **文件名解析** — `S01E02`、`[01]`、`EP03`、`第04集`、`01.mp4`、`第一季` 等
+- **Emos 上传** — onedrive/r2 分片、multipart 预签名分片、断点续传
+- **文件名解析** — `S01E02`、`[Show][25][BIG5][1080P]`、`入青云01.mp4`、`EP03`、`第04集`、`Season II` 等
 - **实时进度** — SSE 推送速度/进度
 - **SQLite 存储** — 任务进度高频写入不再卡在 JSON 文件上
 - **一键二进制部署** — 安装 / 更新 / 卸载脚本 + systemd
@@ -27,6 +28,9 @@ curl -fsSL https://raw.githubusercontent.com/binaryu/emosup/main/scripts/install
 # 安装指定版本
 curl -fsSL https://raw.githubusercontent.com/binaryu/emosup/main/scripts/install.sh \
   | sudo bash -s -- install --version v1.0.0
+
+# 用本地打包产物安装（适合先部署测试版，不依赖已发布的 Release）
+sudo bash scripts/install.sh install --bundle /path/to/emosup-linux-amd64.tar.gz
 
 # 装到自定义目录
 sudo bash install.sh install --dir /home/user/emosup --port 8080

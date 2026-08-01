@@ -12,6 +12,7 @@ INSTALL_DIR="${EMOSUP_INSTALL_DIR:-/opt/emosup}"
 VERSION="${EMOSUP_VERSION:-}"
 PORT="${EMOSUP_PORT:-}"
 PORT_FROM_CLI=0
+BUNDLE="${EMOSUP_BUNDLE:-}"
 SERVICE_NAME="emosup"
 KEEP_DATA=0
 NONINTERACTIVE="${EMOSUP_NONINTERACTIVE:-0}"
@@ -61,6 +62,14 @@ detect_os() {
 }
 
 resolve_version() {
+  if [[ -n "$BUNDLE" ]]; then
+    if [[ -n "$VERSION" ]]; then
+      echo "$VERSION"
+    else
+      echo "local"
+    fi
+    return
+  fi
   if [[ -n "$VERSION" ]]; then
     echo "$VERSION"
     return
@@ -79,21 +88,27 @@ resolve_version() {
 download_and_extract() {
   local version="$1" arch="$2" dest="$3"
   local asset="emosup-linux-${arch}.tar.gz"
-  local url="${GITHUB_RELEASES}/download/${version}/${asset}"
   local tmp
   tmp="$(mktemp -d)"
 
-  log "下载 ${url}"
-  if ! http_get "$url" "${tmp}/${asset}"; then
-    rm -rf "$tmp"
-    die "下载失败。请确认 Release ${version} 已发布且包含 ${asset}"
-  fi
-
-  if http_get "${url}.sha256" "${tmp}/${asset}.sha256" 2>/dev/null; then
-    log "校验 SHA256"
-    (cd "$tmp" && sha256sum -c "${asset}.sha256") || { rm -rf "$tmp"; die "校验和失败"; }
+  if [[ -n "$BUNDLE" ]]; then
+    [[ -f "$BUNDLE" ]] || { rm -rf "$tmp"; die "找不到 bundle: ${BUNDLE}"; }
+    log "使用本地 bundle ${BUNDLE}"
+    cp -a "$BUNDLE" "${tmp}/${asset}"
   else
-    warn "未找到 .sha256，跳过校验"
+    local url="${GITHUB_RELEASES}/download/${version}/${asset}"
+    log "下载 ${url}"
+    if ! http_get "$url" "${tmp}/${asset}"; then
+      rm -rf "$tmp"
+      die "下载失败。请确认 Release ${version} 已发布且包含 ${asset}"
+    fi
+
+    if http_get "${url}.sha256" "${tmp}/${asset}.sha256" 2>/dev/null; then
+      log "校验 SHA256"
+      (cd "$tmp" && sha256sum -c "${asset}.sha256") || { rm -rf "$tmp"; die "校验和失败"; }
+    else
+      warn "未找到 .sha256，跳过校验"
+    fi
   fi
 
   tar -xzf "${tmp}/${asset}" -C "$tmp"
@@ -368,7 +383,8 @@ emosup 安装脚本
 
 用法:
   $0 install   [--dir DIR] [--version TAG] [--port PORT]
-  $0 update    [--dir DIR] [--version TAG] [--port PORT]
+  $0 install   [--bundle /path/to/emosup-linux-amd64.tar.gz] [--dir DIR] [--port PORT]
+  $0 update    [--dir DIR] [--version TAG] [--port PORT] [--bundle FILE]
   $0 uninstall [--dir DIR] [--keep-data]
   $0 status    [--dir DIR]
   $0 restart
@@ -397,6 +413,7 @@ main() {
       --dir)      INSTALL_DIR="$2"; shift 2 ;;
       --version)  VERSION="$2"; shift 2 ;;
       --port)     PORT="$2"; PORT_FROM_CLI=1; shift 2 ;;
+      --bundle)   BUNDLE="$2"; shift 2 ;;
       --keep-data) KEEP_DATA=1; shift ;;
       -y|--yes)   NONINTERACTIVE=1; shift ;;
       -h|--help)  usage; exit 0 ;;

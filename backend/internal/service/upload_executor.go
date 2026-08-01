@@ -7,15 +7,19 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"emosup/backend/internal/client"
-	"emosup/backend/internal/model"
 	"emosup/backend/internal/eventbus"
+	"emosup/backend/internal/model"
 )
 
 var errTaskCanceled = errors.New("task canceled")
+
+const maxMultipartUploadWorkers = 10
 
 type UploadExecutor struct {
 	taskService *TaskService
@@ -66,7 +70,7 @@ func (e *UploadExecutor) Execute(ctx context.Context, taskID string) error {
 	switch task.Status {
 	case model.TaskStatusUploadPending:
 		// For retried uploads with existing upload context, resume from where we left off
-		task, err = e.uploadFile(ctx, task, access, chunkSize)
+		task, err = e.uploadFile(ctx, task, access, chunkSize, clampUploadPartConcurrency(cfg.Worker.UploadPartConcurrency))
 		if err != nil {
 			if errors.Is(err, errTaskCanceled) {
 				return nil
@@ -81,7 +85,7 @@ func (e *UploadExecutor) Execute(ctx context.Context, taskID string) error {
 	return e.saveWithRetry(ctx, task, access, saveRetryInterval, saveRetryMaxAttempts)
 }
 
-func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access client.EmosAccess, chunkSize int64) (model.Task, error) {
+func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access client.EmosAccess, chunkSize int64, maxWorkers int) (model.Task, error) {
 	localPath := toContainerPath(strings.TrimSpace(task.Download.LocalPath))
 	if localPath == "" {
 		_, err := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "local_file_missing", "local file path is empty")
@@ -98,7 +102,7 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 		return model.Task{}, firstNonNil(markErr, err)
 	}
 
-	resuming := task.Upload.FileID != "" && task.Upload.UploadURL != ""
+	resuming := hasResumableUploadContext(task)
 	if !resuming {
 		task, err = e.taskService.PrepareTaskUpload(ctx, task.ID, info.Size())
 		if err != nil {
@@ -129,50 +133,53 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 		}
 	}
 
-	// Resume from existing progress if we have upload context and bytes already sent
-	effectiveUploadURL := task.Upload.UploadURL
-	offset := task.Upload.UploadedBytes
-	if offset > 0 && offset < info.Size() {
-		log.Printf("upload resuming: task=%s from byte %d/%d", task.ID, offset, info.Size())
-	}
-
-	lastSSE := time.Time{}
-	err = e.emosClient.UploadFile(ctx, effectiveUploadURL, localPath, chunkSize, offset, func(progress client.EmosUploadProgress) error {
-		if canceled, cancelErr := e.taskService.IsTaskCanceled(ctx, task.ID); cancelErr != nil {
-			return cancelErr
-		} else if canceled {
-			return errTaskCanceled
+	uploadType := strings.ToLower(strings.TrimSpace(task.Upload.UploadType))
+	switch uploadType {
+	case "", "onedrive", "r2":
+		if uploadType == "" {
+			uploadType = "onedrive"
+		}
+		// Resume from existing progress if we have upload context and bytes already sent
+		effectiveUploadURL := task.Upload.UploadURL
+		offset := task.Upload.UploadedBytes
+		if offset > 0 && offset < info.Size() {
+			log.Printf("upload resuming: task=%s from byte %d/%d", task.ID, offset, info.Size())
 		}
 
-		updated, syncErr := e.taskService.SyncUploadProgress(ctx, task.ID, progress)
-		if syncErr != nil {
-			return syncErr
-		}
-
-		// Push live progress over SSE (throttle to ~1/s; always emit final chunk).
-		if e.eventBus != nil {
-			now := time.Now()
-			done := progress.TotalBytes > 0 && progress.UploadedBytes >= progress.TotalBytes
-			if done || now.Sub(lastSSE) >= time.Second {
-				lastSSE = now
-				e.eventBus.Publish(eventbus.TaskEvent{
-					TaskID:  updated.ID,
-					Status:  "uploading",
-					UlProg:  updated.Upload.Progress,
-					UlSpeed: updated.Upload.Speed,
-					UlDone:  updated.Upload.UploadedBytes,
-					UlTotal: updated.Upload.TotalBytes,
-				})
+		lastSSE := time.Time{}
+		err = e.emosClient.UploadFile(ctx, uploadType, effectiveUploadURL, localPath, chunkSize, offset, func(progress client.EmosUploadProgress) error {
+			if canceled, cancelErr := e.taskService.IsTaskCanceled(ctx, task.ID); cancelErr != nil {
+				return cancelErr
+			} else if canceled {
+				return errTaskCanceled
 			}
+
+			updated, syncErr := e.taskService.SyncUploadProgress(ctx, task.ID, progress)
+			if syncErr != nil {
+				return syncErr
+			}
+
+			e.emitUploadEvent(updated, &lastSSE, progress.TotalBytes > 0 && progress.UploadedBytes >= progress.TotalBytes)
+			return nil
+		})
+		if err != nil {
+			if errors.Is(err, errTaskCanceled) {
+				return task, errTaskCanceled
+			}
+			_, markErr := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "upload_put_failed", "upload put failed: "+err.Error())
+			return model.Task{}, firstNonNil(markErr, err)
 		}
-		return nil
-	})
-	if err != nil {
-		if errors.Is(err, errTaskCanceled) {
-			return task, errTaskCanceled
+	case "multipart":
+		if err := e.uploadMultipart(ctx, task, access, chunkSize, info.Size(), localPath, maxWorkers); err != nil {
+			if errors.Is(err, errTaskCanceled) {
+				return task, errTaskCanceled
+			}
+			_, markErr := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "multipart_upload_failed", "multipart upload failed: "+err.Error())
+			return model.Task{}, firstNonNil(markErr, err)
 		}
-		_, markErr := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "upload_put_failed", "upload put failed: "+err.Error())
-		return model.Task{}, firstNonNil(markErr, err)
+	default:
+		_, markErr := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "unsupported_upload_type", "unsupported emos upload type: "+uploadType)
+		return model.Task{}, firstNonNil(markErr, errors.New("unsupported emos upload type: "+uploadType))
 	}
 
 	task, err = e.taskService.MarkUploadSaving(ctx, task.ID)
@@ -180,6 +187,243 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 		return model.Task{}, err
 	}
 	return task, nil
+}
+
+func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, access client.EmosAccess, configuredChunkSize, fileSize int64, localPath string, maxWorkers int) error {
+	chunkSize := configuredChunkSize
+	if task.Upload.MultipartSizeMin > 0 || task.Upload.MultipartSizeMax > 0 {
+		if task.Upload.MultipartSizeMin > 0 && chunkSize < task.Upload.MultipartSizeMin {
+			chunkSize = task.Upload.MultipartSizeMin
+		}
+		if task.Upload.MultipartSizeMax > 0 && chunkSize > task.Upload.MultipartSizeMax {
+			chunkSize = task.Upload.MultipartSizeMax
+		}
+	}
+	if chunkSize <= 0 {
+		return errors.New("multipart chunk size must be positive")
+	}
+
+	numChunks := int((fileSize + chunkSize - 1) / chunkSize)
+	presigns := task.Upload.MultipartPresigns
+	if len(presigns) == 0 {
+		clientPresigns, err := e.emosClient.RequestMultipartPresigns(ctx, access, task.Upload.FileID, numChunks)
+		if err != nil {
+			return err
+		}
+		presigns = make([]model.UploadMultipartPart, 0, len(clientPresigns))
+		for _, part := range clientPresigns {
+			presigns = append(presigns, model.UploadMultipartPart{
+				Number:    part.Number,
+				UploadURL: part.UploadURL,
+				ETag:      part.ETag,
+			})
+		}
+		updated, err := e.taskService.SetMultipartPresigns(ctx, task.ID, presigns)
+		if err != nil {
+			return err
+		}
+		task = updated
+		presigns = task.Upload.MultipartPresigns
+	}
+
+	if len(presigns) != numChunks {
+		return errors.New("multipart presign count does not match file chunk count")
+	}
+
+	sort.Slice(presigns, func(i, j int) bool {
+		return presigns[i].Number < presigns[j].Number
+	})
+
+	uploaded := make(map[int]model.UploadMultipartPart, len(task.Upload.MultipartParts))
+	for _, part := range task.Upload.MultipartParts {
+		if part.Number > 0 {
+			uploaded[part.Number] = part
+		}
+	}
+
+	jobs := make([]int, 0, len(presigns))
+	for idx, presign := range presigns {
+		startByte := int64(presign.Number-1) * chunkSize
+		if startByte >= fileSize {
+			return errors.New("multipart presign is outside local file range")
+		}
+
+		if part, ok := uploaded[presign.Number]; ok && strings.TrimSpace(part.ETag) != "" {
+			continue
+		}
+		jobs = append(jobs, idx)
+	}
+
+	completedBytes := int64(0)
+	for _, presign := range presigns {
+		if part, ok := uploaded[presign.Number]; ok && strings.TrimSpace(part.ETag) != "" {
+			completedBytes += partSizeForMultipartPresign(presign.Number, chunkSize, fileSize)
+		}
+	}
+
+	if len(jobs) > 0 {
+		workerCount := clampUploadPartConcurrency(maxWorkers)
+		if workerCount > len(jobs) {
+			workerCount = len(jobs)
+		}
+
+		pending := make(chan int, len(jobs))
+		for _, idx := range jobs {
+			pending <- idx
+		}
+		close(pending)
+
+		workerCtx, stopWorkers := context.WithCancel(ctx)
+		defer stopWorkers()
+
+		lastSSE := time.Time{}
+		var wg sync.WaitGroup
+		var stateMu sync.Mutex
+		var eventMu sync.Mutex
+		var firstErr error
+
+		recordWorkerError := func(workerErr error) {
+			stateMu.Lock()
+			defer stateMu.Unlock()
+			if firstErr != nil {
+				return
+			}
+			if ctx.Err() != nil {
+				firstErr = errTaskCanceled
+			} else {
+				firstErr = workerErr
+			}
+			stopWorkers()
+		}
+
+		worker := func() {
+			defer wg.Done()
+			for idx := range pending {
+				if workerCtx.Err() != nil {
+					return
+				}
+
+				presign := presigns[idx]
+				startByte := int64(presign.Number-1) * chunkSize
+				partSize := partSizeForMultipartPresign(presign.Number, chunkSize, fileSize)
+
+				if canceled, cancelErr := e.taskService.IsTaskCanceled(workerCtx, task.ID); cancelErr != nil {
+					recordWorkerError(cancelErr)
+					return
+				} else if canceled {
+					recordWorkerError(errTaskCanceled)
+					return
+				}
+
+				startedAt := time.Now()
+				etag, uploadErr := e.emosClient.UploadMultipartPart(workerCtx, client.EmosMultipartPart{
+					Number:    presign.Number,
+					UploadURL: presign.UploadURL,
+				}, localPath, startByte, partSize)
+				if uploadErr != nil {
+					recordWorkerError(uploadErr)
+					return
+				}
+
+				part := model.UploadMultipartPart{
+					Number:    presign.Number,
+					UploadURL: presign.UploadURL,
+					ETag:      etag,
+				}
+				stateMu.Lock()
+				uploaded[presign.Number] = part
+				completedBytes += partSize
+				currentBytes := completedBytes
+				stateMu.Unlock()
+
+				speed := int64(0)
+				if elapsed := time.Since(startedAt); elapsed > 0 {
+					speed = int64(float64(partSize) / elapsed.Seconds())
+				}
+
+				if workerCtx.Err() != nil {
+					return
+				}
+				updated, syncErr := e.taskService.RecordMultipartPart(ctx, task.ID, part, client.EmosUploadProgress{
+					UploadedBytes: currentBytes,
+					TotalBytes:    fileSize,
+					Speed:         speed,
+				})
+				if syncErr != nil {
+					recordWorkerError(syncErr)
+					return
+				}
+
+				eventMu.Lock()
+				e.emitUploadEvent(updated, &lastSSE, currentBytes >= fileSize)
+				eventMu.Unlock()
+			}
+		}
+
+		for i := 0; i < workerCount; i++ {
+			wg.Add(1)
+			go worker()
+		}
+		wg.Wait()
+		if firstErr != nil {
+			return firstErr
+		}
+	}
+	if ctx.Err() != nil {
+		return errTaskCanceled
+	}
+
+	parts := make([]client.EmosMultipartPart, 0, len(presigns))
+	for _, presign := range presigns {
+		part, ok := uploaded[presign.Number]
+		if !ok || strings.TrimSpace(part.ETag) == "" {
+			return errors.New("multipart upload is incomplete")
+		}
+		parts = append(parts, client.EmosMultipartPart{
+			Number: presign.Number,
+			ETag:   part.ETag,
+		})
+	}
+	return e.emosClient.CompleteMultipart(ctx, access, task.Upload.FileID, parts)
+}
+
+func clampUploadPartConcurrency(value int) int {
+	if value <= 0 {
+		return 3
+	}
+	if value > maxMultipartUploadWorkers {
+		return maxMultipartUploadWorkers
+	}
+	return value
+}
+
+func partSizeForMultipartPresign(number int, chunkSize, fileSize int64) int64 {
+	startByte := int64(number-1) * chunkSize
+	if startByte >= fileSize {
+		return 0
+	}
+	if remaining := fileSize - startByte; remaining < chunkSize {
+		return remaining
+	}
+	return chunkSize
+}
+
+func (e *UploadExecutor) emitUploadEvent(task model.Task, lastSSE *time.Time, done bool) {
+	if e.eventBus == nil {
+		return
+	}
+	now := time.Now()
+	if done || now.Sub(*lastSSE) >= time.Second {
+		*lastSSE = now
+		e.eventBus.Publish(eventbus.TaskEvent{
+			TaskID:  task.ID,
+			Status:  "uploading",
+			UlProg:  task.Upload.Progress,
+			UlSpeed: task.Upload.Speed,
+			UlDone:  task.Upload.UploadedBytes,
+			UlTotal: task.Upload.TotalBytes,
+		})
+	}
 }
 
 func (e *UploadExecutor) saveWithRetry(ctx context.Context, task model.Task, access client.EmosAccess, interval time.Duration, maxAttempts int) error {
