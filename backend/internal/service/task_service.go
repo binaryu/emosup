@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"emosup/backend/internal/client"
@@ -22,6 +23,13 @@ type TaskService struct {
 	store          *store.FileStore
 	aria2Client    client.Aria2Client
 	openListClient client.OpenListClient
+
+	runMu     sync.Mutex
+	runCancel map[string]*taskRunHandle
+}
+
+type taskRunHandle struct {
+	cancel context.CancelFunc
 }
 
 type TaskServiceError struct {
@@ -69,6 +77,32 @@ func NewTaskService(store *store.FileStore, aria2Client client.Aria2Client, open
 		store:          store,
 		aria2Client:    aria2Client,
 		openListClient: openListClient,
+	}
+}
+
+func (s *TaskService) RegisterTaskRun(taskID string, cancel context.CancelFunc) func() {
+	handle := &taskRunHandle{cancel: cancel}
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	if s.runCancel == nil {
+		s.runCancel = make(map[string]*taskRunHandle)
+	}
+	s.runCancel[taskID] = handle
+	return func() {
+		s.runMu.Lock()
+		defer s.runMu.Unlock()
+		if current := s.runCancel[taskID]; current == handle {
+			delete(s.runCancel, taskID)
+		}
+	}
+}
+
+func (s *TaskService) cancelTaskRun(taskID string) {
+	s.runMu.Lock()
+	handle := s.runCancel[taskID]
+	s.runMu.Unlock()
+	if handle != nil {
+		handle.cancel()
 	}
 }
 
@@ -754,11 +788,14 @@ func (s *TaskService) SetMultipartPresigns(_ context.Context, taskID string, pre
 	return task, nil
 }
 
-func (s *TaskService) RecordMultipartPart(_ context.Context, taskID string, part model.UploadMultipartPart, progress client.EmosUploadProgress) (model.Task, error) {
+func (s *TaskService) RecordMultipartPart(_ context.Context, taskID string, retryCount int, part model.UploadMultipartPart, progress client.EmosUploadProgress) (model.Task, error) {
 	now := time.Now()
 	return s.store.UpdateTask(taskID, func(task *model.Task) error {
 		if task.Status != model.TaskStatusUploading {
 			return newTaskServiceError(http.StatusBadRequest, fmt.Sprintf("task status %q cannot record multipart part", task.Status))
+		}
+		if task.RetryCount != retryCount {
+			return newTaskServiceError(http.StatusConflict, fmt.Sprintf("task retry count %d cannot record multipart part from attempt %d", task.RetryCount, retryCount))
 		}
 		parts := make([]model.UploadMultipartPart, 0, len(task.Upload.MultipartParts)+1)
 		replaced := false
@@ -1121,6 +1158,7 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) (model.Task, er
 	case model.TaskStatusUploadPending:
 		return s.markTaskCanceled(task.ID, task.Download.Status, "task canceled by user")
 	case model.TaskStatusUploading, model.TaskStatusSaving:
+		s.cancelTaskRun(task.ID)
 		return s.markTaskCanceled(task.ID, task.Download.Status, "upload cancel requested; remote partial upload may remain")
 	case model.TaskStatusDownloadFailed, model.TaskStatusUploadFailed:
 		return s.markTaskCanceled(task.ID, task.Download.Status, "failed task canceled by user")

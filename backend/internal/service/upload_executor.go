@@ -35,9 +35,27 @@ func NewUploadExecutor(taskService *TaskService, emosClient client.EmosClient, e
 	}
 }
 
+func (e *UploadExecutor) isCanceledUpload(ctx context.Context, taskID string) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	canceled, err := e.taskService.IsTaskCanceled(ctx, taskID)
+	return err == nil && canceled
+}
+
+func (e *UploadExecutor) isStaleUploadAttempt(ctx context.Context, taskID string, retryCount int) bool {
+	task, err := e.taskService.GetTask(ctx, taskID)
+	if err != nil {
+		return ctx.Err() != nil
+	}
+	return task.RetryCount != retryCount || task.Status != model.TaskStatusUploading
+}
+
 func (e *UploadExecutor) Execute(ctx context.Context, taskID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Hour)
 	defer cancel()
+	unregister := e.taskService.RegisterTaskRun(taskID, cancel)
+	defer unregister()
 
 	task, err := e.taskService.GetTask(ctx, taskID)
 	if err != nil {
@@ -72,7 +90,7 @@ func (e *UploadExecutor) Execute(ctx context.Context, taskID string) error {
 		// For retried uploads with existing upload context, resume from where we left off
 		task, err = e.uploadFile(ctx, task, access, chunkSize, clampUploadPartConcurrency(cfg.Worker.UploadPartConcurrency))
 		if err != nil {
-			if errors.Is(err, errTaskCanceled) {
+			if errors.Is(err, errTaskCanceled) || e.isCanceledUpload(ctx, task.ID) {
 				return nil
 			}
 			return err
@@ -117,6 +135,9 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 			FileStorage:  task.Upload.Storage,
 		})
 		if tokenErr != nil {
+			if e.isCanceledUpload(ctx, task.ID) {
+				return model.Task{}, errTaskCanceled
+			}
 			_, markErr := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "upload_token_failed", "upload token failed: "+tokenErr.Error())
 			return model.Task{}, firstNonNil(markErr, tokenErr)
 		}
@@ -163,15 +184,15 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 			return nil
 		})
 		if err != nil {
-			if errors.Is(err, errTaskCanceled) {
+			if errors.Is(err, errTaskCanceled) || e.isCanceledUpload(ctx, task.ID) {
 				return task, errTaskCanceled
 			}
 			_, markErr := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "upload_put_failed", "upload put failed: "+err.Error())
 			return model.Task{}, firstNonNil(markErr, err)
 		}
 	case "multipart":
-		if err := e.uploadMultipart(ctx, task, access, chunkSize, info.Size(), localPath, maxWorkers); err != nil {
-			if errors.Is(err, errTaskCanceled) {
+		if err := e.uploadMultipart(ctx, task, access, chunkSize, info.Size(), localPath, maxWorkers, task.RetryCount); err != nil {
+			if errors.Is(err, errTaskCanceled) || e.isCanceledUpload(ctx, task.ID) {
 				return task, errTaskCanceled
 			}
 			_, markErr := e.taskService.MarkUploadFailedWithDetails(ctx, task.ID, "upload", "multipart_upload_failed", "multipart upload failed: "+err.Error())
@@ -189,7 +210,7 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 	return task, nil
 }
 
-func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, access client.EmosAccess, configuredChunkSize, fileSize int64, localPath string, maxWorkers int) error {
+func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, access client.EmosAccess, configuredChunkSize, fileSize int64, localPath string, maxWorkers int, retryCount int) error {
 	chunkSize := configuredChunkSize
 	if task.Upload.MultipartSizeMin > 0 || task.Upload.MultipartSizeMax > 0 {
 		if task.Upload.MultipartSizeMin > 0 && chunkSize < task.Upload.MultipartSizeMin {
@@ -321,6 +342,10 @@ func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, a
 					UploadURL: presign.UploadURL,
 				}, localPath, startByte, partSize)
 				if uploadErr != nil {
+					if workerCtx.Err() != nil || e.isStaleUploadAttempt(workerCtx, task.ID, retryCount) {
+						recordWorkerError(errTaskCanceled)
+						return
+					}
 					recordWorkerError(uploadErr)
 					return
 				}
@@ -344,12 +369,16 @@ func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, a
 				if workerCtx.Err() != nil {
 					return
 				}
-				updated, syncErr := e.taskService.RecordMultipartPart(ctx, task.ID, part, client.EmosUploadProgress{
+				updated, syncErr := e.taskService.RecordMultipartPart(ctx, task.ID, retryCount, part, client.EmosUploadProgress{
 					UploadedBytes: currentBytes,
 					TotalBytes:    fileSize,
 					Speed:         speed,
 				})
 				if syncErr != nil {
+					if workerCtx.Err() != nil || e.isStaleUploadAttempt(workerCtx, task.ID, retryCount) {
+						recordWorkerError(errTaskCanceled)
+						return
+					}
 					recordWorkerError(syncErr)
 					return
 				}

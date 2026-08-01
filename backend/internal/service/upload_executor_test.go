@@ -453,6 +453,159 @@ func TestUploadExecutorMultipartResumeSkipsUploadedParts(t *testing.T) {
 	}
 }
 
+func TestUploadExecutorCancelThenRetryDoesNotFailTask(t *testing.T) {
+	t.Parallel()
+
+	const fileSize = 3 * 1024 * 1024
+	fileStore := newTaskTestStore(t)
+	cfg, err := fileStore.LoadConfig()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Worker.UploadChunkSizeMB = 1
+	cfg.Worker.UploadPartConcurrency = 1
+	cfg.Emos.Token = "demo-token"
+	cfg.Emos.Storage = "zn_r2_upload"
+	if err := fileStore.SaveConfig(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	presigns := []client.EmosMultipartPart{
+		{Number: 1, UploadURL: "https://upload.example/part/1"},
+		{Number: 2, UploadURL: "https://upload.example/part/2"},
+		{Number: 3, UploadURL: "https://upload.example/part/3"},
+	}
+	base := &stubEmosUploadClient{
+		tokenResult: client.EmosUploadTokenResult{
+			Storage:          "r2",
+			FileID:           "file-multipart",
+			UploadType:       "multipart",
+			MultipartSizeMin: 1024 * 1024,
+			MultipartSizeMax: 1024 * 1024,
+		},
+		presigns: presigns,
+	}
+	blockingClient := &cancelableMultipartClient{
+		stubEmosUploadClient: base,
+		firstStarted:         make(chan struct{}, 1),
+		releaseFirst:         make(chan struct{}),
+	}
+	executor := NewUploadExecutor(taskService, blockingClient, nil)
+	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- executor.Execute(context.Background(), taskID)
+	}()
+
+	select {
+	case <-blockingClient.firstStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("multipart upload did not start")
+	}
+
+	if _, err := taskService.CancelTask(context.Background(), taskID); err != nil {
+		t.Fatalf("cancel task: %v", err)
+	}
+	if _, err := taskService.RetryTask(context.Background(), taskID); err != nil {
+		t.Fatalf("retry canceled task: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("canceled upload returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled upload did not stop")
+	}
+
+	task, err := taskService.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("get task after cancel/retry: %v", err)
+	}
+	if task.Status != model.TaskStatusUploadPending {
+		t.Fatalf("expected upload_pending after retry, got %s", task.Status)
+	}
+	if task.RetryCount != 1 {
+		t.Fatalf("expected retry count 1, got %d", task.RetryCount)
+	}
+	if task.Result.ErrorMessage != "" {
+		t.Fatalf("expected no error after cancel/retry, got %q", task.Result.ErrorMessage)
+	}
+
+	completeClient := &stubEmosUploadClient{}
+	secondExecutor := NewUploadExecutor(taskService, completeClient, nil)
+	if err := secondExecutor.Execute(context.Background(), taskID); err != nil {
+		t.Fatalf("execute resumed upload after retry: %v", err)
+	}
+
+	task, err = taskService.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("get completed task: %v", err)
+	}
+	if task.Status != model.TaskStatusCompleted {
+		t.Fatalf("expected completed status, got %s", task.Status)
+	}
+	if len(task.Upload.MultipartParts) != 3 {
+		t.Fatalf("expected three persisted multipart parts, got %d", len(task.Upload.MultipartParts))
+	}
+}
+
+func TestRecordMultipartPartRejectsStaleRetryAttempt(t *testing.T) {
+	t.Parallel()
+
+	fileStore := newTaskTestStore(t)
+	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskID := seedUploadPendingTask(t, taskService, fileStore)
+	if _, err := fileStore.UpdateTask(taskID, func(task *model.Task) error {
+		task.Status = model.TaskStatusUploading
+		task.RetryCount = 1
+		task.Upload = model.TaskUpload{
+			Storage:          "r2",
+			FileID:           "file-multipart",
+			UploadType:       "multipart",
+			MultipartSizeMin: 1024 * 1024,
+			MultipartSizeMax: 1024 * 1024,
+			MultipartPresigns: []model.UploadMultipartPart{
+				{Number: 1, UploadURL: "https://upload.example/part/1"},
+			},
+			TotalBytes: 1024,
+			Status:     "uploading",
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed uploading task: %v", err)
+	}
+
+	if _, err := taskService.RecordMultipartPart(context.Background(), taskID, 0, model.UploadMultipartPart{
+		Number: 1,
+		ETag:   "stale-etag",
+	}, client.EmosUploadProgress{UploadedBytes: 1024, TotalBytes: 1024}); err == nil {
+		t.Fatal("expected stale multipart attempt to be rejected")
+	}
+
+	task, err := taskService.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if len(task.Upload.MultipartParts) != 0 {
+		t.Fatalf("stale attempt must not record a multipart part, got %d parts", len(task.Upload.MultipartParts))
+	}
+
+	updated, err := taskService.RecordMultipartPart(context.Background(), taskID, 1, model.UploadMultipartPart{
+		Number: 1,
+		ETag:   "etag-1",
+	}, client.EmosUploadProgress{UploadedBytes: 1024, TotalBytes: 1024})
+	if err != nil {
+		t.Fatalf("record current multipart attempt: %v", err)
+	}
+	if len(updated.Upload.MultipartParts) != 1 {
+		t.Fatalf("expected one persisted multipart part, got %d", len(updated.Upload.MultipartParts))
+	}
+}
+
 func seedUploadPendingTask(t *testing.T, taskService *TaskService, fileStore *store.FileStore) string {
 	return seedUploadPendingTaskWithFileSize(t, taskService, fileStore, 1024)
 }
@@ -592,6 +745,27 @@ type blockingMultipartClient struct {
 	release   chan struct{}
 	active    atomic.Int64
 	maxActive atomic.Int64
+}
+
+type cancelableMultipartClient struct {
+	*stubEmosUploadClient
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+}
+
+func (c *cancelableMultipartClient) UploadMultipartPart(ctx context.Context, part client.EmosMultipartPart, filePath string, startByte, partSize int64) (string, error) {
+	if part.Number == 1 {
+		select {
+		case c.firstStarted <- struct{}{}:
+		default:
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-c.releaseFirst:
+		}
+	}
+	return c.stubEmosUploadClient.UploadMultipartPart(ctx, part, filePath, startByte, partSize)
 }
 
 func (c *blockingMultipartClient) UploadMultipartPart(ctx context.Context, part client.EmosMultipartPart, filePath string, startByte, partSize int64) (string, error) {
