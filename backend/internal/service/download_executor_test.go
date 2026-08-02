@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"emosup/backend/internal/model"
 )
@@ -120,3 +124,118 @@ func TestDownloadExecutorRecoverDownloadingTaskWithoutGIDUsesLocalFile(t *testin
 	}
 }
 
+func TestCancelStopsDirectDownloadAndKeepsCanceled(t *testing.T) {
+	t.Parallel()
+
+	// Slow streaming server so the download is still in flight when we cancel.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, ok := w.(http.Flusher)
+		for i := 0; i < 2000; i++ {
+			_, _ = w.Write(make([]byte, 512*1024))
+			if ok {
+				flusher.Flush()
+			}
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}))
+	defer server.Close()
+
+	fileStore := newTaskTestStore(t)
+	taskService := NewTaskService(fileStore)
+	executor := NewDownloadExecutor(taskService, nil, nil)
+	scan := seedTaskTestScan(t, fileStore)
+
+	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
+		ScanSessionID: scan.ID,
+		ItemIDs:       []string{"item-confirmed"},
+	})
+	if err != nil {
+		t.Fatalf("batch create tasks: %v", err)
+	}
+	taskID := result.Created[0].TaskID
+	if _, err := fileStore.UpdateTask(taskID, func(tk *model.Task) error {
+		tk.Source.RawURL = server.URL + "/big.bin"
+		tk.Source.FileSize = 1024 * 1024 * 1024
+		tk.Download.TotalBytes = tk.Source.FileSize
+		return nil
+	}); err != nil {
+		t.Fatalf("set raw url: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- executor.Execute(context.Background(), taskID) }()
+
+	// Wait until the download is actually in progress (PrepareTaskDownload
+	// flips the status to downloading before the first byte is written).
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		task, getErr := taskService.GetTask(context.Background(), taskID)
+		if getErr != nil {
+			t.Fatalf("get task: %v", getErr)
+		}
+		if task.Status == model.TaskStatusDownloading {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("download never started; status=%s completed=%d", task.Status, task.Download.CompletedBytes)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	canceled, err := taskService.CancelTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("cancel task: %v", err)
+	}
+	if canceled.Status != model.TaskStatusCanceled {
+		t.Fatalf("expected canceled, got %s", canceled.Status)
+	}
+
+	select {
+	case err := <-done:
+		if err == nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("Execute expected context.Canceled, got %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("download did not stop after cancel")
+	}
+
+	final, err := taskService.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("get final task: %v", err)
+	}
+	if final.Status != model.TaskStatusCanceled {
+		t.Fatalf("cancel must not be overwritten; got %s (error=%q)", final.Status, final.Result.ErrorMessage)
+	}
+}
+
+func TestCancelIsNoopForCompletedTask(t *testing.T) {
+	t.Parallel()
+	fileStore := newTaskTestStore(t)
+	taskService := NewTaskService(fileStore)
+	scan := seedTaskTestScan(t, fileStore)
+	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
+		ScanSessionID: scan.ID,
+		ItemIDs:       []string{"item-confirmed"},
+	})
+	if err != nil {
+		t.Fatalf("batch create: %v", err)
+	}
+	taskID := result.Created[0].TaskID
+	if _, err := taskService.CancelTask(context.Background(), taskID); err != nil {
+		t.Fatalf("cancel queued task: %v", err)
+	}
+	// Cancel is idempotent: canceling a canceled task succeeds silently.
+	again, err := taskService.CancelTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("second cancel should be a no-op: %v", err)
+	}
+	if again.Status != model.TaskStatusCanceled {
+		t.Fatalf("expected canceled, got %s", again.Status)
+	}
+}

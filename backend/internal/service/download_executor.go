@@ -151,7 +151,12 @@ func (e *DownloadExecutor) taskLog(ctx context.Context, taskID, level, message s
 
 func (e *DownloadExecutor) Execute(ctx context.Context, taskID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Hour)
-	defer cancel()
+	// Register the run so a user cancel actually stops the in-flight download.
+	unregister := e.taskService.RegisterTaskRun(taskID, cancel)
+	defer func() {
+		unregister()
+		cancel()
+	}()
 
 	task, err := e.taskService.GetTask(ctx, taskID)
 	if err != nil {
@@ -308,9 +313,17 @@ func (e *DownloadExecutor) downloadWithResume(ctx context.Context, task model.Ta
 			return nil
 		}
 		lastErr = err
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			e.taskLog(ctx, task.ID, "error", "download aborted: "+err.Error())
-			_, _ = e.taskService.MarkDownloadFailedWithDetails(ctx, task.ID, "download", "download_aborted", err.Error())
+		if errors.Is(err, context.Canceled) {
+			// A cancel only comes from a user cancel (registered task run) or
+			// scheduler shutdown; in both cases the task status is managed by
+			// the cancel/recovery flow — never overwrite it with a failure.
+			// The download may also be marked canceled just after this runs.
+			e.taskLog(context.Background(), task.ID, "info", "download stopped: "+err.Error())
+			return err
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			e.taskLog(context.Background(), task.ID, "error", "download aborted: "+err.Error())
+			_, _ = e.taskService.MarkDownloadFailedWithDetails(context.Background(), task.ID, "download", "download_aborted", err.Error())
 			return err
 		}
 		log.Printf("[download] failed: task=%s retry=%d err=%v", task.ID, retry+1, err)
