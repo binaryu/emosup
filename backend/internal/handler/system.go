@@ -3,12 +3,14 @@ package handler
 import (
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
 
 	"emosup/backend/internal/scheduler"
+	"emosup/backend/internal/service"
 	"emosup/backend/internal/store"
 	"emosup/backend/internal/version"
 )
@@ -16,10 +18,11 @@ import (
 type SystemHandler struct {
 	manager *scheduler.Manager
 	store   *store.FileStore
+	logs    *service.LogService
 }
 
 func NewSystemHandler(manager *scheduler.Manager, store *store.FileStore) *SystemHandler {
-	return &SystemHandler{manager: manager, store: store}
+	return &SystemHandler{manager: manager, store: store, logs: service.NewLogService()}
 }
 
 func (h *SystemHandler) RegisterRoutes(router *gin.RouterGroup) {
@@ -27,6 +30,25 @@ func (h *SystemHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/system/recovery", h.getRecovery)
 	router.GET("/system/disk", h.getDiskUsage)
 	router.GET("/system/version", h.getVersion)
+	router.GET("/system/logs", h.getLogs)
+}
+
+// getLogs tails a log source: ?kind=service|upgrade&lines=N
+func (h *SystemHandler) getLogs(c *gin.Context) {
+	kind := c.DefaultQuery("kind", "service")
+	lines := 200
+	if raw := strings.TrimSpace(c.Query("lines")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			lines = n
+		}
+	}
+
+	result, err := h.logs.Tail(c.Request.Context(), kind, lines)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondOK(c, result)
 }
 
 func (h *SystemHandler) getVersion(c *gin.Context) {

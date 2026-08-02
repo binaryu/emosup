@@ -256,6 +256,33 @@
         </div>
       </el-card>
 
+      <!-- 运行日志 -->
+      <el-card class="setting-card about-card">
+        <template #header>
+          <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+            运行日志
+          </div>
+        </template>
+
+        <div class="log-toolbar">
+          <el-radio-group v-model="logKind" size="small" @change="loadLogs">
+            <el-radio-button value="service">服务日志</el-radio-button>
+            <el-radio-button value="upgrade">升级日志</el-radio-button>
+          </el-radio-group>
+          <el-select v-model="logLines" size="small" style="width: 110px" @change="loadLogs">
+            <el-option label="100 行" :value="100" />
+            <el-option label="300 行" :value="300" />
+            <el-option label="1000 行" :value="1000" />
+          </el-select>
+          <el-button size="small" :loading="logLoading" @click="loadLogs">刷新</el-button>
+          <span v-if="logSource" class="log-source">{{ logSource }}</span>
+        </div>
+
+        <div v-if="logError" class="log-error">{{ logError }}</div>
+        <pre v-else class="log-viewer">{{ logContent || '暂无日志' }}</pre>
+      </el-card>
+
     </div>
   </div>
 </template>
@@ -278,7 +305,38 @@ const upgradeError = ref('')
 const upgradeLoading = ref(false)
 const upgradeProgress = ref(0)
 const upgradeStatusText = ref('')
+const logKind = ref<'service' | 'upgrade'>('service')
+const logLines = ref(300)
+const logContent = ref('')
+const logSource = ref('')
+const logError = ref('')
+const logLoading = ref(false)
 let healthTimer: number | undefined
+
+async function loadLogs() {
+  logLoading.value = true
+  logError.value = ''
+  try {
+    const resp = await apiFetch(`/api/system/logs?kind=${logKind.value}&lines=${logLines.value}`)
+    const data = await resp.json()
+    if (!data.success) {
+      logError.value = data.message || '读取日志失败'
+      logContent.value = ''
+      logSource.value = ''
+      return
+    }
+    logContent.value = data.data.lines.join('\n')
+    logSource.value = data.data.path
+    if (data.data.truncated) {
+      logSource.value += `（仅显示最近 ${logLines.value} 行）`
+    }
+  } catch (e) {
+    logError.value = e instanceof Error ? e.message : '读取日志失败'
+    logContent.value = ''
+  } finally {
+    logLoading.value = false
+  }
+}
 
 function formatDate(iso: string) {
   if (!iso) return ''
@@ -370,7 +428,7 @@ function waitForRestart() {
     attempts += 1
     upgradeProgress.value = Math.min(60 + attempts * 2, 95)
     upgradeStatusText.value = attempts > 45
-      ? '服务未自动恢复，请在服务器上执行: sudo systemctl restart emosup（升级日志: /tmp/emosup-upgrade.log）'
+      ? '服务未自动恢复，请在服务器执行: sudo systemctl restart emosup（可切换上方「升级日志」查看原因）'
       : `等待服务重启… (${attempts * 2}s)`
   }, 2000)
 }
@@ -379,6 +437,7 @@ onMounted(() => {
   configStore.fetchConfig()
   fetchVersion()
   checkUpgrade()
+  loadLogs()
 })
 
 onBeforeUnmount(() => {
@@ -542,6 +601,53 @@ onBeforeUnmount(() => {
 .about-error {
   font-size: 12px;
   color: #ef4444;
+  word-break: break-all;
+}
+
+/* Log viewer */
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.log-source {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.log-viewer {
+  margin: 0;
+  padding: 12px;
+  background: #0f172a;
+  color: #cbd5e1;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html.dark .log-viewer {
+  background: #020617;
+}
+
+.log-error {
+  font-size: 13px;
+  color: #ef4444;
+  padding: 12px;
+  background: rgba(239, 68, 68, 0.06);
+  border-radius: 10px;
   word-break: break-all;
 }
 
