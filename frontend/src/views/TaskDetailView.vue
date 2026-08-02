@@ -115,7 +115,7 @@
                 <div class="exec-progress">
                   <div class="progress-labels">
                     <span>{{ formatBytes(task.download.completed_bytes) }} / {{ formatBytes(task.download.total_bytes) }}</span>
-                    <span>{{ formatSpeed(task.download.speed) }}</span>
+                    <span>{{ formatSpeed(task.download.speed) }} · {{ formatRemaining(task.download.completed_bytes, task.download.total_bytes, task.download.speed) }}</span>
                   </div>
                   <el-progress :percentage="Math.round(task.download.progress || 0)" :stroke-width="6" :show-text="false" />
                 </div>
@@ -138,7 +138,7 @@
                 <div class="exec-progress">
                   <div class="progress-labels">
                     <span>{{ formatBytes(task.upload.uploaded_bytes) }} / {{ formatBytes(task.upload.total_bytes) }}</span>
-                    <span>{{ formatSpeed(task.upload.speed) }}</span>
+                    <span>{{ formatSpeed(task.upload.speed) }} · {{ formatRemaining(task.upload.uploaded_bytes, task.upload.total_bytes, task.upload.speed) }}</span>
                   </div>
                   <el-progress :percentage="Math.round(task.upload.progress || 0)" :stroke-width="6" :show-text="false" status="success" />
                 </div>
@@ -246,7 +246,7 @@ import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { useTaskStore } from '@/stores/tasks'
 import type { TaskLogEntry, TaskStatus } from '@/types/api'
-import { formatBytes, formatSpeed, formatTime } from '@/utils/format'
+import { formatBytes, formatRemaining, formatSpeed, formatTime } from '@/utils/format'
 
 const route = useRoute()
 const taskStore = useTaskStore()

@@ -884,6 +884,10 @@ func (c *stubEmosUploadClient) UploadFile(_ context.Context, uploadType string, 
 }
 
 func (c *stubEmosUploadClient) UploadMultipartPart(_ context.Context, part client.EmosMultipartPart, _ string, _ int64, _ int64) (string, error) {
+	return c.UploadMultipartPartWithProgress(context.Background(), part, "", 0, 0, nil)
+}
+
+func (c *stubEmosUploadClient) UploadMultipartPartWithProgress(_ context.Context, part client.EmosMultipartPart, _ string, _ int64, _ int64, _ func(int64)) (string, error) {
 	c.uploadedPartsMu.Lock()
 	c.uploadedPartNumbers = append(c.uploadedPartNumbers, part.Number)
 	c.uploadedPartsMu.Unlock()
@@ -961,6 +965,10 @@ func (c *cancelableMultipartClient) UploadMultipartPart(ctx context.Context, par
 	return c.stubEmosUploadClient.UploadMultipartPart(ctx, part, filePath, startByte, partSize)
 }
 
+func (c *cancelableMultipartClient) UploadMultipartPartWithProgress(ctx context.Context, part client.EmosMultipartPart, filePath string, startByte, partSize int64, _ func(int64)) (string, error) {
+	return c.UploadMultipartPart(ctx, part, filePath, startByte, partSize)
+}
+
 func (c *blockingMultipartClient) UploadMultipartPart(ctx context.Context, part client.EmosMultipartPart, filePath string, startByte, partSize int64) (string, error) {
 	active := c.active.Add(1)
 	for {
@@ -984,4 +992,8 @@ func (c *blockingMultipartClient) UploadMultipartPart(ctx context.Context, part 
 	}
 	c.active.Add(-1)
 	return c.stubEmosUploadClient.UploadMultipartPart(ctx, part, filePath, startByte, partSize)
+}
+
+func (c *blockingMultipartClient) UploadMultipartPartWithProgress(ctx context.Context, part client.EmosMultipartPart, filePath string, startByte, partSize int64, _ func(int64)) (string, error) {
+	return c.UploadMultipartPart(ctx, part, filePath, startByte, partSize)
 }

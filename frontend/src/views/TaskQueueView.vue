@@ -131,14 +131,14 @@
                 <el-progress :percentage="Math.round(row.download.progress || 0)" :stroke-width="6" :show-text="false" />
                 <div class="progress-detail">
                   <span>{{ formatBytes(row.download.completed_bytes) }} / {{ formatBytes(row.download.total_bytes) }}</span>
-                  <span>{{ formatSpeed(row.download.speed) }}</span>
+                  <span>{{ formatSpeed(row.download.speed) }} · {{ formatRemaining(row.download.completed_bytes, row.download.total_bytes, row.download.speed) }}</span>
                 </div>
               </template>
               <template v-else-if="['uploading', 'saving'].includes(row.status)">
                 <el-progress :percentage="Math.round(row.upload.progress || 0)" :stroke-width="6" :show-text="false" status="success" />
                 <div class="progress-detail">
                   <span>{{ formatBytes(row.upload.uploaded_bytes) }} / {{ formatBytes(row.upload.total_bytes) }}</span>
-                  <span>{{ formatSpeed(row.upload.speed) }}</span>
+                  <span>{{ formatSpeed(row.upload.speed) }} · {{ formatRemaining(row.upload.uploaded_bytes, row.upload.total_bytes, row.upload.speed) }}</span>
                 </div>
               </template>
               <template v-else-if="row.status === 'completed'">
@@ -230,7 +230,7 @@
               <el-progress :percentage="Math.round(row.download.progress)" :stroke-width="6" :show-text="false" />
               <div class="progress-stats">
                 <span>{{ formatBytes(row.download.completed_bytes) }} / {{ formatBytes(row.download.total_bytes) }}</span>
-                <span>{{ formatSpeed(row.download.speed) }}</span>
+                <span>{{ formatSpeed(row.download.speed) }} · {{ formatRemaining(row.download.completed_bytes, row.download.total_bytes, row.download.speed) }}</span>
               </div>
             </div>
           </template>
@@ -243,7 +243,7 @@
               <el-progress :percentage="Math.round(row.upload.progress)" :stroke-width="6" :show-text="false" status="success" />
               <div class="progress-stats">
                 <span>{{ formatBytes(row.upload.uploaded_bytes) }} / {{ formatBytes(row.upload.total_bytes) }}</span>
-                <span>{{ formatSpeed(row.upload.speed) }}</span>
+                <span>{{ formatSpeed(row.upload.speed) }} · {{ formatRemaining(row.upload.uploaded_bytes, row.upload.total_bytes, row.upload.speed) }}</span>
               </div>
             </div>
           </template>
@@ -309,7 +309,7 @@ import StatusTag from '@/components/StatusTag.vue'
 import { useTaskStore } from '@/stores/tasks'
 import type { Task, TaskStatus } from '@/types/api'
 import { apiFetch, getToken } from '@/utils/api'
-import { formatBytes, formatSpeed, formatTime } from '@/utils/format'
+import { formatBytes, formatRemaining, formatSpeed, formatTime } from '@/utils/format'
 
 const router = useRouter()
 const taskStore = useTaskStore()

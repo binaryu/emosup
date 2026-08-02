@@ -152,6 +152,10 @@ type EmosClient interface {
 	GetUploadToken(ctx context.Context, access EmosAccess, req EmosUploadTokenRequest) (EmosUploadTokenResult, error)
 	UploadFile(ctx context.Context, uploadType, uploadURL, filePath string, chunkSize int64, offset int64, onProgress func(EmosUploadProgress) error) error
 	UploadMultipartPart(ctx context.Context, part EmosMultipartPart, filePath string, startByte, partSize int64) (string, error)
+	// UploadMultipartPartWithProgress is UploadMultipartPart with a live
+	// per-part byte counter (incremental bytes read so far, called from the
+	// HTTP body reader). progress may be nil to disable reporting.
+	UploadMultipartPartWithProgress(ctx context.Context, part EmosMultipartPart, filePath string, startByte, partSize int64, progress func(int64)) (string, error)
 	RequestMultipartPresigns(ctx context.Context, access EmosAccess, fileID string, numChunks int) ([]EmosMultipartPart, error)
 	CompleteMultipart(ctx context.Context, access EmosAccess, fileID string, parts []EmosMultipartPart) error
 	SaveVideo(ctx context.Context, access EmosAccess, req EmosSaveVideoRequest) (EmosSaveVideoResult, error)
@@ -414,6 +418,7 @@ func (c *HTTPEmosClient) UploadFile(ctx context.Context, uploadType, uploadURL, 
 			partSize,
 			"application/octet-stream",
 			contentRange,
+			nil,
 			func(statusCode int) bool {
 				return acceptedUploadStatus(statusCode, uploadType == "r2")
 			},
@@ -444,6 +449,10 @@ func (c *HTTPEmosClient) UploadFile(ctx context.Context, uploadType, uploadURL, 
 }
 
 func (c *HTTPEmosClient) UploadMultipartPart(ctx context.Context, part EmosMultipartPart, filePath string, startByte, partSize int64) (string, error) {
+	return c.UploadMultipartPartWithProgress(ctx, part, filePath, startByte, partSize, nil)
+}
+
+func (c *HTTPEmosClient) UploadMultipartPartWithProgress(ctx context.Context, part EmosMultipartPart, filePath string, startByte, partSize int64, progress func(int64)) (string, error) {
 	if part.Number <= 0 {
 		return "", errors.New("multipart part number must be positive")
 	}
@@ -472,6 +481,7 @@ func (c *HTTPEmosClient) UploadMultipartPart(ctx context.Context, part EmosMulti
 		partSize,
 		"application/octet-stream",
 		"",
+		progress,
 		func(statusCode int) bool {
 			return statusCode == http.StatusOK ||
 				statusCode == http.StatusCreated ||
@@ -480,12 +490,28 @@ func (c *HTTPEmosClient) UploadMultipartPart(ctx context.Context, part EmosMulti
 	)
 }
 
+// progressSectionReader wraps a section reader and reports incremental bytes
+// read to fn (called from the HTTP transport's body reads).
+type progressSectionReader struct {
+	r  io.Reader
+	fn func(int64)
+}
+
+func (p *progressSectionReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 && p.fn != nil {
+		p.fn(int64(n))
+	}
+	return n, err
+}
+
 func (c *HTTPEmosClient) putFileSectionWithRetry(
 	ctx context.Context,
 	operation, uploadURL string,
 	file *os.File,
 	startByte, partSize int64,
 	contentType, contentRange string,
+	progress func(int64),
 	isSuccess func(int) bool,
 ) (string, error) {
 	var lastErr error
@@ -494,11 +520,15 @@ func (c *HTTPEmosClient) putFileSectionWithRetry(
 			return "", err
 		}
 
+		var reqBody io.Reader = io.NewSectionReader(file, startByte, partSize)
+		if progress != nil {
+			reqBody = &progressSectionReader{r: reqBody, fn: progress}
+		}
 		request, err := http.NewRequestWithContext(
 			ctx,
 			http.MethodPut,
 			uploadURL,
-			io.NewSectionReader(file, startByte, partSize),
+			reqBody,
 		)
 		if err != nil {
 			return "", err

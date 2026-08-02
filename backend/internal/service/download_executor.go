@@ -19,6 +19,7 @@ import (
 	"emosup/backend/internal/client"
 	"emosup/backend/internal/eventbus"
 	"emosup/backend/internal/model"
+	"emosup/backend/internal/utils"
 )
 
 var (
@@ -172,6 +173,11 @@ func (e *DownloadExecutor) Execute(ctx context.Context, taskID string) error {
 	pollInterval := time.Duration(cfg.Aria2.PollIntervalSeconds) * time.Second
 	if pollInterval <= 0 {
 		pollInterval = 3 * time.Second
+	}
+	// Poll at most once per second so progress/speed reach the UI in real time;
+	// aria2 tellStatus is cheap at this rate.
+	if pollInterval > time.Second {
+		pollInterval = time.Second
 	}
 
 	switch task.Status {
@@ -637,6 +643,8 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 	startTime := time.Now()
 	lastSSE := time.Time{}
 	lastPersist := time.Time{}
+	speedTracker := utils.NewSpeedTracker()
+	speedTracker.Sample(doneBytes, startTime)
 
 	publishDownloadProgress := func(force bool) {
 		now := time.Now()
@@ -648,11 +656,7 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 		}
 
 		progress := float64(0)
-		elapsed := now.Sub(startTime)
-		speed := int64(0)
-		if elapsed > 0 && doneBytes > offset {
-			speed = int64(float64(doneBytes-offset) / elapsed.Seconds())
-		}
+		speed := speedTracker.Sample(doneBytes, now)
 		if totalBytes > 0 {
 			progress = float64(doneBytes) * 100 / float64(totalBytes)
 		}
@@ -874,6 +878,8 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 	defer ticker.Stop()
 	completedSegments := 0
 	var firstErr error
+	speedTracker := utils.NewSpeedTracker()
+	speedTracker.Sample(0, startTime)
 
 	reportProgress := func(force bool) {
 		now := time.Now()
@@ -888,10 +894,7 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 		}
 
 		progress := float64(done) * 100 / float64(totalSize)
-		speed := int64(0)
-		if elapsed := now.Sub(startTime); elapsed > 0 {
-			speed = int64(float64(done) / elapsed.Seconds())
-		}
+		speed := speedTracker.Sample(done, now)
 
 		if shouldPersist {
 			lastPersist = now

@@ -11,11 +11,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"emosup/backend/internal/client"
 	"emosup/backend/internal/eventbus"
 	"emosup/backend/internal/model"
+	"emosup/backend/internal/utils"
 )
 
 var errTaskCanceled = errors.New("task canceled")
@@ -309,6 +311,41 @@ func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, a
 		var stateMu sync.Mutex
 		var eventMu sync.Mutex
 		var firstErr error
+		// liveBytes counts bytes uploaded inside currently in-flight parts;
+		// total uploaded = completedBytes + liveBytes.
+		var liveBytes atomic.Int64
+		speedTracker := utils.NewSpeedTracker()
+		speedTracker.Sample(completedBytes, time.Now())
+
+		// reportLiveProgress is called from HTTP body reads; it updates the
+		// smoothed speed and pushes SSE updates at most once per second so the
+		// panel stays real-time even while a single large part is in flight.
+		reportLiveProgress := func(partBytes int64) {
+			if partBytes <= 0 {
+				return
+			}
+			liveBytes.Add(partBytes)
+			now := time.Now()
+			stateMu.Lock()
+			total := completedBytes + liveBytes.Load()
+			speed := speedTracker.Sample(total, now)
+			done := total >= fileSize && fileSize > 0
+			stateMu.Unlock()
+
+			eventMu.Lock()
+			if done || now.Sub(lastSSE) >= time.Second {
+				lastSSE = now
+				e.eventBus.Publish(eventbus.TaskEvent{
+					TaskID:  task.ID,
+					Status:  "uploading",
+					UlProg:  calculateProgress(total, fileSize),
+					UlSpeed: speed,
+					UlDone:  total,
+					UlTotal: fileSize,
+				})
+			}
+			eventMu.Unlock()
+		}
 
 		recordWorkerError := func(workerErr error) {
 			stateMu.Lock()
@@ -343,11 +380,10 @@ func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, a
 					return
 				}
 
-				startedAt := time.Now()
-				etag, uploadErr := e.emosClient.UploadMultipartPart(workerCtx, client.EmosMultipartPart{
+				etag, uploadErr := e.emosClient.UploadMultipartPartWithProgress(workerCtx, client.EmosMultipartPart{
 					Number:    presign.Number,
 					UploadURL: presign.UploadURL,
-				}, localPath, startByte, partSize)
+				}, localPath, startByte, partSize, reportLiveProgress)
 				if uploadErr != nil {
 					if workerCtx.Err() != nil || e.isStaleUploadAttempt(workerCtx, task.ID, retryCount) {
 						recordWorkerError(errTaskCanceled)
@@ -365,13 +401,10 @@ func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, a
 				stateMu.Lock()
 				uploaded[presign.Number] = part
 				completedBytes += partSize
+				liveBytes.Add(-partSize)
 				currentBytes := completedBytes
+				speed := speedTracker.Sample(currentBytes, time.Now())
 				stateMu.Unlock()
-
-				speed := int64(0)
-				if elapsed := time.Since(startedAt); elapsed > 0 {
-					speed = int64(float64(partSize) / elapsed.Seconds())
-				}
 
 				if workerCtx.Err() != nil {
 					return
