@@ -24,6 +24,13 @@
           <span class="nav-label" v-show="!isCollapsed">{{ authStore.username }}</span>
         </div>
 
+        <div v-if="appVersion" class="version-row" :title="'Emos Upload ' + appVersion">
+          <span class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          </span>
+          <span class="nav-label" v-show="!isCollapsed">{{ appVersion }}</span>
+        </div>
+
         <button class="action-btn" @click="toggleTheme" :title="isDark ? '切换亮色' : '切换暗色'">
           <span class="nav-icon">
             <svg v-if="isDark" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
@@ -57,6 +64,7 @@
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
         </button>
         <span class="mobile-title">Emos Upload</span>
+        <span v-if="appVersion" class="mobile-version">{{ appVersion }}</span>
       </div>
       
       <div class="content-wrapper">
@@ -73,8 +81,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { apiFetch } from '@/utils/api'
 
 const authStore = useAuthStore()
+
+const appVersion = ref('')
 
 const navItems = [
   { label: '影片扫描', to: '/browse', icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>' },
@@ -120,8 +131,23 @@ function handleLogout() {
   authStore.logout(true)
 }
 
+async function fetchVersion() {
+  try {
+    const resp = await apiFetch('/api/system/version')
+    const data = await resp.json()
+    if (data.success && data.data?.version) {
+      appVersion.value = String(data.data.version).startsWith('v')
+        ? data.data.version
+        : `v${data.data.version}`
+    }
+  } catch {
+    appVersion.value = ''
+  }
+}
+
 onMounted(() => {
   checkMobile()
+  fetchVersion()
   window.addEventListener('resize', checkMobile)
   if (!authStore.username) {
     authStore.fetchMe()
@@ -271,6 +297,28 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
+.version-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: monospace;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sidebar.is-collapsed .version-row {
+  justify-content: center;
+  padding: 8px;
+}
+
+.version-row .nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .action-btn {
   width: 100%;
   padding: 12px 14px;
@@ -345,6 +393,13 @@ onUnmounted(() => {
   font-weight: 700;
   font-size: 18px;
   color: var(--text-main);
+}
+
+.mobile-version {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: monospace;
+  margin-left: auto;
 }
 
 .content-wrapper {

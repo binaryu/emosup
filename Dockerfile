@@ -10,11 +10,12 @@ RUN npm run build
 FROM golang:1.25-alpine AS backend-build
 WORKDIR /src/backend
 
+ARG EMOSUP_VERSION=dev
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
 COPY backend/ ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/emosup-server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X emosup/backend/internal/version.Version=${EMOSUP_VERSION}" -o /out/emosup-server ./cmd/server
 
 FROM alpine:3.21
 WORKDIR /app

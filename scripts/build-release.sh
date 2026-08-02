@@ -28,7 +28,7 @@ build_one() {
     cd "${ROOT}/backend"
     CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" \
       go build -trimpath \
-        -ldflags="-s -w -X main.version=${VERSION}" \
+        -ldflags="-s -w -X emosup/backend/internal/version.Version=${VERSION}" \
         -o "${dest}/emosup-server" \
         ./cmd/server
   )

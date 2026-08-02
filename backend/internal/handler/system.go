@@ -10,6 +10,7 @@ import (
 
 	"emosup/backend/internal/scheduler"
 	"emosup/backend/internal/store"
+	"emosup/backend/internal/version"
 )
 
 type SystemHandler struct {
@@ -25,6 +26,13 @@ func (h *SystemHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/system/runtime", h.getRuntime)
 	router.GET("/system/recovery", h.getRecovery)
 	router.GET("/system/disk", h.getDiskUsage)
+	router.GET("/system/version", h.getVersion)
+}
+
+func (h *SystemHandler) getVersion(c *gin.Context) {
+	respondOK(c, gin.H{
+		"version": version.Version,
+	})
 }
 
 func (h *SystemHandler) getRuntime(c *gin.Context) {
