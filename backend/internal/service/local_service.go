@@ -92,9 +92,8 @@ func (s *LocalService) resolve(relPath string) (absBase, fullPath, cleanRel stri
 	fullPath = filepath.Join(absBase, cleanRel)
 
 	// Prevent directory traversal
-	baseWithSep := filepath.Clean(absBase) + string(filepath.Separator)
 	cleanedFull := filepath.Clean(fullPath)
-	if cleanedFull != filepath.Clean(absBase) && !strings.HasPrefix(cleanedFull+string(filepath.Separator), baseWithSep) {
+	if rel, err := filepath.Rel(filepath.Clean(absBase), cleanedFull); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", "", "", errors.New("access denied")
 	}
 	return absBase, fullPath, cleanRel, nil
