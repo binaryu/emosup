@@ -127,7 +127,9 @@
             </div>
           </template>
 
+          <!-- Table View (Desktop) -->
           <el-table
+            v-if="viewMode === 'table'"
             ref="tableRef"
             :data="entries"
             row-key="path"
@@ -169,6 +171,41 @@
               </template>
             </el-table-column>
           </el-table>
+
+          <!-- Card View (Mobile) -->
+          <div v-else class="browse-card-list">
+            <el-empty v-if="!entries.length" description="暂无文件" />
+            <div
+              v-for="row in entries"
+              :key="row.path"
+              class="browse-card"
+              @click="handleCardClick(row)"
+            >
+              <el-checkbox
+                v-if="isSelectable(row)"
+                class="card-check"
+                :model-value="isCardSelected(row)"
+                @click.stop
+                @change="toggleSelect(row)"
+              />
+              <div class="card-icon">{{ row.is_dir ? '📁' : isVideoFile(row.name) ? '🎬' : '📄' }}</div>
+              <div class="card-info">
+                <div class="card-name">{{ row.name }}</div>
+                <div class="card-meta">
+                  <span class="card-type">{{ row.is_dir ? '目录' : '文件' }}</span>
+                  <span v-if="!row.is_dir" class="card-size">{{ formatSizeInMB(row.size) }}</span>
+                </div>
+              </div>
+              <button
+                v-if="row.is_dir"
+                type="button"
+                class="card-enter"
+                @click.stop="enterDirectory(row.path)"
+              >
+                进入
+              </button>
+            </div>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -176,7 +213,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { TableInstance } from 'element-plus'
@@ -202,6 +239,7 @@ const videoType = ref('')
 const entries = ref<OpenListEntry[]>([])
 const selected = ref<OpenListEntry[]>([])
 const tmdbLoading = ref(false)
+const viewMode = ref<'table' | 'card'>(typeof window !== 'undefined' && window.innerWidth < 768 ? 'card' : 'table')
 const tmdbResults = ref<Array<{
   tmdb_id: number
   title: string
@@ -251,6 +289,34 @@ const apiBase = () => (source.value === 'local' ? '/api/local/list' : '/api/open
 
 function isSelectable(row: OpenListEntry) {
   return row.is_dir || isVideoFile(row.name)
+}
+
+function syncViewMode() {
+  if (typeof window === 'undefined') return
+  viewMode.value = window.innerWidth < 768 ? 'card' : 'table'
+}
+
+function isCardSelected(row: OpenListEntry) {
+  return selected.value.some((e) => e.path === row.path)
+}
+
+function toggleSelect(row: OpenListEntry) {
+  const idx = selected.value.findIndex((e) => e.path === row.path)
+  if (idx >= 0) {
+    selected.value.splice(idx, 1)
+  } else {
+    selected.value.push(row)
+  }
+}
+
+function handleCardClick(row: OpenListEntry) {
+  if (row.is_dir) {
+    enterDirectory(row.path)
+    return
+  }
+  if (isSelectable(row)) {
+    toggleSelect(row)
+  }
 }
 
 function switchSource(next: 'openlist' | 'local') {
@@ -312,7 +378,6 @@ function clearSelection() {
   selected.value = []
   tableRef.value?.clearSelection()
 }
-
 function selectTMDB(item: {
   tmdb_id: number
   title: string
@@ -388,7 +453,13 @@ async function startScan() {
 }
 
 onMounted(() => {
+  syncViewMode()
+  window.addEventListener('resize', syncViewMode)
   loadEntries()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', syncViewMode)
 })
 </script>
 
@@ -562,4 +633,86 @@ html.dark .source-toggle { background: rgba(255, 255, 255, 0.06); }
   color: var(--text-main);
   margin-bottom: 4px;
 }
+
+/* Card View (Mobile) */
+.browse-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.browse-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.browse-card:active { border-color: var(--brand); box-shadow: var(--shadow-sm); }
+
+.card-check { flex-shrink: 0; }
+
+.card-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  background: var(--bg-hover);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.card-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: break-all;
+}
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.card-type {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-subtle);
+}
+
+.card-enter {
+  flex-shrink: 0;
+  border: none;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.card-enter:active { opacity: 0.8; }
 </style>

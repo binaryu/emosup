@@ -68,7 +68,10 @@
         </template>
 
         <div class="table-scroll">
+          <!-- Table View (Desktop) -->
           <el-table
+            v-if="viewMode === 'table'"
+            :ref="(el: unknown) => setTableRef(scan.id, el)"
             :data="scan.items"
             row-key="id"
             stripe
@@ -77,52 +80,7 @@
           >
             <el-table-column type="expand" width="48">
               <template #default="{ row }">
-                <div class="expand-panel">
-                  <div class="expand-section">
-                    <div class="expand-title">人工修正</div>
-                    <div class="edit-grid">
-                      <div class="edit-field">
-                        <span class="edit-label">item_id</span>
-                        <el-input
-                          :model-value="itemInputs[row.id] ?? (row.selected_item_type && row.selected_item_id ? row.selected_item_type + '-' + row.selected_item_id : (row.selected_item_type || ''))"
-                          @update:model-value="(val: string) => { itemInputs = { ...itemInputs, [row.id]: val } }"
-                          placeholder="ve-1829946"
-                          size="small"
-                          @blur="() => parseItemID(row)"
-                        />
-                      </div>
-                      <div class="edit-field title-field">
-                        <span class="edit-label">title</span>
-                        <el-input v-model="row.selected_title" placeholder="目标标题" size="small" />
-                      </div>
-                      <div class="edit-field">
-                        <span class="edit-label">确认</span>
-                        <el-switch
-                          v-model="row.confirmed"
-                          inline-prompt
-                          active-text="已确认"
-                          inactive-text="未确认"
-                          size="small"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div class="expand-section">
-                    <div class="expand-title">匹配候选</div>
-                    <div v-if="row.match_candidates?.length" class="candidate-list">
-                      <el-tag
-                        v-for="candidate in row.match_candidates"
-                        :key="`${candidate.item_type}-${candidate.item_id}`"
-                        size="small"
-                        class="candidate-tag"
-                        @click="applyCandidate(row, candidate)"
-                      >
-                        {{ candidate.item_type }}-{{ candidate.item_id }} {{ candidate.title }}
-                      </el-tag>
-                    </div>
-                    <span v-else class="muted-text">无</span>
-                  </div>
-                </div>
+                <ScanItemEditor :row="row" />
               </template>
             </el-table-column>
           <el-table-column
@@ -178,6 +136,75 @@
             </template>
           </el-table-column>
           </el-table>
+
+          <!-- Card View (Mobile) -->
+          <div v-else class="item-card-list">
+            <el-empty v-if="!scan.items.length" description="暂无扫描项" />
+            <div
+              v-for="row in scan.items"
+              :key="row.id"
+              class="item-card"
+            >
+              <div class="item-card-main" @click="toggleExpand(row.id)">
+                <el-checkbox
+                  class="item-check"
+                  :model-value="isItemSelected(scan.id, row.id)"
+                  :disabled="!canCreateTask(row, scan.source)"
+                  @click.stop
+                  @change="toggleItemSelect(scan.id, row)"
+                />
+                <div class="item-thumb">{{ row.is_video ? '🎬' : '📄' }}</div>
+                <div class="item-info">
+                  <div class="item-name">{{ row.file_name }}</div>
+                  <div class="item-meta">
+                    <span>S{{ row.parsed.season ?? '-' }}E{{ row.parsed.episode ?? '-' }}<template v-if="row.parsed.is_special"> · 特别篇</template></span>
+                    <span>{{ formatSizeInMB(row.file_size) }}</span>
+                    <el-tag v-if="row.has_media === false" type="danger" size="small" effect="plain">空</el-tag>
+                    <el-tag v-else-if="row.has_media === true" type="success" size="small" effect="plain">有</el-tag>
+                  </div>
+                  <div class="item-target">
+                    <span v-if="row.selected_title" class="target-title">{{ row.selected_title }}</span>
+                    <span v-else class="muted-text">{{ row.match_reason || '未匹配' }}</span>
+                  </div>
+                </div>
+                <div class="item-side">
+                  <StatusTag :status="row.match_status" />
+                  <svg
+                    class="item-chevron"
+                    :class="{ open: isExpanded(row.id) }"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  ><polyline points="6 9 12 15 18 9"/></svg>
+                </div>
+              </div>
+
+              <div v-if="isExpanded(row.id)" class="item-edit-panel">
+                <ScanItemEditor :row="row" />
+              </div>
+
+              <div class="item-card-actions">
+                <button type="button" class="item-action-btn primary" @click="saveItem(scan.id, row.id, row)">
+                  保存
+                </button>
+                <button
+                  type="button"
+                  class="item-action-btn success"
+                  :class="{ disabled: !canCreateTask(row, scan.source) }"
+                  :disabled="!canCreateTask(row, scan.source)"
+                  @click="createSingleTask(scan.id, row)"
+                >
+                  入队
+                </button>
+                <button type="button" class="item-action-btn danger" @click="deleteItem(scan.id, row)">
+                  删除
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </el-card>
     </el-space>
@@ -185,16 +212,17 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { TableInstance } from 'element-plus'
 import { useRouter } from 'vue-router'
 
 import PageHeaderCard from '@/components/PageHeaderCard.vue'
+import ScanItemEditor from '@/components/ScanItemEditor.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { useScanStore } from '@/stores/scans'
 import { useTaskStore } from '@/stores/tasks'
-import type { ScanItem, ScanSession, MatchCandidate } from '@/types/api'
-import { apiFetch } from '@/utils/api'
+import type { ScanItem, ScanSession } from '@/types/api'
 import { formatSizeInMB } from '@/utils/format'
 
 const router = useRouter()
@@ -202,6 +230,65 @@ const scanStore = useScanStore()
 const taskStore = useTaskStore()
 
 const selectedItemIdsByScan = ref<Record<string, string[]>>({})
+const viewMode = ref<'table' | 'card'>(typeof window !== 'undefined' && window.innerWidth < 768 ? 'card' : 'table')
+const expandedItemIds = ref<Set<string>>(new Set())
+const tableRefs = ref<Record<string, TableInstance | null>>({})
+
+function syncViewMode() {
+  if (typeof window === 'undefined') return
+  const next = window.innerWidth < 768 ? 'card' : 'table'
+  if (next !== viewMode.value) {
+    viewMode.value = next
+    if (next === 'table') {
+      restoreTableSelection()
+    }
+  }
+}
+
+function setTableRef(scanId: string, el: unknown) {
+  tableRefs.value[scanId] = (el as TableInstance | null) || null
+}
+
+function restoreTableSelection() {
+  nextTick(() => {
+    for (const scan of scanStore.scans) {
+      const table = tableRefs.value[scan.id]
+      if (!table) continue
+      const ids = new Set(selectedItemIdsByScan.value[scan.id] ?? [])
+      for (const row of scan.items) {
+        table.toggleRowSelection(row, ids.has(row.id))
+      }
+    }
+  })
+}
+
+function isItemSelected(scanId: string, itemId: string) {
+  return (selectedItemIdsByScan.value[scanId] ?? []).includes(itemId)
+}
+
+function toggleItemSelect(scanId: string, row: ScanItem) {
+  const current = new Set(selectedItemIdsByScan.value[scanId] ?? [])
+  if (current.has(row.id)) {
+    current.delete(row.id)
+  } else {
+    current.add(row.id)
+  }
+  selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scanId]: [...current] }
+}
+
+function isExpanded(itemId: string) {
+  return expandedItemIds.value.has(itemId)
+}
+
+function toggleExpand(itemId: string) {
+  const next = new Set(expandedItemIds.value)
+  if (next.has(itemId)) {
+    next.delete(itemId)
+  } else {
+    next.add(itemId)
+  }
+  expandedItemIds.value = next
+}
 
 function canCreateTask(row: ScanItem, scanSource?: string) {
   const isLocal = scanSource === 'local'
@@ -224,50 +311,6 @@ async function rescan(scan: ScanSession) {
 async function selectEmptyMedia(scan: ScanSession) {
   const ids = scan.items.filter(i => i.has_media === false && canCreateTask(i, scan.source)).map(i => i.id)
   selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scan.id]: ids }
-}
-
-const itemInputs = ref<Record<string, string>>({})
-
-function parseItemID(row: ScanItem) {
-  const value = (itemInputs.value[row.id] || '').trim()
-  if (!value) return
-  const idx = value.indexOf('-')
-  if (idx > 0) {
-    row.selected_item_type = value.substring(0, idx)
-    row.selected_item_id = parseInt(value.substring(idx + 1), 10) || 0
-  } else {
-    row.selected_item_type = value
-  }
-  fetchTitle(row)
-}
-
-function applyCandidate(row: ScanItem, candidate: MatchCandidate) {
-  row.selected_item_type = candidate.item_type
-  row.selected_item_id = candidate.item_id
-  row.selected_title = candidate.title
-  itemInputs.value = { ...itemInputs.value, [row.id]: candidate.item_type + '-' + candidate.item_id }
-}
-
-let fetchTitleTimer: ReturnType<typeof setTimeout> | null = null
-async function fetchTitle(row: ScanItem) {
-  const itemType = row.selected_item_type?.trim()
-  const itemId = row.selected_item_id
-  if (!itemType || !itemId || itemId <= 0) return
-
-  if (fetchTitleTimer) clearTimeout(fetchTitleTimer)
-  fetchTitleTimer = setTimeout(async () => {
-    try {
-      const resp = await apiFetch(
-        `/api/emos/video/base?item_type=${encodeURIComponent(itemType)}&item_id=${itemId}`,
-      )
-      const data = await resp.json()
-      if (data.success && data.data?.title) {
-        row.selected_title = data.data.title
-      }
-    } catch {
-      // ignore network errors
-    }
-  }, 300)
 }
 
 async function persistItem(scanId: string, itemId: string, row: ScanItem, showToast = true) {
@@ -429,7 +472,13 @@ async function createTasks(scanId: string) {
 }
 
 onMounted(() => {
+  syncViewMode()
+  window.addEventListener('resize', syncViewMode)
   scanStore.fetchScans()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', syncViewMode)
 })
 </script>
 
@@ -473,61 +522,130 @@ onMounted(() => {
   overflow-x: auto;
 }
 
-/* ---- expand panel ---- */
-.expand-panel {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  padding: 12px 8px;
-}
-
-.expand-title {
-  margin-bottom: 10px;
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-main);
-}
-
-.expand-section .muted-text {
-  font-size: 12px;
-}
-
-.edit-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  align-items: start;
-}
-
-.edit-field {
+/* ---- Card View (Mobile) ---- */
+.item-card-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
 }
 
-.edit-label {
+.item-card {
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.item-card-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.item-check { flex-shrink: 0; }
+
+.item-thumb {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  background: var(--bg-hover);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: break-all;
+}
+
+.item-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   font-size: 12px;
   color: var(--text-muted);
 }
 
-.title-field {
-  grid-column: 1 / -1;
+.item-target {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.candidate-list {
+.item-side {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 6px;
+  flex-shrink: 0;
 }
 
-.candidate-tag {
+.item-chevron {
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+}
+.item-chevron.open {
+  transform: rotate(180deg);
+}
+
+.item-edit-panel {
+  padding: 4px 12px 12px;
+  border-top: 1px dashed var(--line-soft);
+  background: var(--bg-hover);
+}
+.item-edit-panel :deep(.expand-panel) {
+  grid-template-columns: 1fr;
+  padding: 8px 0;
+}
+.item-edit-panel :deep(.edit-grid) {
+  grid-template-columns: 1fr;
+}
+.item-edit-panel :deep(.title-field) {
+  grid-column: 1;
+}
+
+.item-card-actions {
+  display: flex;
+  border-top: 1px solid var(--line-soft);
+}
+
+.item-action-btn {
+  flex: 1;
+  padding: 10px 6px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: background 0.15s;
 }
-
-.candidate-tag:hover {
-  opacity: 0.75;
-}
+.item-action-btn:not(:last-child) { border-right: 1px solid var(--line-soft); }
+.item-action-btn.primary { color: var(--brand); }
+.item-action-btn.success { color: var(--el-color-success); }
+.item-action-btn.danger { color: #ef4444; }
+.item-action-btn:active { background: var(--bg-hover); }
+.item-action-btn.disabled { opacity: 0.35; cursor: not-allowed; }
 
 .parse-info {
   white-space: nowrap;
@@ -559,18 +677,6 @@ onMounted(() => {
   .selection-text {
     width: 100%;
     margin-bottom: 4px;
-  }
-
-  .expand-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .edit-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .title-field {
-    grid-column: 1;
   }
 }
 </style>
