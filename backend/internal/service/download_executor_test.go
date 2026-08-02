@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"emosup/backend/internal/client"
 	"emosup/backend/internal/model"
 )
 
@@ -14,9 +13,8 @@ func TestDownloadExecutorExecuteQueuedTask(t *testing.T) {
 	t.Parallel()
 
 	fileStore := newTaskTestStore(t)
-	aria2Client := &sequenceAria2Client{}
-	taskService := NewTaskService(fileStore, aria2Client)
-	executor := NewDownloadExecutor(taskService, aria2Client, nil, nil)
+	taskService := NewTaskService(fileStore)
+	executor := NewDownloadExecutor(taskService, nil, nil)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
@@ -75,9 +73,8 @@ func TestDownloadExecutorRecoverDownloadingTaskWithoutGIDUsesLocalFile(t *testin
 	t.Parallel()
 
 	fileStore := newTaskTestStore(t)
-	aria2Client := &sequenceAria2Client{}
-	taskService := NewTaskService(fileStore, aria2Client)
-	executor := NewDownloadExecutor(taskService, aria2Client, nil, nil)
+	taskService := NewTaskService(fileStore)
+	executor := NewDownloadExecutor(taskService, nil, nil)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
@@ -99,7 +96,6 @@ func TestDownloadExecutorRecoverDownloadingTaskWithoutGIDUsesLocalFile(t *testin
 
 	task, err = fileStore.UpdateTask(taskID, func(task *model.Task) error {
 		task.Status = model.TaskStatusDownloading
-		task.Download.Aria2GID = ""
 		task.Download.TotalBytes = 1024
 		return nil
 	})
@@ -124,23 +120,3 @@ func TestDownloadExecutorRecoverDownloadingTaskWithoutGIDUsesLocalFile(t *testin
 	}
 }
 
-type sequenceAria2Client struct {
-	statuses []client.Aria2Status
-}
-
-func (c *sequenceAria2Client) AddURI(_ context.Context, _ client.Aria2Access, _ string, _ client.Aria2AddURIOptions) (string, error) {
-	return "gid-1", nil
-}
-
-func (c *sequenceAria2Client) TellStatus(_ context.Context, _ client.Aria2Access, _ string) (client.Aria2Status, error) {
-	if len(c.statuses) == 0 {
-		return client.Aria2Status{GID: "gid-1", Status: "complete"}, nil
-	}
-	status := c.statuses[0]
-	c.statuses = c.statuses[1:]
-	return status, nil
-}
-
-func (c *sequenceAria2Client) ForceRemove(_ context.Context, _ client.Aria2Access, _ string) error {
-	return nil
-}

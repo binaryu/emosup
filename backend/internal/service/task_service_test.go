@@ -15,7 +15,7 @@ func TestBatchCreateTasks(t *testing.T) {
 	t.Parallel()
 
 	fileStore := newTaskTestStore(t)
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
@@ -67,7 +67,7 @@ func TestBatchCreateTasksPreventsDuplicateActiveTask(t *testing.T) {
 	t.Parallel()
 
 	fileStore := newTaskTestStore(t)
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	scan := seedTaskTestScan(t, fileStore)
 
 	first, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
@@ -111,7 +111,7 @@ func TestCancelAndRetryTask(t *testing.T) {
 	t.Parallel()
 
 	fileStore := newTaskTestStore(t)
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
@@ -148,7 +148,7 @@ func TestCancelAndRetryTask(t *testing.T) {
 	if retriedTask.FinishedAt != nil {
 		t.Fatalf("expected finished_at to be cleared after retry")
 	}
-	if retriedTask.Download.Aria2GID != "" || retriedTask.Download.Progress != 0 {
+	if retriedTask.Download.Progress != 0 {
 		t.Fatalf("expected retry to clear download state, got %#v", retriedTask.Download)
 	}
 
@@ -167,12 +167,11 @@ func TestCancelAndRetryTask(t *testing.T) {
 	}
 }
 
-func TestCancelDownloadingTaskRemovesAria2(t *testing.T) {
+func TestCancelDownloadingTaskMarksCanceled(t *testing.T) {
 	t.Parallel()
 
 	fileStore := newTaskTestStore(t)
-	aria2Client := &stubAria2Client{}
-	taskService := NewTaskService(fileStore, aria2Client)
+	taskService := NewTaskService(fileStore)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
@@ -187,9 +186,6 @@ func TestCancelDownloadingTaskRemovesAria2(t *testing.T) {
 	if _, err := taskService.PrepareTaskDownload(context.Background(), taskID); err != nil {
 		t.Fatalf("prepare task download: %v", err)
 	}
-	if _, err := taskService.AttachAria2GID(context.Background(), taskID, "gid-123"); err != nil {
-		t.Fatalf("attach gid: %v", err)
-	}
 
 	canceledTask, err := taskService.CancelTask(context.Background(), taskID)
 	if err != nil {
@@ -198,8 +194,8 @@ func TestCancelDownloadingTaskRemovesAria2(t *testing.T) {
 	if canceledTask.Status != model.TaskStatusCanceled {
 		t.Fatalf("expected canceled status, got %s", canceledTask.Status)
 	}
-	if aria2Client.removedGID != "gid-123" {
-		t.Fatalf("expected aria2 gid to be removed, got %s", aria2Client.removedGID)
+	if canceledTask.Download.Speed != 0 {
+		t.Fatalf("expected download speed to reset, got %d", canceledTask.Download.Speed)
 	}
 }
 
@@ -208,7 +204,7 @@ func TestRetryDownloadFailedTaskRefreshesRawURL(t *testing.T) {
 
 	fileStore := newTaskTestStore(t)
 	openListClient := &stubOpenListClient{rawURL: "https://openlist.example/raw/refreshed"}
-	taskService := NewTaskService(fileStore, &stubAria2Client{}, openListClient)
+	taskService := NewTaskService(fileStore, openListClient)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
@@ -319,25 +315,8 @@ func seedTaskTestScan(t *testing.T, fileStore *store.FileStore) model.ScanSessio
 	return scan
 }
 
-type stubAria2Client struct {
-	removedGID string
-}
-
 type stubOpenListClient struct {
 	rawURL string
-}
-
-func (c *stubAria2Client) AddURI(_ context.Context, _ client.Aria2Access, _ string, _ client.Aria2AddURIOptions) (string, error) {
-	return "stub-gid", nil
-}
-
-func (c *stubAria2Client) TellStatus(_ context.Context, _ client.Aria2Access, _ string) (client.Aria2Status, error) {
-	return client.Aria2Status{}, nil
-}
-
-func (c *stubAria2Client) ForceRemove(_ context.Context, _ client.Aria2Access, gid string) error {
-	c.removedGID = gid
-	return nil
 }
 
 func (c *stubOpenListClient) List(context.Context, client.OpenListAccess, string) ([]client.OpenListEntry, error) {

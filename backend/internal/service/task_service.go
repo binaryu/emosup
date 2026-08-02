@@ -21,7 +21,6 @@ import (
 
 type TaskService struct {
 	store          *store.FileStore
-	aria2Client    client.Aria2Client
 	openListClient client.OpenListClient
 
 	runMu     sync.Mutex
@@ -67,7 +66,7 @@ type ListTasksRequest struct {
 	PageSize int
 }
 
-func NewTaskService(store *store.FileStore, aria2Client client.Aria2Client, openListClients ...client.OpenListClient) *TaskService {
+func NewTaskService(store *store.FileStore, openListClients ...client.OpenListClient) *TaskService {
 	var openListClient client.OpenListClient
 	if len(openListClients) > 0 {
 		openListClient = openListClients[0]
@@ -75,7 +74,6 @@ func NewTaskService(store *store.FileStore, aria2Client client.Aria2Client, open
 
 	return &TaskService{
 		store:          store,
-		aria2Client:    aria2Client,
 		openListClient: openListClient,
 	}
 }
@@ -165,7 +163,7 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, req BatchCreateTasks
 			result.Failed = append(result.Failed, FailedTaskItem{ItemID: itemID, Reason: reason})
 			continue
 		}
-		tasksToCreate = append(tasksToCreate, newTaskFromScan(scan, scanItem, cfg.Emos.Storage, cfg.Local.Root, cfg.Aria2.DownloadDir))
+		tasksToCreate = append(tasksToCreate, newTaskFromScan(scan, scanItem, cfg.Emos.Storage, cfg.Local.Root, cfg.Download.Dir))
 	}
 
 	if len(tasksToCreate) > 0 {
@@ -516,9 +514,9 @@ func (s *TaskService) PrepareTaskDownload(ctx context.Context, taskID string) (m
 		return model.Task{}, err
 	}
 
-	downloadDir := strings.TrimSpace(cfg.Aria2.DownloadDir)
+	downloadDir := strings.TrimSpace(cfg.Download.Dir)
 	if downloadDir == "" {
-		return model.Task{}, newTaskServiceError(http.StatusInternalServerError, "aria2 download_dir is required")
+		return model.Task{}, newTaskServiceError(http.StatusInternalServerError, "download dir is required")
 	}
 	if err := utils.EnsureDir(downloadDir); err != nil {
 		return model.Task{}, fmt.Errorf("create download dir: %w", err)
@@ -538,7 +536,6 @@ func (s *TaskService) PrepareTaskDownload(ctx context.Context, taskID string) (m
 		task.UpdatedAt = now
 		task.FinishedAt = nil
 		clearTaskError(task)
-		task.Download.Aria2GID = ""
 		task.Download.SaveDir = downloadDir
 		task.Download.LocalPath = filepath.Join(toContainerPath(downloadDir), fileName)
 		task.Download.Status = "starting"
@@ -558,36 +555,16 @@ func (s *TaskService) PrepareTaskDownload(ctx context.Context, taskID string) (m
 	return task, nil
 }
 
-func (s *TaskService) AttachAria2GID(_ context.Context, taskID, gid string) (model.Task, error) {
-	now := time.Now()
-	task, err := s.store.UpdateTask(taskID, func(task *model.Task) error {
-		if task.Status != model.TaskStatusDownloading {
-			return newTaskServiceError(http.StatusBadRequest, fmt.Sprintf("task status %q cannot attach aria2 gid", task.Status))
-		}
-		task.Download.Aria2GID = strings.TrimSpace(gid)
-		task.Download.Status = "active"
-		task.UpdatedAt = now
-		return nil
-	})
-	if err != nil {
-		return model.Task{}, err
-	}
-	if err := s.appendTaskLog(task.ID, "info", "aria2 gid assigned"); err != nil {
-		return model.Task{}, err
-	}
-	return task, nil
-}
-
-func (s *TaskService) SyncDownloadStatus(_ context.Context, taskID string, ariaStatus client.Aria2Status) (model.Task, error) {
+func (s *TaskService) SyncDownloadStatus(_ context.Context, taskID string, dlStatus client.DownloadStatus) (model.Task, error) {
 	now := time.Now()
 	return s.store.UpdateTask(taskID, func(task *model.Task) error {
 		task.UpdatedAt = now
-		task.Download.Status = ariaStatus.Status
-		task.Download.TotalBytes = maxInt64(task.Download.TotalBytes, ariaStatus.TotalLength)
-		task.Download.CompletedBytes = ariaStatus.CompletedLength
+		task.Download.Status = dlStatus.Status
+		task.Download.TotalBytes = maxInt64(task.Download.TotalBytes, dlStatus.TotalLength)
+		task.Download.CompletedBytes = dlStatus.CompletedLength
 		task.Download.Progress = calculateProgress(task.Download.CompletedBytes, task.Download.TotalBytes)
-		task.Download.Speed = ariaStatus.DownloadSpeed
-		if localPath := firstAria2FilePath(ariaStatus); localPath != "" {
+		task.Download.Speed = dlStatus.DownloadSpeed
+		if localPath := firstDownloadFilePath(dlStatus); localPath != "" {
 			task.Download.LocalPath = localPath
 		}
 		if task.Download.Status == "complete" {
@@ -622,15 +599,15 @@ func (s *TaskService) MarkDownloadFailedWithDetails(_ context.Context, taskID, s
 	return task, nil
 }
 
-func (s *TaskService) MarkDownloadCompleted(ctx context.Context, taskID string, ariaStatus client.Aria2Status) (model.Task, error) {
+func (s *TaskService) MarkDownloadCompleted(ctx context.Context, taskID string, dlStatus client.DownloadStatus) (model.Task, error) {
 	now := time.Now()
 	task, err := s.store.UpdateTask(taskID, func(task *model.Task) error {
 		task.Download.Status = "complete"
-		task.Download.TotalBytes = maxInt64(task.Download.TotalBytes, ariaStatus.TotalLength)
-		task.Download.CompletedBytes = maxInt64(task.Download.TotalBytes, ariaStatus.CompletedLength)
+		task.Download.TotalBytes = maxInt64(task.Download.TotalBytes, dlStatus.TotalLength)
+		task.Download.CompletedBytes = maxInt64(task.Download.TotalBytes, dlStatus.CompletedLength)
 		task.Download.Progress = 100
 		task.Download.Speed = 0
-		if localPath := firstAria2FilePath(ariaStatus); localPath != "" {
+		if localPath := firstDownloadFilePath(dlStatus); localPath != "" {
 			task.Download.LocalPath = localPath
 		}
 		task.Status = model.TaskStatusDownloadCompleted
@@ -1000,32 +977,6 @@ func (s *TaskService) RecoverInterruptedUpload(ctx context.Context, taskID strin
 	return task, nil
 }
 
-func (s *TaskService) MarkTaskRecovered(_ context.Context, taskID string, ariaStatus client.Aria2Status) (model.Task, error) {
-	now := time.Now()
-	task, err := s.store.UpdateTask(taskID, func(task *model.Task) error {
-		task.Status = model.TaskStatusDownloading
-		clearTaskError(task)
-		task.Download.Status = ariaStatus.Status
-		task.Download.TotalBytes = maxInt64(task.Download.TotalBytes, ariaStatus.TotalLength)
-		task.Download.CompletedBytes = ariaStatus.CompletedLength
-		task.Download.Progress = calculateProgress(task.Download.CompletedBytes, task.Download.TotalBytes)
-		task.Download.Speed = ariaStatus.DownloadSpeed
-		if localPath := firstAria2FilePath(ariaStatus); localPath != "" {
-			task.Download.LocalPath = localPath
-		}
-		task.UpdatedAt = now
-		task.FinishedAt = nil
-		return nil
-	})
-	if err != nil {
-		return model.Task{}, err
-	}
-	if err := s.appendTaskLog(task.ID, "info", "task recovered from aria2 status"); err != nil {
-		return model.Task{}, err
-	}
-	return task, nil
-}
-
 func (s *TaskService) RecoverCompletedDownload(ctx context.Context, taskID string) (model.Task, error) {
 	task, err := s.GetTask(ctx, taskID)
 	if err != nil {
@@ -1075,7 +1026,6 @@ func (s *TaskService) RetryTask(ctx context.Context, id string) (model.Task, err
 		task.Status = nextStatus
 		task.RetryCount++
 		clearTaskError(task)
-		task.Download.Aria2GID = ""
 		task.Download.Speed = 0
 
 		if nextStatus == model.TaskStatusUploadPending {
@@ -1151,9 +1101,7 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) (model.Task, er
 	case model.TaskStatusQueued:
 		return s.markTaskCanceled(task.ID, "queued", "task canceled by user")
 	case model.TaskStatusDownloading:
-		if err := s.cancelAria2Task(ctx, task); err != nil {
-			return model.Task{}, err
-		}
+		s.cancelTaskRun(task.ID)
 		return s.markTaskCanceled(task.ID, "removed", "task canceled by user")
 	case model.TaskStatusUploadPending:
 		return s.markTaskCanceled(task.ID, task.Download.Status, "task canceled by user")
@@ -1165,27 +1113,6 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) (model.Task, er
 	default:
 		return model.Task{}, newTaskServiceError(http.StatusBadRequest, fmt.Sprintf("task status %q cannot be canceled", task.Status))
 	}
-}
-
-func (s *TaskService) GetAria2Access(_ context.Context) (client.Aria2Access, model.AppConfig, error) {
-	cfg, err := s.store.LoadConfig()
-	if err != nil {
-		return client.Aria2Access{}, model.AppConfig{}, err
-	}
-	if strings.TrimSpace(cfg.Aria2.RPCURL) == "" {
-		return client.Aria2Access{}, model.AppConfig{}, newTaskServiceError(http.StatusInternalServerError, "aria2 rpc_url is required")
-	}
-
-	timeout := time.Duration(cfg.Aria2.ConnectTimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
-
-	return client.Aria2Access{
-		RPCURL:         cfg.Aria2.RPCURL,
-		Secret:         cfg.Aria2.Secret,
-		ConnectTimeout: timeout,
-	}, cfg, nil
 }
 
 func (s *TaskService) GetEmosAccess(_ context.Context) (client.EmosAccess, model.AppConfig, error) {
@@ -1306,22 +1233,6 @@ func (s *TaskService) appendTaskLog(taskID, level, message string) error {
 		Message: message,
 		Time:    time.Now(),
 	})
-}
-
-func (s *TaskService) cancelAria2Task(ctx context.Context, task model.Task) error {
-	if s.aria2Client == nil || strings.TrimSpace(task.Download.Aria2GID) == "" {
-		return nil
-	}
-
-	access, _, err := s.GetAria2Access(ctx)
-	if err != nil {
-		return err
-	}
-	err = s.aria2Client.ForceRemove(ctx, access, task.Download.Aria2GID)
-	if err != nil && !isAria2NotFoundError(err) {
-		return err
-	}
-	return nil
 }
 
 func (s *TaskService) markTaskCanceled(taskID, downloadStatus, message string) (model.Task, error) {
@@ -1463,16 +1374,11 @@ func calculateProgress(completed, total int64) float64 {
 	return float64(completed) * 100 / float64(total)
 }
 
-func firstAria2FilePath(status client.Aria2Status) string {
+func firstDownloadFilePath(status client.DownloadStatus) string {
 	if len(status.Files) == 0 {
 		return ""
 	}
 	return strings.TrimSpace(status.Files[0].Path)
-}
-
-func isAria2NotFoundError(err error) bool {
-	message := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(message, "not found") || strings.Contains(message, "cannot be found")
 }
 
 func firstNonEmptyTaskString(values ...string) string {

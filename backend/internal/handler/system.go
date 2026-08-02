@@ -57,8 +57,8 @@ func (h *SystemHandler) getDiskUsage(c *gin.Context) {
 	// Prefer configured download cache (where free space actually matters).
 	path := ""
 	if h.store != nil {
-		if cfg, err := h.store.LoadConfig(); err == nil && strings.TrimSpace(cfg.Aria2.DownloadDir) != "" {
-			path = cfg.Aria2.DownloadDir
+		if cfg, err := h.store.LoadConfig(); err == nil && strings.TrimSpace(cfg.Download.Dir) != "" {
+			path = cfg.Download.Dir
 		} else if root := h.store.Root(); root != "" {
 			path = root
 		}

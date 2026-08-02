@@ -5,7 +5,7 @@ type AppConfig struct {
 	Auth     AuthConfig     `json:"auth"`
 	Local    LocalConfig    `json:"local"`
 	OpenList OpenListConfig `json:"openlist"`
-	Aria2    Aria2Config    `json:"aria2"`
+	Download DownloadConfig `json:"download"`
 	Emos     EmosConfig     `json:"emos"`
 	Worker   WorkerConfig   `json:"worker"`
 }
@@ -36,12 +36,10 @@ type OpenListConfig struct {
 	Token    string `json:"token"`
 }
 
-type Aria2Config struct {
-	RPCURL                string `json:"rpc_url"`
-	Secret                string `json:"secret"`
-	DownloadDir           string `json:"download_dir"`
-	PollIntervalSeconds   int    `json:"poll_interval_seconds"`
-	ConnectTimeoutSeconds int    `json:"connect_timeout_seconds"`
+// DownloadConfig controls the local download cache directory.
+type DownloadConfig struct {
+	// Dir is where downloaded files are cached before upload.
+	Dir string `json:"dir"`
 }
 
 type EmosConfig struct {
@@ -74,11 +72,8 @@ func DefaultAppConfig() AppConfig {
 			Password:      "admin",
 			TokenTTLHours: 72,
 		},
-		Aria2: Aria2Config{
-			RPCURL:                "http://127.0.0.1:6800/jsonrpc",
-			DownloadDir:           "./data/downloads",
-			PollIntervalSeconds:   3,
-			ConnectTimeoutSeconds: 10,
+		Download: DownloadConfig{
+			Dir: "./data/downloads",
 		},
 		Emos: EmosConfig{
 			BaseURL: "https://emos.best",
@@ -117,17 +112,8 @@ func NormalizeAppConfig(cfg AppConfig) AppConfig {
 		cfg.Auth.TokenTTLHours = defaults.Auth.TokenTTLHours
 	}
 
-	if cfg.Aria2.RPCURL == "" {
-		cfg.Aria2.RPCURL = defaults.Aria2.RPCURL
-	}
-	if cfg.Aria2.DownloadDir == "" {
-		cfg.Aria2.DownloadDir = defaults.Aria2.DownloadDir
-	}
-	if cfg.Aria2.PollIntervalSeconds <= 0 {
-		cfg.Aria2.PollIntervalSeconds = defaults.Aria2.PollIntervalSeconds
-	}
-	if cfg.Aria2.ConnectTimeoutSeconds <= 0 {
-		cfg.Aria2.ConnectTimeoutSeconds = defaults.Aria2.ConnectTimeoutSeconds
+	if cfg.Download.Dir == "" {
+		cfg.Download.Dir = defaults.Download.Dir
 	}
 
 	if cfg.Emos.BaseURL == "" {

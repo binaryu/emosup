@@ -31,7 +31,7 @@ func TestUploadExecutorExecuteUploadPendingTaskWithSaveRetry(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	emosClient := &stubEmosUploadClient{
 		tokenResult: client.EmosUploadTokenResult{
 			Storage:   "onedrive",
@@ -107,7 +107,7 @@ func TestRetryUploadFailedTaskPreservesUploadSessionForResume(t *testing.T) {
 	t.Parallel()
 
 	fileStore := newTaskTestStore(t)
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	taskID := seedUploadPendingTask(t, taskService, fileStore)
 
 	if _, err := fileStore.UpdateTask(taskID, func(task *model.Task) error {
@@ -171,7 +171,7 @@ func TestUploadExecutorR2UploadType(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	emosClient := &stubEmosUploadClient{
 		tokenResult: client.EmosUploadTokenResult{
 			Storage:    "r2",
@@ -226,7 +226,7 @@ func TestUploadExecutorMultipartUpload(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	presigns := []client.EmosMultipartPart{
 		{Number: 1, UploadURL: "https://upload.example/part/1"},
 		{Number: 2, UploadURL: "https://upload.example/part/2"},
@@ -296,7 +296,7 @@ func TestUploadExecutorMultipartUploadConcurrent(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	presigns := make([]client.EmosMultipartPart, 6)
 	for i := 1; i <= 6; i++ {
 		presigns[i-1] = client.EmosMultipartPart{
@@ -391,7 +391,7 @@ func TestUploadExecutorMultipartResumeSkipsUploadedParts(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	presigns := []model.UploadMultipartPart{
 		{Number: 1, UploadURL: "https://upload.example/part/1"},
 		{Number: 2, UploadURL: "https://upload.example/part/2"},
@@ -469,7 +469,7 @@ func TestUploadExecutorMultipartStalePresignCountRefreshesUploadContext(t *testi
 		t.Fatalf("save config: %v", err)
 	}
 
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	presigns := []client.EmosMultipartPart{
 		{Number: 1, UploadURL: "https://upload.example/new/1"},
 		{Number: 2, UploadURL: "https://upload.example/new/2"},
@@ -562,7 +562,7 @@ func TestUploadExecutorMultipartStaleFileIDRefreshesUploadContext(t *testing.T) 
 		t.Fatalf("save config: %v", err)
 	}
 
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	presigns := []client.EmosMultipartPart{
 		{Number: 1, UploadURL: "https://upload.example/new/1"},
 		{Number: 2, UploadURL: "https://upload.example/new/2"},
@@ -647,7 +647,7 @@ func TestUploadExecutorCancelThenRetryDoesNotFailTask(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	presigns := []client.EmosMultipartPart{
 		{Number: 1, UploadURL: "https://upload.example/part/1"},
 		{Number: 2, UploadURL: "https://upload.example/part/2"},
@@ -734,7 +734,7 @@ func TestRecordMultipartPartRejectsStaleRetryAttempt(t *testing.T) {
 	t.Parallel()
 
 	fileStore := newTaskTestStore(t)
-	taskService := NewTaskService(fileStore, &stubAria2Client{})
+	taskService := NewTaskService(fileStore)
 	taskID := seedUploadPendingTask(t, taskService, fileStore)
 	if _, err := fileStore.UpdateTask(taskID, func(task *model.Task) error {
 		task.Status = model.TaskStatusUploading
@@ -809,11 +809,11 @@ func seedUploadPendingTaskWithFileSize(t *testing.T, taskService *TaskService, f
 		t.Fatalf("write local file: %v", err)
 	}
 
-	if _, err := taskService.MarkDownloadCompleted(context.Background(), taskID, client.Aria2Status{
+	if _, err := taskService.MarkDownloadCompleted(context.Background(), taskID, client.DownloadStatus{
 		Status:          "complete",
 		TotalLength:     int64(size),
 		CompletedLength: int64(size),
-		Files:           []client.Aria2File{{Path: task.Download.LocalPath}},
+		Files:           []client.DownloadFile{{Path: task.Download.LocalPath}},
 	}); err != nil {
 		t.Fatalf("mark download completed: %v", err)
 	}

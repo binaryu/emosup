@@ -57,7 +57,6 @@ type TaskTarget struct {
 }
 
 type TaskDownload struct {
-	Aria2GID       string  `json:"aria2_gid"`
 	SaveDir        string  `json:"save_dir"`
 	LocalPath      string  `json:"local_path"`
 	Status         string  `json:"status"`

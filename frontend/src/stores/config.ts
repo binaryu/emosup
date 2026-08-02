@@ -23,12 +23,8 @@ const defaultConfig: AppConfig = {
     password: '',
     token: '',
   },
-  aria2: {
-    rpc_url: 'http://127.0.0.1:6800/jsonrpc',
-    secret: '',
-    download_dir: './data/downloads',
-    poll_interval_seconds: 3,
-    connect_timeout_seconds: 10,
+  download: {
+    dir: './data/downloads',
   },
   emos: {
     base_url: 'https://emos.best',
@@ -71,7 +67,7 @@ export const useConfigStore = defineStore('config', {
           server: { ...defaultConfig.server, ...(data.server || {}) },
           local: { ...defaultConfig.local, ...(data.local || {}) },
           openlist: { ...defaultConfig.openlist, ...(data.openlist || {}) },
-          aria2: { ...defaultConfig.aria2, ...(data.aria2 || {}) },
+          download: { ...defaultConfig.download, ...(data.download || {}) },
           emos: { ...defaultConfig.emos, ...(data.emos || {}) },
           worker: { ...defaultConfig.worker, ...(data.worker || {}) },
         }

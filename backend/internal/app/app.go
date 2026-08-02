@@ -55,10 +55,9 @@ func New() (*App, error) {
 	matchService := service.NewMatchService()
 	scanService := service.NewScanService(fileStore, openListService, localService, emosService, matchService)
 
-	aria2Client := client.NewHTTPAria2Client()
-	taskService := service.NewTaskService(fileStore, aria2Client, openListClient)
+	taskService := service.NewTaskService(fileStore, openListClient)
 	eventBus := eventbus.New()
-	downloadExecutor := service.NewDownloadExecutor(taskService, aria2Client, openListClient, eventBus)
+	downloadExecutor := service.NewDownloadExecutor(taskService, openListClient, eventBus)
 	uploadExecutor := service.NewUploadExecutor(taskService, emosClient, eventBus)
 	tmdbClient := client.NewTMDBClient()
 

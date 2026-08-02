@@ -47,12 +47,8 @@ export interface OpenListConfig {
   token: string
 }
 
-export interface Aria2Config {
-  rpc_url: string
-  secret: string
-  download_dir: string
-  poll_interval_seconds: number
-  connect_timeout_seconds: number
+export interface DownloadConfig {
+  dir: string
 }
 
 export interface EmosConfig {
@@ -78,7 +74,7 @@ export interface AppConfig {
   auth: AuthConfig
   local: LocalConfig
   openlist: OpenListConfig
-  aria2: Aria2Config
+  download: DownloadConfig
   emos: EmosConfig
   worker: WorkerConfig
 }
@@ -169,7 +165,6 @@ export interface Task {
     title: string
   }
   download: {
-    aria2_gid: string
     save_dir: string
     local_path: string
     status: string

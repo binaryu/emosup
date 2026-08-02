@@ -30,8 +30,8 @@ func TestInitCreatesDBAndDownloadDir(t *testing.T) {
 		t.Fatalf("load config: %v", err)
 	}
 	want, _ := filepath.Abs(filepath.Join(root, "downloads"))
-	if cfg.Aria2.DownloadDir != want {
-		t.Fatalf("download_dir=%q want %q", cfg.Aria2.DownloadDir, want)
+	if cfg.Download.Dir != want {
+		t.Fatalf("download_dir=%q want %q", cfg.Download.Dir, want)
 	}
 }
 

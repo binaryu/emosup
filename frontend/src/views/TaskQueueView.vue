@@ -399,9 +399,10 @@ function scheduleFlush() {
         needSoftRefresh = true
         continue
       }
-      if (!applyLiveEvent(evt)) {
-        needSoftRefresh = true
-      }
+      // Ignore the return value: progress events for tasks not on the
+      // current page/filter are skipped silently instead of triggering a
+      // full refetch (which previously caused a 1s fetch storm → UI freeze).
+      applyLiveEvent(evt)
     }
     if (needSoftRefresh) scheduleSoftRefresh()
   }, 250)
@@ -460,10 +461,16 @@ function applyLiveEvent(evt: LiveTaskEvent): boolean {
   })
 }
 
+let lastSoftRefresh = 0
 function scheduleSoftRefresh() {
   if (softRefreshTimer) return
+  // Rate-limit background refetches: at most one per 3s, otherwise busy
+  // queues keep hitting /api/tasks + /stats + /runtime every second.
+  const now = Date.now()
+  if (now - lastSoftRefresh < 3000) return
   softRefreshTimer = window.setTimeout(async () => {
     softRefreshTimer = undefined
+    lastSoftRefresh = Date.now()
     try {
       await Promise.all([
         taskStore.fetchTasks({ status: filterStatus.value, page: taskStore.page }),

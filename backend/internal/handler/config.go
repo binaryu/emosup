@@ -52,7 +52,7 @@ func (h *ConfigHandler) saveConfig(c *gin.Context) {
 func (h *ConfigHandler) validateConfig(c *gin.Context) {
 	respondOK(c, gin.H{
 		"openlist": "pending",
-		"aria2":    "pending",
+		"download": "pending",
 		"emos":     "pending",
 		"message":  "第一阶段仅保留接口与状态位，后续补充真实连通性检查。",
 	})

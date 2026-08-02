@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,7 +109,7 @@ func (s *FileStore) Init() error {
 	if err != nil {
 		return err
 	}
-	if dir := strings.TrimSpace(cfg.Aria2.DownloadDir); dir != "" {
+	if dir := strings.TrimSpace(cfg.Download.Dir); dir != "" {
 		if err := utils.EnsureDir(dir); err != nil {
 			return fmt.Errorf("ensure download dir %s: %w", dir, err)
 		}
@@ -186,7 +187,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   target_item_type TEXT NOT NULL DEFAULT '',
   target_item_id INTEGER NOT NULL DEFAULT 0,
   target_title TEXT NOT NULL DEFAULT '',
-  dl_aria2_gid TEXT NOT NULL DEFAULT '',
   dl_save_dir TEXT NOT NULL DEFAULT '',
   dl_local_path TEXT NOT NULL DEFAULT '',
   dl_status TEXT NOT NULL DEFAULT '',
@@ -236,6 +236,26 @@ CREATE INDEX IF NOT EXISTS idx_task_logs_task ON task_logs(task_id, time);
 	}
 	if err := s.migrateTaskColumns(); err != nil {
 		return err
+	}
+	if err := s.dropLegacyColumns(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// dropLegacyColumns removes columns from old schemas that are no longer used.
+func (s *FileStore) dropLegacyColumns() error {
+	for _, column := range []string{"dl_aria2_gid"} {
+		exists, err := s.columnExists("tasks", column)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		if _, err := s.db.Exec("ALTER TABLE tasks DROP COLUMN " + column); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -303,6 +323,24 @@ func (s *FileStore) LoadConfig() (model.AppConfig, error) {
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		return model.AppConfig{}, err
 	}
+	// Legacy migration: pre-v1.2.3 configs stored the cache dir under the
+	// (removed) aria2 section as download_dir. Persist the migrated shape once
+	// so the stored config no longer carries the dead section.
+	if strings.Contains(raw, `"aria2"`) && strings.TrimSpace(cfg.Download.Dir) == "" {
+		var legacy struct {
+			Aria2 struct {
+				DownloadDir string `json:"download_dir"`
+			} `json:"aria2"`
+		}
+		if json.Unmarshal([]byte(raw), &legacy) == nil && legacy.Aria2.DownloadDir != "" {
+			cfg.Download.Dir = legacy.Aria2.DownloadDir
+		}
+		cfg = s.normalizeConfig(cfg)
+		if saveErr := s.SaveConfig(cfg); saveErr != nil {
+			log.Printf("persist migrated config failed: %v", saveErr)
+		}
+		return cfg, nil
+	}
 	return s.normalizeConfig(cfg), nil
 }
 
@@ -332,21 +370,21 @@ func (s *FileStore) ensureConfig() error {
 
 func (s *FileStore) defaultConfig() model.AppConfig {
 	cfg := model.DefaultAppConfig()
-	cfg.Aria2.DownloadDir = filepath.Join(s.root, "downloads")
+	cfg.Download.Dir = filepath.Join(s.root, "downloads")
 	return model.NormalizeAppConfig(cfg)
 }
 
 func (s *FileStore) normalizeConfig(cfg model.AppConfig) model.AppConfig {
 	cfg = model.NormalizeAppConfig(cfg)
-	dir := strings.TrimSpace(cfg.Aria2.DownloadDir)
-	defaultPlaceholder := model.DefaultAppConfig().Aria2.DownloadDir
+	dir := strings.TrimSpace(cfg.Download.Dir)
+	defaultPlaceholder := model.DefaultAppConfig().Download.Dir
 	if dir == "" || dir == defaultPlaceholder || dir == "./data/downloads" || dir == "data/downloads" {
-		cfg.Aria2.DownloadDir = filepath.Join(s.root, "downloads")
+		cfg.Download.Dir = filepath.Join(s.root, "downloads")
 	} else if !filepath.IsAbs(dir) {
-		cfg.Aria2.DownloadDir = filepath.Join(s.root, dir)
+		cfg.Download.Dir = filepath.Join(s.root, dir)
 	}
-	if abs, err := filepath.Abs(cfg.Aria2.DownloadDir); err == nil {
-		cfg.Aria2.DownloadDir = abs
+	if abs, err := filepath.Abs(cfg.Download.Dir); err == nil {
+		cfg.Download.Dir = abs
 	}
 
 	// Local browse root: keep empty (means fall back) or resolve to absolute path.
@@ -691,7 +729,7 @@ INSERT INTO tasks(
   source_type, source_path, source_raw_url, source_file_name, source_file_size,
   parsed_season, parsed_episode, parsed_is_special,
   target_tmdb_id, target_item_type, target_item_id, target_title,
-  dl_aria2_gid, dl_save_dir, dl_local_path, dl_status, dl_total_bytes, dl_completed_bytes, dl_progress, dl_speed,
+  dl_save_dir, dl_local_path, dl_status, dl_total_bytes, dl_completed_bytes, dl_progress, dl_speed,
   ul_storage, ul_file_id, ul_upload_url, ul_upload_type, ul_multipart_size_min, ul_multipart_size_max,
   ul_multipart_presigns, ul_multipart_parts, ul_media_id, ul_total_bytes, ul_uploaded_bytes, ul_progress, ul_speed,
   ul_status, ul_save_retry_count, ul_last_save_error,
@@ -702,7 +740,7 @@ INSERT INTO tasks(
   ?,?,?,?,?,
   ?,?,?,
   ?,?,?,?,
-  ?,?,?,?,?,?,?,?,
+  ?,?,?,?,?,?,?,
   ?,?,?,?,?,?,?,?,?,?,?,?,?,
   ?,?,?,
   ?,?,?,?,
@@ -716,7 +754,7 @@ ON CONFLICT(id) DO UPDATE SET
   parsed_season=excluded.parsed_season, parsed_episode=excluded.parsed_episode, parsed_is_special=excluded.parsed_is_special,
   target_tmdb_id=excluded.target_tmdb_id, target_item_type=excluded.target_item_type,
   target_item_id=excluded.target_item_id, target_title=excluded.target_title,
-  dl_aria2_gid=excluded.dl_aria2_gid, dl_save_dir=excluded.dl_save_dir, dl_local_path=excluded.dl_local_path,
+  dl_save_dir=excluded.dl_save_dir, dl_local_path=excluded.dl_local_path,
   dl_status=excluded.dl_status, dl_total_bytes=excluded.dl_total_bytes, dl_completed_bytes=excluded.dl_completed_bytes,
   dl_progress=excluded.dl_progress, dl_speed=excluded.dl_speed,
   ul_storage=excluded.ul_storage, ul_file_id=excluded.ul_file_id, ul_upload_url=excluded.ul_upload_url,
@@ -733,7 +771,7 @@ ON CONFLICT(id) DO UPDATE SET
 		task.Source.Type, task.Source.Path, task.Source.RawURL, task.Source.FileName, task.Source.FileSize,
 		season, episode, boolToInt(task.Parsed.IsSpecial),
 		task.Target.TMDBID, task.Target.ItemType, task.Target.ItemID, task.Target.Title,
-		task.Download.Aria2GID, task.Download.SaveDir, task.Download.LocalPath, task.Download.Status,
+		task.Download.SaveDir, task.Download.LocalPath, task.Download.Status,
 		task.Download.TotalBytes, task.Download.CompletedBytes, task.Download.Progress, task.Download.Speed,
 		task.Upload.Storage, task.Upload.FileID, task.Upload.UploadURL, task.Upload.UploadType,
 		task.Upload.MultipartSizeMin, task.Upload.MultipartSizeMax, string(presignsJSON), string(partsJSON),
@@ -759,7 +797,7 @@ const taskColumns = `
   source_type, source_path, source_raw_url, source_file_name, source_file_size,
   parsed_season, parsed_episode, parsed_is_special,
   target_tmdb_id, target_item_type, target_item_id, target_title,
-  dl_aria2_gid, dl_save_dir, dl_local_path, dl_status, dl_total_bytes, dl_completed_bytes, dl_progress, dl_speed,
+  dl_save_dir, dl_local_path, dl_status, dl_total_bytes, dl_completed_bytes, dl_progress, dl_speed,
   ul_storage, ul_file_id, ul_upload_url, ul_upload_type, ul_multipart_size_min, ul_multipart_size_max,
   ul_multipart_presigns, ul_multipart_parts, ul_media_id, ul_total_bytes, ul_uploaded_bytes, ul_progress, ul_speed,
   ul_status, ul_save_retry_count, ul_last_save_error,
@@ -784,7 +822,7 @@ func scanTask(row scannable) (model.Task, error) {
 		&t.Source.Type, &t.Source.Path, &t.Source.RawURL, &t.Source.FileName, &t.Source.FileSize,
 		&season, &episode, &special,
 		&t.Target.TMDBID, &t.Target.ItemType, &t.Target.ItemID, &t.Target.Title,
-		&t.Download.Aria2GID, &t.Download.SaveDir, &t.Download.LocalPath, &t.Download.Status,
+		&t.Download.SaveDir, &t.Download.LocalPath, &t.Download.Status,
 		&t.Download.TotalBytes, &t.Download.CompletedBytes, &t.Download.Progress, &t.Download.Speed,
 		&t.Upload.Storage, &t.Upload.FileID, &t.Upload.UploadURL, &t.Upload.UploadType,
 		&t.Upload.MultipartSizeMin, &t.Upload.MultipartSizeMax, &presignsJSON, &partsJSON,
@@ -886,7 +924,7 @@ INSERT INTO tasks(
   source_type, source_path, source_raw_url, source_file_name, source_file_size,
   parsed_season, parsed_episode, parsed_is_special,
   target_tmdb_id, target_item_type, target_item_id, target_title,
-  dl_aria2_gid, dl_save_dir, dl_local_path, dl_status, dl_total_bytes, dl_completed_bytes, dl_progress, dl_speed,
+  dl_save_dir, dl_local_path, dl_status, dl_total_bytes, dl_completed_bytes, dl_progress, dl_speed,
   ul_storage, ul_file_id, ul_upload_url, ul_upload_type, ul_multipart_size_min, ul_multipart_size_max,
   ul_multipart_presigns, ul_multipart_parts, ul_media_id, ul_total_bytes, ul_uploaded_bytes, ul_progress, ul_speed,
   ul_status, ul_save_retry_count, ul_last_save_error,
@@ -897,7 +935,7 @@ INSERT INTO tasks(
   ?,?,?,?,?,
   ?,?,?,
   ?,?,?,?,
-  ?,?,?,?,?,?,?,?,
+  ?,?,?,?,?,?,?,
   ?,?,?,?,?,?,?,?,?,?,?,?,?,
   ?,?,?,
   ?,?,?,?,
@@ -911,7 +949,7 @@ ON CONFLICT(id) DO UPDATE SET
   parsed_season=excluded.parsed_season, parsed_episode=excluded.parsed_episode, parsed_is_special=excluded.parsed_is_special,
   target_tmdb_id=excluded.target_tmdb_id, target_item_type=excluded.target_item_type,
   target_item_id=excluded.target_item_id, target_title=excluded.target_title,
-  dl_aria2_gid=excluded.dl_aria2_gid, dl_save_dir=excluded.dl_save_dir, dl_local_path=excluded.dl_local_path,
+  dl_save_dir=excluded.dl_save_dir, dl_local_path=excluded.dl_local_path,
   dl_status=excluded.dl_status, dl_total_bytes=excluded.dl_total_bytes, dl_completed_bytes=excluded.dl_completed_bytes,
   dl_progress=excluded.dl_progress, dl_speed=excluded.dl_speed,
   ul_storage=excluded.ul_storage, ul_file_id=excluded.ul_file_id, ul_upload_url=excluded.ul_upload_url,
@@ -928,7 +966,7 @@ ON CONFLICT(id) DO UPDATE SET
 		task.Source.Type, task.Source.Path, task.Source.RawURL, task.Source.FileName, task.Source.FileSize,
 		season, episode, boolToInt(task.Parsed.IsSpecial),
 		task.Target.TMDBID, task.Target.ItemType, task.Target.ItemID, task.Target.Title,
-		task.Download.Aria2GID, task.Download.SaveDir, task.Download.LocalPath, task.Download.Status,
+		task.Download.SaveDir, task.Download.LocalPath, task.Download.Status,
 		task.Download.TotalBytes, task.Download.CompletedBytes, task.Download.Progress, task.Download.Speed,
 		task.Upload.Storage, task.Upload.FileID, task.Upload.UploadURL, task.Upload.UploadType,
 		task.Upload.MultipartSizeMin, task.Upload.MultipartSizeMax, string(presignsJSON), string(partsJSON),

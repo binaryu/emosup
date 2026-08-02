@@ -50,7 +50,7 @@
           </el-form-item>
           <el-form-item label="下载缓存目录">
             <el-input
-              v-model="configStore.config.aria2.download_dir"
+              v-model="configStore.config.download.dir"
               placeholder="OpenList 任务下载到此目录"
             />
           </el-form-item>

@@ -33,7 +33,7 @@ func NewLocalService(store *store.FileStore) *LocalService {
 // Priority:
 //  1. EMOSUP_LOCAL_ROOT (env override, e.g. Docker /media)
 //  2. config.local.root (settings UI / config file)
-//  3. config.aria2.download_dir
+//  3. config.download.dir
 //  4. {dataRoot}/downloads
 func (s *LocalService) Root() string {
 	localRoot, downloadDir, dataRoot := "", "", ""
@@ -41,7 +41,7 @@ func (s *LocalService) Root() string {
 		dataRoot = s.store.Root()
 		if cfg, err := s.store.LoadConfig(); err == nil {
 			localRoot = strings.TrimSpace(cfg.Local.Root)
-			downloadDir = strings.TrimSpace(cfg.Aria2.DownloadDir)
+			downloadDir = strings.TrimSpace(cfg.Download.Dir)
 		}
 	}
 	return ResolveLocalMediaRoot(localRoot, downloadDir, dataRoot)
