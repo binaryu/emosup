@@ -148,32 +148,53 @@ jobs:
           test -f release-assets/emosup-linux-amd64.tar.gz
           test -f release-assets/emosup-linux-arm64.tar.gz
 
+      - name: Build release body
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          {
+            echo '## 安装'
+            echo
+            echo '```bash'
+            echo 'curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sudo bash'
+            echo '```'
+            echo
+            echo '安装时会询问端口（默认 8080）。或指定：'
+            echo
+            echo '```bash'
+            echo 'curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sudo bash -s -- install --version '"${TAG}"' --port 8080'
+            echo '```'
+            echo
+            echo '默认账号：`admin` / `admin`'
+            echo '面板：`http://服务器IP:端口`'
+            echo
+            echo '---'
+            echo
+            echo '## 更新内容'
+            echo
+            # Extract the CHANGELOG.md section for this tag (## v1.2.4 ... next ##).
+            # Fall back to the latest section when the tag has no own entry.
+            if ! awk -v tag="${TAG}" 'BEGIN{found=0} /^## /{if (found) exit} {if ($0 ~ "^## " tag "$") found=1} found{print}' CHANGELOG.md | grep -q .; then
+              awk 'BEGIN{found=0} /^## /{if (found) exit} /^## /{found=1} found{print}' CHANGELOG.md
+            else
+              awk -v tag="${TAG}" 'BEGIN{found=0} /^## /{if (found) exit} {if ($0 ~ "^## " tag "$") found=1} found{print}' CHANGELOG.md
+            fi
+          } > release-body.md
+          test -s release-body.md
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ steps.meta.outputs.prerelease }}
-          generate_release_notes: true
+          generate_release_notes: false
           fail_on_unmatched_files: true
           files: |
             release-assets/emosup-linux-amd64.tar.gz
             release-assets/emosup-linux-amd64.tar.gz.sha256
             release-assets/emosup-linux-arm64.tar.gz
             release-assets/emosup-linux-arm64.tar.gz.sha256
-          body: |
-            ## 安装
-
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sudo bash
-            ```
-
-            安装时会询问端口（默认 8080）。或指定：
-
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sudo bash -s -- install --version ${{ github.ref_name }} --port 8080
-            ```
-
-            默认账号：`admin` / `admin`  
-            面板：`http://服务器IP:端口`
+          body_path: release-body.md
 
   # Independent of publish-release so a flaky Docker push never blocks the GitHub Release.
   build-docker:
