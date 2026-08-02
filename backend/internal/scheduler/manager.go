@@ -26,12 +26,13 @@ type Manager struct {
 	pollInterval     time.Duration
 	maxConcurrency   int
 	eventBus         *eventbus.Bus
+	tuner            *service.Tuner
 
-	mu            sync.RWMutex
-	running       bool
-	activeTasks   map[string]string // taskID -> stage
-	startedAt     *time.Time
-	lastRecovery  RecoverySummary
+	mu           sync.RWMutex
+	running      bool
+	activeTasks  map[string]string // taskID -> stage
+	startedAt    *time.Time
+	lastRecovery RecoverySummary
 }
 
 func NewManager(
@@ -41,6 +42,7 @@ func NewManager(
 	pollInterval time.Duration,
 	maxConcurrency int,
 	eventBus *eventbus.Bus,
+	tuner *service.Tuner,
 ) *Manager {
 	if pollInterval <= 0 {
 		pollInterval = 5 * time.Second
@@ -56,8 +58,28 @@ func NewManager(
 		pollInterval:     pollInterval,
 		maxConcurrency:   maxConcurrency,
 		eventBus:         eventBus,
+		tuner:            tuner,
 		activeTasks:      make(map[string]string),
 	}
+}
+
+// effectiveCeiling returns how many tasks may run in parallel this poll:
+// the fixed user cap, raised by the auto-tuner when it is enabled.
+func (m *Manager) effectiveCeiling() int {
+	ceiling := m.maxConcurrency
+	if m.tuner != nil {
+		if snap := m.tuner.Snapshot(); snap.Enabled {
+			ceiling = max(ceiling, max(snap.DownloadConcurrency, snap.UploadConcurrency))
+		}
+	}
+	return ceiling
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m *Manager) Start(ctx context.Context) {
@@ -129,12 +151,12 @@ func (m *Manager) tick(ctx context.Context) error {
 	m.maxConcurrency = maxConc
 	m.mu.Unlock()
 
-	if activeCount >= maxConc {
+	// Pick up to (effectiveCeiling - activeCount) tasks
+	ceiling := m.effectiveCeiling()
+	if activeCount >= ceiling {
 		return nil
 	}
-
-	// Pick up to (maxConcurrency - activeCount) tasks
-	for i := 0; i < maxConc-activeCount; i++ {
+	for i := 0; i < ceiling-activeCount; i++ {
 		m.mu.RLock()
 		activeIDs := make(map[string]struct{}, len(m.activeTasks))
 		for id := range m.activeTasks {

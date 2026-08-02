@@ -28,14 +28,32 @@ type UploadExecutor struct {
 	taskService *TaskService
 	emosClient  client.EmosClient
 	eventBus    *eventbus.Bus
+	tuner       *Tuner
 }
 
-func NewUploadExecutor(taskService *TaskService, emosClient client.EmosClient, eventBus *eventbus.Bus) *UploadExecutor {
+func NewUploadExecutor(taskService *TaskService, emosClient client.EmosClient, eventBus *eventbus.Bus, tuner *Tuner) *UploadExecutor {
 	return &UploadExecutor{
 		taskService: taskService,
 		emosClient:  emosClient,
 		eventBus:    eventBus,
+		tuner:       tuner,
 	}
+}
+
+// tuned returns the auto-tuned upload floors (chunk MB and part concurrency)
+// raised above the user-configured values, or the user values when tuning is off.
+func (e *UploadExecutor) tuned(chunkMB, parts int) (int, int) {
+	if e.tuner != nil {
+		if snap := e.tuner.Snapshot(); snap.Enabled {
+			if snap.UploadChunkMB > chunkMB {
+				chunkMB = snap.UploadChunkMB
+			}
+			if snap.UploadParts > parts {
+				parts = snap.UploadParts
+			}
+		}
+	}
+	return chunkMB, parts
 }
 
 func (e *UploadExecutor) isCanceledUpload(ctx context.Context, taskID string) bool {
@@ -73,7 +91,8 @@ func (e *UploadExecutor) Execute(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	chunkSize := int64(cfg.Worker.UploadChunkSizeMB) * 1024 * 1024
+	chunkMB, parts := e.tuned(cfg.Worker.UploadChunkSizeMB, cfg.Worker.UploadPartConcurrency)
+	chunkSize := int64(chunkMB) * 1024 * 1024
 	if chunkSize <= 0 {
 		chunkSize = 8 * 1024 * 1024
 	}
@@ -91,7 +110,7 @@ func (e *UploadExecutor) Execute(ctx context.Context, taskID string) error {
 	switch task.Status {
 	case model.TaskStatusUploadPending:
 		// For retried uploads with existing upload context, resume from where we left off
-		task, err = e.uploadFile(ctx, task, access, chunkSize, clampUploadPartConcurrency(cfg.Worker.UploadPartConcurrency))
+		task, err = e.uploadFile(ctx, task, access, chunkSize, clampUploadPartConcurrency(parts))
 		if err != nil {
 			if errors.Is(err, errTaskCanceled) || e.isCanceledUpload(ctx, task.ID) {
 				return nil
@@ -171,11 +190,17 @@ func (e *UploadExecutor) uploadFile(ctx context.Context, task model.Task, access
 		}
 
 		lastSSE := time.Time{}
+		var lastMetered int64
 		err = e.emosClient.UploadFile(ctx, uploadType, effectiveUploadURL, localPath, chunkSize, offset, func(progress client.EmosUploadProgress) error {
 			if canceled, cancelErr := e.taskService.IsTaskCanceled(ctx, task.ID); cancelErr != nil {
 				return cancelErr
 			} else if canceled {
 				return errTaskCanceled
+			}
+
+			if e.tuner != nil && progress.UploadedBytes > lastMetered {
+				e.tuner.RecordUploadBytes(progress.UploadedBytes - lastMetered)
+				lastMetered = progress.UploadedBytes
 			}
 
 			updated, syncErr := e.taskService.SyncUploadProgress(ctx, task.ID, progress)
@@ -325,6 +350,9 @@ func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, a
 				return
 			}
 			liveBytes.Add(partBytes)
+			if e.tuner != nil {
+				e.tuner.RecordUploadBytes(partBytes)
+			}
 			now := time.Now()
 			stateMu.Lock()
 			total := completedBytes + liveBytes.Load()

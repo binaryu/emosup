@@ -51,14 +51,16 @@ type DownloadExecutor struct {
 	taskService    *TaskService
 	openListClient client.OpenListClient
 	eventBus       *eventbus.Bus
+	tuner          *Tuner
 }
 
-func NewDownloadExecutor(taskService *TaskService, openListClient client.OpenListClient, eventBus *eventbus.Bus) *DownloadExecutor {
+func NewDownloadExecutor(taskService *TaskService, openListClient client.OpenListClient, eventBus *eventbus.Bus, tuner *Tuner) *DownloadExecutor {
 	initDownloadPaths()
 	return &DownloadExecutor{
 		taskService:    taskService,
 		openListClient: openListClient,
 		eventBus:       eventBus,
+		tuner:          tuner,
 	}
 }
 
@@ -351,6 +353,11 @@ var downloadHTTPClient = &http.Client{
 
 func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string) error {
 	threads := cfg.Worker.DownloadThreads
+	if e.tuner != nil {
+		if snap := e.tuner.Snapshot(); snap.Enabled && snap.DownloadThreads > threads {
+			threads = snap.DownloadThreads
+		}
+	}
 	if threads <= 1 {
 		threads = 1
 	}
@@ -440,6 +447,7 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 	startTime := time.Now()
 	lastSSE := time.Time{}
 	lastPersist := time.Time{}
+	var lastMetered int64 = offset
 	speedTracker := utils.NewSpeedTracker()
 	speedTracker.Sample(doneBytes, startTime)
 
@@ -478,6 +486,10 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 				TaskID: task.ID, Status: "downloading",
 				DlProg: progress, DlSpeed: speed, DlDone: doneBytes, DlTotal: totalBytes,
 			})
+		}
+		if shouldSSE && e.tuner != nil && doneBytes > lastMetered {
+			e.tuner.RecordDownloadBytes(doneBytes - lastMetered)
+			lastMetered = doneBytes
 		}
 	}
 
@@ -671,6 +683,7 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 	startTime := time.Now()
 	lastSSE := time.Time{}
 	lastPersist := time.Time{}
+	var lastMetered int64
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	completedSegments := 0
@@ -710,6 +723,10 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 				TaskID: task.ID, Status: "downloading",
 				DlProg: progress, DlSpeed: speed, DlDone: done, DlTotal: totalSize,
 			})
+		}
+		if shouldSSE && e.tuner != nil && done > lastMetered {
+			e.tuner.RecordDownloadBytes(done - lastMetered)
+			lastMetered = done
 		}
 	}
 

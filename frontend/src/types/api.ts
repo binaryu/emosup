@@ -67,6 +67,7 @@ export interface WorkerConfig {
   save_retry_max_attempts: number
   tmdb_api_key: string
   proxy_backends: string
+  auto_tune?: boolean
 }
 
 export interface AppConfig {

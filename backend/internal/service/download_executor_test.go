@@ -18,7 +18,7 @@ func TestDownloadExecutorExecuteQueuedTask(t *testing.T) {
 
 	fileStore := newTaskTestStore(t)
 	taskService := NewTaskService(fileStore)
-	executor := NewDownloadExecutor(taskService, nil, nil)
+	executor := NewDownloadExecutor(taskService, nil, nil, nil)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
@@ -78,7 +78,7 @@ func TestDownloadExecutorRecoverDownloadingTaskWithoutGIDUsesLocalFile(t *testin
 
 	fileStore := newTaskTestStore(t)
 	taskService := NewTaskService(fileStore)
-	executor := NewDownloadExecutor(taskService, nil, nil)
+	executor := NewDownloadExecutor(taskService, nil, nil, nil)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
@@ -148,7 +148,7 @@ func TestCancelStopsDirectDownloadAndKeepsCanceled(t *testing.T) {
 
 	fileStore := newTaskTestStore(t)
 	taskService := NewTaskService(fileStore)
-	executor := NewDownloadExecutor(taskService, nil, nil)
+	executor := NewDownloadExecutor(taskService, nil, nil, nil)
 	scan := seedTaskTestScan(t, fileStore)
 
 	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{

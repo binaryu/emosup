@@ -58,9 +58,14 @@ type WorkerConfig struct {
 	SaveRetryMaxAttempts     int    `json:"save_retry_max_attempts"`
 	TMDBAPIKey               string `json:"tmdb_api_key"`
 	ProxyBackends            string `json:"proxy_backends"`
+	// AutoTune adapts concurrency/threads/chunk size to measured bandwidth
+	// and free disk space (tuned values act as floors above the fixed ones).
+	// nil means enabled (default) so pre-existing configs opt in automatically.
+	AutoTune *bool `json:"auto_tune"`
 }
 
 func DefaultAppConfig() AppConfig {
+	trueVal := true
 	return AppConfig{
 		Server: ServerConfig{
 			// 0.0.0.0 so binary/systemd installs are reachable on LAN/WAN by default.
@@ -88,6 +93,7 @@ func DefaultAppConfig() AppConfig {
 			SaveRetryIntervalSeconds: 25,
 			SaveRetryMaxAttempts:     8,
 			ProxyBackends:            "quark,夸克",
+			AutoTune:                 &trueVal,
 		},
 	}
 }

@@ -57,7 +57,7 @@ func TestUploadExecutorExecuteUploadPendingTaskWithSaveRetry(t *testing.T) {
 			},
 		},
 	}
-	executor := NewUploadExecutor(taskService, emosClient, nil)
+	executor := NewUploadExecutor(taskService, emosClient, nil, nil)
 	taskID := seedUploadPendingTask(t, taskService, fileStore)
 
 	if err := executor.Execute(context.Background(), taskID); err != nil {
@@ -183,7 +183,7 @@ func TestUploadExecutorR2UploadType(t *testing.T) {
 			{UploadedBytes: 1024, TotalBytes: 1024, Speed: 256},
 		},
 	}
-	executor := NewUploadExecutor(taskService, emosClient, nil)
+	executor := NewUploadExecutor(taskService, emosClient, nil, nil)
 	taskID := seedUploadPendingTask(t, taskService, fileStore)
 
 	if err := executor.Execute(context.Background(), taskID); err != nil {
@@ -242,7 +242,7 @@ func TestUploadExecutorMultipartUpload(t *testing.T) {
 		},
 		presigns: presigns,
 	}
-	executor := NewUploadExecutor(taskService, emosClient, nil)
+	executor := NewUploadExecutor(taskService, emosClient, nil, nil)
 	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
 
 	if err := executor.Execute(context.Background(), taskID); err != nil {
@@ -319,7 +319,7 @@ func TestUploadExecutorMultipartUploadConcurrent(t *testing.T) {
 		started:              make(chan struct{}, 1),
 		release:              make(chan struct{}),
 	}
-	executor := NewUploadExecutor(taskService, blockingClient, nil)
+	executor := NewUploadExecutor(taskService, blockingClient, nil, nil)
 	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
 
 	var releaseOnce sync.Once
@@ -398,7 +398,7 @@ func TestUploadExecutorMultipartResumeSkipsUploadedParts(t *testing.T) {
 		{Number: 3, UploadURL: "https://upload.example/part/3"},
 	}
 	emosClient := &stubEmosUploadClient{}
-	executor := NewUploadExecutor(taskService, emosClient, nil)
+	executor := NewUploadExecutor(taskService, emosClient, nil, nil)
 	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
 
 	if _, err := fileStore.UpdateTask(taskID, func(task *model.Task) error {
@@ -485,7 +485,7 @@ func TestUploadExecutorMultipartStalePresignCountRefreshesUploadContext(t *testi
 		},
 		presigns: presigns,
 	}
-	executor := NewUploadExecutor(taskService, emosClient, nil)
+	executor := NewUploadExecutor(taskService, emosClient, nil, nil)
 	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
 
 	if _, err := fileStore.UpdateTask(taskID, func(task *model.Task) error {
@@ -582,7 +582,7 @@ func TestUploadExecutorMultipartStaleFileIDRefreshesUploadContext(t *testing.T) 
 		stubEmosUploadClient: base,
 		staleFileID:          "file-old",
 	}
-	executor := NewUploadExecutor(taskService, emosClient, nil)
+	executor := NewUploadExecutor(taskService, emosClient, nil, nil)
 	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
 
 	if _, err := fileStore.UpdateTask(taskID, func(task *model.Task) error {
@@ -668,7 +668,7 @@ func TestUploadExecutorCancelThenRetryDoesNotFailTask(t *testing.T) {
 		firstStarted:         make(chan struct{}, 1),
 		releaseFirst:         make(chan struct{}),
 	}
-	executor := NewUploadExecutor(taskService, blockingClient, nil)
+	executor := NewUploadExecutor(taskService, blockingClient, nil, nil)
 	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
 
 	done := make(chan error, 1)
@@ -713,7 +713,7 @@ func TestUploadExecutorCancelThenRetryDoesNotFailTask(t *testing.T) {
 	}
 
 	completeClient := &stubEmosUploadClient{}
-	secondExecutor := NewUploadExecutor(taskService, completeClient, nil)
+	secondExecutor := NewUploadExecutor(taskService, completeClient, nil, nil)
 	if err := secondExecutor.Execute(context.Background(), taskID); err != nil {
 		t.Fatalf("execute resumed upload after retry: %v", err)
 	}

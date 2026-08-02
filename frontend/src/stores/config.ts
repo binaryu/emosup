@@ -41,6 +41,7 @@ const defaultConfig: AppConfig = {
     save_retry_max_attempts: 8,
     tmdb_api_key: '',
     proxy_backends: 'quark,夸克',
+    auto_tune: true,
   },
 }
 
@@ -69,7 +70,12 @@ export const useConfigStore = defineStore('config', {
           openlist: { ...defaultConfig.openlist, ...(data.openlist || {}) },
           download: { ...defaultConfig.download, ...(data.download || {}) },
           emos: { ...defaultConfig.emos, ...(data.emos || {}) },
-          worker: { ...defaultConfig.worker, ...(data.worker || {}) },
+          worker: {
+            ...defaultConfig.worker,
+            ...(data.worker || {}),
+            // nil from the API means "not configured" → auto-tune is on by default.
+            auto_tune: data.worker?.auto_tune ?? true,
+          },
         }
       } finally {
         this.loading = false

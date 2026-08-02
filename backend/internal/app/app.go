@@ -57,8 +57,10 @@ func New() (*App, error) {
 
 	taskService := service.NewTaskService(fileStore, openListClient)
 	eventBus := eventbus.New()
-	downloadExecutor := service.NewDownloadExecutor(taskService, openListClient, eventBus)
-	uploadExecutor := service.NewUploadExecutor(taskService, emosClient, eventBus)
+	tuner := service.NewTuner(fileStore)
+	tuner.Start()
+	downloadExecutor := service.NewDownloadExecutor(taskService, openListClient, eventBus, tuner)
+	uploadExecutor := service.NewUploadExecutor(taskService, emosClient, eventBus, tuner)
 	tmdbClient := client.NewTMDBClient()
 
 	// Load full config from store (not redacted) for scheduler settings.
@@ -74,6 +76,7 @@ func New() (*App, error) {
 		time.Duration(cfg.Worker.PollIntervalSeconds)*time.Second,
 		cfg.Worker.MaxConcurrency,
 		eventBus,
+		tuner,
 	)
 
 	frontendDist := findFrontendDistDir()

@@ -172,6 +172,15 @@
             <el-form-item label="最大并发">
               <el-input-number v-model="configStore.config.worker.max_concurrency" :min="1" :max="20" class="full-width" :controls="false" />
             </el-form-item>
+            <el-form-item label="自动调优">
+              <el-switch
+                v-model="configStore.config.worker.auto_tune"
+                inline-prompt
+                active-text="开"
+                inactive-text="关"
+              />
+              <span style="font-size:11px;color:var(--text-subtle)">根据实测带宽与剩余磁盘自动调整并行任务数 / 下载线程 / 上传分片（只增不减，不会低于上方设置值）</span>
+            </el-form-item>
             <el-form-item label="下载线程">
               <el-input-number v-model="configStore.config.worker.download_threads" :min="1" :max="16" class="full-width" :controls="false" />
               <span style="font-size:11px;color:var(--text-subtle)">多线程分段下载，4线程约4倍速</span>
