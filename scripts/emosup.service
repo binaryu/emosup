@@ -12,12 +12,10 @@ Restart=on-failure
 RestartSec=3
 LimitNOFILE=65535
 
-# Override via drop-in or EnvironmentFile=/opt/emosup/emosup.env
-Environment=EMOSUP_DATA_DIR=/opt/emosup/data
-Environment=EMOSUP_FRONTEND_DIST=/opt/emosup/frontend
-Environment=EMOSUP_HOST=0.0.0.0
-Environment=EMOSUP_PORT=8080
-# Environment=EMOSUP_LOCAL_ROOT=/path/to/media
+# All EMOSUP_* variables come from /opt/emosup/emosup.env (created by
+# install.sh). Do NOT hardcode Environment= here: systemd gives it priority
+# over EnvironmentFile, which would silently ignore edits to emosup.env.
+EnvironmentFile=-/opt/emosup/emosup.env
 
 # Uncomment to run as non-root (create user first):
 # User=emosup

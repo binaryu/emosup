@@ -11,7 +11,6 @@ REPO="${EMOSUP_REPO:-binaryu/emosup}"
 INSTALL_DIR="${EMOSUP_INSTALL_DIR:-/opt/emosup}"
 VERSION="${EMOSUP_VERSION:-}"
 PORT="${EMOSUP_PORT:-}"
-PORT_FROM_CLI=0
 BUNDLE="${EMOSUP_BUNDLE:-}"
 SERVICE_NAME="emosup"
 KEEP_DATA=0
@@ -137,17 +136,20 @@ download_and_extract() {
   }
 
   mkdir -p "$dest"
+  # Rename data/ aside (same filesystem → instant) instead of copying it to
+  # /tmp: the download cache can be tens of GB and /tmp may be a small tmpfs.
   local keep_data=""
   if [[ -d "${dest}/data" ]]; then
-    keep_data="${tmp}/_keep_data"
-    cp -a "${dest}/data" "$keep_data"
+    keep_data="${dest}/.upgrade-data-bak"
+    rm -rf "$keep_data"
+    mv "${dest}/data" "$keep_data"
   fi
   if [[ -f "${dest}/emosup.env" ]]; then
     cp -a "${dest}/emosup.env" "${tmp}/_keep_env"
   fi
 
   # Replace program files, preserve data/env
-  find "$dest" -mindepth 1 -maxdepth 1 ! -name data ! -name emosup.env -exec rm -rf {} +
+  find "$dest" -mindepth 1 -maxdepth 1 ! -name .upgrade-data-bak ! -name emosup.env -exec rm -rf {} +
   cp -a "${extracted}/." "$dest/"
   chmod +x "${dest}/emosup-server"
 
@@ -212,11 +214,10 @@ ExecStart=${dest}/emosup-server
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65535
+# All EMOSUP_* variables come from emosup.env. Do NOT hardcode Environment=
+# here: systemd gives it priority over EnvironmentFile, which would silently
+# ignore edits to emosup.env.
 EnvironmentFile=-${dest}/emosup.env
-Environment=EMOSUP_DATA_DIR=${dest}/data
-Environment=EMOSUP_FRONTEND_DIST=${dest}/frontend
-Environment=EMOSUP_HOST=0.0.0.0
-Environment=EMOSUP_PORT=${PORT}
 
 [Install]
 WantedBy=multi-user.target
@@ -268,9 +269,9 @@ prompt_port() {
   if [[ "$NONINTERACTIVE" == "1" ]] || [[ ! -t 0 ]]; then
     # Piped install (curl | bash): stdin is the script, not a TTY.
     # Try to read from /dev/tty so the user can still answer.
-    if [[ -r /dev/tty ]]; then
+    if [[ -r /dev/tty ]] && [[ -w /dev/tty ]]; then
       local answer=""
-      echo -en "${GREEN}[emosup]${NC} 请输入面板端口 [${default_port}]: " > /dev/tty
+      echo -en "${GREEN}[emosup]${NC} 请输入面板端口 [${default_port}]: " > /dev/tty || true
       read -r answer < /dev/tty || true
       answer="$(echo "${answer:-}" | tr -d '[:space:]')"
       if [[ -z "$answer" ]]; then
@@ -306,9 +307,9 @@ prompt_proxy() {
     return
   fi
   if [[ "$NONINTERACTIVE" == "1" ]] || [[ ! -t 0 ]]; then
-    if [[ -r /dev/tty ]]; then
+    if [[ -r /dev/tty ]] && [[ -w /dev/tty ]]; then
       local answer=""
-      echo -en "${GREEN}[emosup]${NC} 是否使用国内代理加速 GitHub 下载？[y/N]: " > /dev/tty
+      echo -en "${GREEN}[emosup]${NC} 是否使用国内代理加速 GitHub 下载？[y/N]: " > /dev/tty || true
       read -r answer < /dev/tty || true
       case "$(echo "${answer:-}" | tr '[:upper:]' '[:lower:]')" in
         y|yes|1) EMOSUP_PROXY="1" ;;
@@ -398,7 +399,8 @@ cmd_uninstall() {
   fi
 
   if [[ "$KEEP_DATA" -eq 1 && -d "${INSTALL_DIR}/data" ]]; then
-    local bak="${INSTALL_DIR%/}.data.bak.$(date +%Y%m%d%H%M%S)"
+    local bak
+    bak="${INSTALL_DIR%/}.data.bak.$(date +%Y%m%d%H%M%S)"
     mv "${INSTALL_DIR}/data" "$bak"
     log "数据已保留: ${bak}"
   fi
@@ -472,7 +474,7 @@ main() {
     case "$1" in
       --dir)      INSTALL_DIR="$2"; shift 2 ;;
       --version)  VERSION="$2"; shift 2 ;;
-      --port)     PORT="$2"; PORT_FROM_CLI=1; shift 2 ;;
+      --port)     PORT="$2"; shift 2 ;;
       --bundle)   BUNDLE="$2"; shift 2 ;;
       --proxy)    EMOSUP_PROXY="$2"; shift 2 ;;
       --keep-data) KEEP_DATA=1; shift ;;
