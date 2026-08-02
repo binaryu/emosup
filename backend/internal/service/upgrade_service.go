@@ -509,36 +509,117 @@ func replaceDirContents(dir, src string) error {
 	return copyTree(src, dir)
 }
 
+// systemdUnit returns the systemd unit name managing this process (derived
+// from the cgroup), or "" when not running under systemd.
+func systemdUnit() string {
+	if os.Getenv("INVOCATION_ID") == "" {
+		return ""
+	}
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return ""
+	}
+	return parseSystemdUnitFromCgroup(string(data))
+}
+
+func parseSystemdUnitFromCgroup(cgroup string) string {
+	for _, line := range strings.Split(cgroup, "\n") {
+		if i := strings.LastIndex(line, "/"); i >= 0 {
+			if name := strings.TrimSpace(line[i+1:]); strings.HasSuffix(name, ".service") {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+// upgradeLogPath is where the restart script writes diagnostics.
+func upgradeLogPath() string {
+	return filepath.Join(os.TempDir(), "emosup-upgrade.log")
+}
+
 // scheduleRestart spawns a detached script that waits for this process to exit
-// and then restarts via systemd (preferred) or re-execs the binary directly.
+// and then brings the service back up. Layered strategy:
+//
+//  1. The server itself exits with a non-zero code (exitCodeRestart), so
+//     systemd units with Restart=on-failure restart automatically — no
+//     systemctl permissions needed.
+//  2. The script, for units without Restart=on-failure: systemctl restart the
+//     real unit (resolved from the cgroup, not a hard-coded name), falling
+//     back to systemctl start, then to a direct re-exec.
+//  3. Every step is appended to /tmp/emosup-upgrade.log for diagnostics.
 func scheduleRestart(installDir string, pid int) error {
-	script := `#!/bin/sh
-PID="$1"; DIR="$2"
-i=0
-while kill -0 "$PID" 2>/dev/null && [ "$i" -lt 60 ]; do sleep 1; i=$((i+1)); done
-kill -9 "$PID" 2>/dev/null || true
-if command -v systemctl >/dev/null 2>&1 && systemctl cat emosup >/dev/null 2>&1; then
-  systemctl restart emosup >/dev/null 2>&1
-else
-  cd "$DIR" || exit 1
-  nohup ./emosup-server >/dev/null 2>&1 &
-fi
-`
+	logPath := upgradeLogPath()
+	unit := systemdUnit()
+	script := buildRestartScript(logPath)
+
 	scriptPath := filepath.Join(os.TempDir(), fmt.Sprintf("emosup-restart-%d.sh", pid))
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		return err
 	}
 
-	cmd := exec.Command("setsid", "-f", "/bin/sh", scriptPath, strconv.Itoa(pid), installDir)
+	cmd := exec.Command("setsid", "-f", "/bin/sh", scriptPath, strconv.Itoa(pid), installDir, unit)
 	if err := cmd.Start(); err != nil {
 		// setsid may be unavailable; fall back to a detached background process.
 		cmd = exec.Command("/bin/sh", "-c",
-			fmt.Sprintf("nohup /bin/sh %s %d %q >/dev/null 2>&1 &", scriptPath, pid, installDir))
+			fmt.Sprintf("nohup /bin/sh %s %d %q %q >/dev/null 2>&1 &", scriptPath, pid, installDir, unit))
 		if err2 := cmd.Start(); err2 != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// buildRestartScript renders the detached restart script. The log path is
+// shell-quoted so paths with spaces survive.
+func buildRestartScript(logPath string) string {
+	quote := func(s string) string { return strings.ReplaceAll(s, "'", `'\''`) }
+	return fmt.Sprintf(`#!/bin/sh
+LOG='%s'
+log() { echo "$(date '+%%F %%T') $*" >> "$LOG"; }
+log "restart script started: pid=$1 dir=$2 unit=$3"
+PID="$1"; DIR="$2"; UNIT="$3"
+i=0
+while kill -0 "$PID" 2>/dev/null && [ "$i" -lt 90 ]; do sleep 1; i=$((i+1)); done
+log "old process exited (waited ${i}s)"
+kill -9 "$PID" 2>/dev/null || true
+restarted=0
+if [ -n "$UNIT" ] && command -v systemctl >/dev/null 2>&1; then
+  if systemctl is-active --quiet "$UNIT" 2>/dev/null; then
+    log "unit $UNIT already active (systemd auto-restart)"
+    restarted=1
+  else
+    systemctl restart "$UNIT" >/dev/null 2>&1
+    j=0
+    while ! systemctl is-active --quiet "$UNIT" 2>/dev/null && [ "$j" -lt 20 ]; do sleep 1; j=$((j+1)); done
+    if systemctl is-active --quiet "$UNIT" 2>/dev/null; then
+      log "unit $UNIT restarted via systemctl"
+      restarted=1
+    else
+      log "systemctl restart failed; trying start"
+      systemctl start "$UNIT" >/dev/null 2>&1
+      sleep 2
+      if systemctl is-active --quiet "$UNIT" 2>/dev/null; then
+        log "unit $UNIT started via systemctl"
+        restarted=1
+      else
+        log "systemctl failed; falling back to direct re-exec"
+      fi
+    fi
+  fi
+else
+  log "no systemd unit detected; using direct re-exec"
+fi
+if [ "$restarted" -eq 0 ]; then
+  if cd "$DIR" 2>/dev/null; then
+    nohup ./emosup-server >/dev/null 2>&1 &
+    log "re-exec started ./emosup-server (pid $!)"
+  else
+    log "re-exec failed: cannot cd $DIR"
+  fi
+fi
+log "restart script finished"
+`, quote(logPath))
 }
 
 func dirExists(path string) bool {

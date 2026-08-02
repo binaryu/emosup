@@ -74,9 +74,9 @@ func makeTarGz(t *testing.T, files map[string]string) string {
 
 func TestExtractTarGz(t *testing.T) {
 	pkg := makeTarGz(t, map[string]string{
-		"emosup-linux-amd64/emosup-server":    "new-binary",
+		"emosup-linux-amd64/emosup-server":       "new-binary",
 		"emosup-linux-amd64/frontend/index.html": "ok",
-		"emosup-linux-amd64/data/downloads/":  "",
+		"emosup-linux-amd64/data/downloads/":     "",
 	})
 	// directories come implicitly; ensure one explicit dir entry
 	root, err := extractTarGz(pkg, t.TempDir())
@@ -179,3 +179,36 @@ func TestSwapInstallPreservesDataAndEnv(t *testing.T) {
 	}
 }
 
+func TestParseSystemdUnitFromCgroup(t *testing.T) {
+	cases := []struct {
+		cgroup string
+		want   string
+	}{
+		{"0::/system.slice/emosup.service\n", "emosup.service"},
+		{"0::/system.slice/fn_emosup.service\n", "fn_emosup.service"},
+		{"12:freezer:/system.slice/docker-abc.scope\n0::/system.slice/emosup.service\n", "emosup.service"},
+		{"0::/\n", ""},
+		{"0::/user.slice/user-1000.slice/session-1.scope\n", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := parseSystemdUnitFromCgroup(c.cgroup); got != c.want {
+			t.Errorf("parseSystemdUnitFromCgroup(%q) = %q, want %q", c.cgroup, got, c.want)
+		}
+	}
+}
+
+func TestBuildRestartScript(t *testing.T) {
+	script := buildRestartScript("/tmp/emosup-upgrade.log")
+	for _, want := range []string{
+		"LOG='/tmp/emosup-upgrade.log'",
+		"systemctl restart \"$UNIT\"",
+		"systemctl start \"$UNIT\"",
+		"nohup ./emosup-server",
+		"restart script finished",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("restart script missing %q", want)
+		}
+	}
+}

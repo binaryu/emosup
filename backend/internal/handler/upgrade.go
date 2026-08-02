@@ -42,11 +42,18 @@ func (h *UpgradeHandler) run(c *gin.Context) {
 	respondOK(c, result)
 
 	// The new files are already in place; exit shortly after the response
-	// has been flushed. The detached restart script (spawned by Run) brings
-	// the service back up via systemd or a direct re-exec.
+	// has been flushed. Exiting non-zero triggers systemd Restart=on-failure
+	// (the unit created by install.sh), so the service comes back up even if
+	// the detached restart script cannot run systemctl. The restart script
+	// (spawned by Run) is the fallback for units without that policy.
 	go func() {
 		time.Sleep(1500 * time.Millisecond)
 		log.Printf("upgrade to %s complete, exiting for restart", result.Version)
-		os.Exit(0)
+		os.Exit(exitCodeRestart)
 	}()
 }
+
+// exitCodeRestart is returned when the upgrade succeeded and the process
+// should be restarted; systemd units with Restart=on-failure use it to
+// bring the service back automatically.
+const exitCodeRestart = 42

@@ -369,7 +369,9 @@ function waitForRestart() {
     }
     attempts += 1
     upgradeProgress.value = Math.min(60 + attempts * 2, 95)
-    upgradeStatusText.value = `等待服务重启… (${attempts * 2}s)`
+    upgradeStatusText.value = attempts > 45
+      ? '服务未自动恢复，请在服务器上执行: sudo systemctl restart emosup（升级日志: /tmp/emosup-upgrade.log）'
+      : `等待服务重启… (${attempts * 2}s)`
   }, 2000)
 }
 
