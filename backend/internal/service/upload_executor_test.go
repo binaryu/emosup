@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sort"
 	"sync"
@@ -1091,5 +1093,145 @@ func TestMultipartRetryDoesNotInflateProgress(t *testing.T) {
 	}
 	if task.Status != model.TaskStatusCompleted {
 		t.Fatalf("expected completed, got %s", task.Status)
+	}
+}
+
+// throttledUploadServer simulates a ~10MB/s upstream: it reads the request body
+// while sleeping to keep the long-term rate bounded.
+func throttledUploadServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	const rate = 10 * 1024 * 1024 // 10MB/s
+	var inflight sync.Mutex
+	var inflightCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inflight.Lock()
+		inflightCount++
+		n := inflightCount
+		inflight.Unlock()
+		defer func() {
+			inflight.Lock()
+			inflightCount--
+			inflight.Unlock()
+		}()
+		buf := make([]byte, 128*1024)
+		for {
+			read, err := r.Body.Read(buf)
+			if read > 0 {
+				// share the bandwidth across concurrent parts
+				time.Sleep(time.Duration(float64(read) / (rate / float64(n)) * float64(time.Second)))
+			}
+			if err != nil {
+				break
+			}
+		}
+		w.Header().Set("ETag", `"etag"`)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// realPartClient uploads parts through the real HTTP client while stubbing the
+// emos API calls (token/presigns/complete/save).
+type realPartClient struct {
+	*stubEmosUploadClient
+	real *client.HTTPEmosClient
+}
+
+func (c *realPartClient) UploadMultipartPart(ctx context.Context, part client.EmosMultipartPart, filePath string, startByte, partSize int64) (string, error) {
+	return c.real.UploadMultipartPart(ctx, part, filePath, startByte, partSize)
+}
+
+func (c *realPartClient) UploadMultipartPartWithProgress(ctx context.Context, part client.EmosMultipartPart, filePath string, startByte, partSize int64, progress func(int64)) (string, error) {
+	return c.real.UploadMultipartPartWithProgress(ctx, part, filePath, startByte, partSize, progress)
+}
+
+// TestMultipartSpeedMatchesThrottledUpstream drives a real HTTP upload against
+// a 10MB/s throttled server and asserts the SSE-reported speed is sane.
+func TestMultipartSpeedMatchesThrottledUpstream(t *testing.T) {
+	t.Parallel()
+
+	const fileSize = 60 * 1024 * 1024
+	server := throttledUploadServer(t)
+
+	fileStore := newTaskTestStore(t)
+	cfg, err := fileStore.LoadConfig()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Worker.UploadChunkSizeMB = 10
+	cfg.Worker.UploadPartConcurrency = 2
+	cfg.Emos.Token = "demo-token"
+	if err := fileStore.SaveConfig(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	taskService := NewTaskService(fileStore)
+	presigns := make([]client.EmosMultipartPart, 6)
+	for i := 1; i <= 6; i++ {
+		presigns[i-1] = client.EmosMultipartPart{Number: i, UploadURL: server.URL + fmt.Sprintf("/part/%d", i)}
+	}
+	partClient := &realPartClient{
+		stubEmosUploadClient: &stubEmosUploadClient{
+			tokenResult: client.EmosUploadTokenResult{
+				Storage: "r2", FileID: "file-multipart", UploadType: "multipart",
+				MultipartSizeMin: 10 * 1024 * 1024, MultipartSizeMax: 10 * 1024 * 1024,
+			},
+			presigns: presigns,
+		},
+		real: client.NewHTTPEmosClient(),
+	}
+
+	bus := eventbus.New()
+	events := bus.Subscribe()
+	defer bus.Unsubscribe(events)
+
+	executor := NewUploadExecutor(taskService, partClient, bus, nil)
+	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
+
+	done := make(chan error, 1)
+	go func() { done <- executor.Execute(context.Background(), taskID) }()
+
+	var maxSpeed int64
+	sampleCount := 0
+	var allSpeeds []string
+	collect := true
+	for collect {
+		select {
+		case evt := <-events:
+			allSpeeds = append(allSpeeds, fmt.Sprintf("%.0fMB/s(done=%d)", float64(evt.UlSpeed)/(1024*1024), evt.UlDone/(1024*1024)))
+			if evt.UlSpeed > maxSpeed {
+				maxSpeed = evt.UlSpeed
+			}
+			if evt.UlSpeed > 0 {
+				sampleCount++
+			}
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("execute upload: %v", err)
+			}
+			collect = false
+		case <-time.After(30 * time.Second):
+			t.Fatal("upload timed out")
+		}
+	}
+	// drain remaining events
+	for {
+		select {
+		case evt := <-events:
+			if evt.UlSpeed > maxSpeed {
+				maxSpeed = evt.UlSpeed
+			}
+		default:
+			collect = false
+			goto done
+		}
+	}
+done:
+	t.Logf("speeds: %v", allSpeeds)
+	t.Logf("max reported speed: %.1f MB/s (%d samples)", float64(maxSpeed)/(1024*1024), sampleCount)
+	// 10MB/s upstream: allow 2.5x for EMA warmup/bursts, but 400MB/s must fail.
+	if maxSpeed > 25*1024*1024 {
+		t.Fatalf("reported speed %.1f MB/s is far above the 10MB/s throttle", float64(maxSpeed)/(1024*1024))
 	}
 }
