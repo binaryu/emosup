@@ -125,7 +125,7 @@
             <div class="status-progress-cell">
               <div class="status-row">
                 <StatusTag :status="row.status" />
-                <StatusTag v-if="isActive(row.status) && (row.upload.status || row.download.status)" :status="row.upload.status || row.download.status" size="small" />
+                <StatusTag v-if="subStatus(row)" :status="subStatus(row)" size="small" />
               </div>
               <template v-if="row.status === 'downloading'">
                 <el-progress :percentage="Math.round(row.download.progress || 0)" :stroke-width="6" :show-text="false" />
@@ -208,7 +208,7 @@
         <div class="card-header">
           <div class="card-status-row">
             <StatusTag :status="row.status" />
-            <StatusTag v-if="isActive(row.status) && (row.upload.status || row.download.status)" :status="row.upload.status || row.download.status" size="small" />
+            <StatusTag v-if="subStatus(row)" :status="subStatus(row)" size="small" />
             <span v-if="row.parsed.season != null || row.parsed.episode != null" class="card-ep">S{{ row.parsed.season ?? '?' }}E{{ row.parsed.episode ?? '?' }}</span>
           </div>
           <svg class="card-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
@@ -500,6 +500,12 @@ function stopBackupPoll() {
 function canRetry(status: TaskStatus) { return ['canceled', 'download_failed', 'upload_failed', 'completed'].includes(status) }
 function canCancel(status: TaskStatus) { return ['queued', 'downloading', 'upload_pending', 'uploading', 'saving', 'download_failed', 'upload_failed'].includes(status) }
 function isActive(status: TaskStatus) { return ['downloading', 'uploading', 'saving'].includes(status) }
+
+/** Secondary sub-status tag: only shown when it adds info beyond the main status. */
+function subStatus(row: Task): string {
+  const sub = (row.upload.status || row.download.status || '').trim()
+  return sub && sub !== row.status ? sub : ''
+}
 
 function onSelectionChange(rows: Task[]) {
   selectedTaskIds.value = rows.map(r => r.id)
