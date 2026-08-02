@@ -91,6 +91,7 @@ func New() (*App, error) {
 		Proxy:        handler.NewProxyHandler(fileStore, openListClient),
 		Scan:         handler.NewScanHandler(scanService),
 		Task:         handler.NewTaskHandler(taskService),
+		Upgrade:      handler.NewUpgradeHandler(service.NewUpgradeService(fileStore)),
 		FrontendDist: frontendDist,
 	})
 

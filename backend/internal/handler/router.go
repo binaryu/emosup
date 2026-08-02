@@ -22,6 +22,7 @@ type RouterDependencies struct {
 	Proxy        *ProxyHandler
 	Scan         *ScanHandler
 	Task         *TaskHandler
+	Upgrade      *UpgradeHandler
 	FrontendDist string
 }
 
@@ -61,6 +62,9 @@ func NewRouter(deps RouterDependencies) *gin.Engine {
 	deps.Proxy.RegisterRoutes(api)
 	deps.Scan.RegisterRoutes(api)
 	deps.Task.RegisterRoutes(api)
+	if deps.Upgrade != nil {
+		deps.Upgrade.RegisterRoutes(api)
+	}
 
 	if deps.FrontendDist != "" {
 		router.NoRoute(func(c *gin.Context) {

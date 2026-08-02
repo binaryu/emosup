@@ -256,3 +256,16 @@ export interface RecoverySummary {
   uploading_failed: number
   upload_pending: number
 }
+
+export interface UpgradeCheck {
+  current: string
+  latest: string
+  has_update: boolean
+  name: string
+  body: string
+  published_at: string
+}
+
+export interface UpgradeResult {
+  version: string
+}

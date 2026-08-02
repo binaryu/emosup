@@ -11,6 +11,7 @@ OpenList / 本地文件 → Emos 异步转存面板。
 - **文件名解析** — `S01E02`、`[Show][25][BIG5][1080P]`、`入青云01.mp4`、`EP03`、`第04集`、`Season II` 等
 - **实时进度** — SSE 推送速度/进度
 - **SQLite 存储** — 任务进度高频写入不再卡在 JSON 文件上
+- **面板内一键升级** — 检查 GitHub 最新版，下载校验后自动替换并重启（保留 data/ 与 emosup.env）
 - **一键二进制部署** — 安装 / 更新 / 卸载脚本 + systemd
 
 ## 快速开始
@@ -79,6 +80,14 @@ sudo bash /opt/emosup/install.sh uninstall
 | `EMOSUP_DOWNLOADS_HOST` | 下载缓存宿主机路径（Docker 映射用） | 同容器内路径 |
 
 本地媒体目录也可在面板 **系统配置 → 本地媒体** 里改，无需改环境变量。
+
+### 面板内自动升级
+
+「系统配置 → 关于与升级」可一键升级：自动检测 GitHub 最新 Release、下载并校验 SHA256、替换程序文件（保留 `data/` 与 `emosup.env`）后重启服务。
+
+- 适用于 `install.sh` 部署的目录（systemd 或手动运行均可）
+- Docker 部署请在宿主机执行 `docker compose pull && docker compose up -d`（面板内升级会给出提示并拒绝）
+- 国内网络可在安装时通过 `EMOSUP_PROXY=1` 走 gh-proxy 加速（面板升级同样生效）
 
 ### 不装 systemd、手动跑
 

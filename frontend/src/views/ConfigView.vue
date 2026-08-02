@@ -200,19 +200,178 @@
         </el-form>
       </el-card>
 
+      <!-- 关于与升级 -->
+      <el-card class="setting-card about-card">
+        <template #header>
+          <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+            关于与升级
+          </div>
+        </template>
+
+        <div class="about-body">
+          <div class="about-row">
+            <span class="about-label">当前版本</span>
+            <span class="about-value font-mono">{{ currentVersion || '…' }}</span>
+            <el-tag v-if="upgradeCheck && upgradeCheck.has_update" type="danger" size="small" effect="plain">有更新</el-tag>
+            <el-tag v-else-if="upgradeCheck" type="success" size="small" effect="plain">已是最新</el-tag>
+          </div>
+          <div class="about-row">
+            <span class="about-label">最新版本</span>
+            <span class="about-value font-mono">{{ upgradeCheck?.latest || '—' }}</span>
+            <span v-if="upgradeCheck?.published_at" class="about-date">{{ formatDate(upgradeCheck.published_at) }}</span>
+          </div>
+
+          <div v-if="upgradeLoading" class="about-progress">
+            <el-progress :percentage="upgradeProgress" :stroke-width="8" :show-text="true" :status="upgradeError ? 'exception' : undefined" />
+            <div class="about-progress-text">{{ upgradeStatusText }}</div>
+          </div>
+
+          <div v-if="upgradeCheck?.body" class="about-changelog">
+            <div class="about-changelog-title">更新内容</div>
+            <div class="about-changelog-body">{{ upgradeCheck.body }}</div>
+          </div>
+
+          <div class="about-actions">
+            <el-button :loading="checking" @click="checkUpgrade">检查更新</el-button>
+            <el-button
+              type="primary"
+              :disabled="!upgradeCheck?.has_update || upgrading"
+              :loading="upgrading"
+              @click="runUpgrade"
+            >
+              立即升级
+            </el-button>
+            <span v-if="upgradeError" class="about-error">{{ upgradeError }}</span>
+          </div>
+        </div>
+      </el-card>
+
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import { useConfigStore } from '@/stores/config'
+import type { UpgradeCheck } from '@/types/api'
+import { apiFetch } from '@/utils/api'
 
 const configStore = useConfigStore()
 
+const currentVersion = ref('')
+const upgradeCheck = ref<UpgradeCheck | null>(null)
+const checking = ref(false)
+const upgrading = ref(false)
+const upgradeError = ref('')
+const upgradeLoading = ref(false)
+const upgradeProgress = ref(0)
+const upgradeStatusText = ref('')
+let healthTimer: number | undefined
+
+function formatDate(iso: string) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+async function fetchVersion() {
+  try {
+    const resp = await apiFetch('/api/system/version')
+    const data = await resp.json()
+    if (data.success && data.data?.version) {
+      const v = String(data.data.version)
+      currentVersion.value = v.startsWith('v') ? v : `v${v}`
+    }
+  } catch {
+    currentVersion.value = ''
+  }
+}
+
+async function checkUpgrade() {
+  checking.value = true
+  upgradeError.value = ''
+  try {
+    const resp = await apiFetch('/api/upgrade/check')
+    const data = await resp.json()
+    if (!data.success) {
+      upgradeError.value = data.message || '检查更新失败'
+      return
+    }
+    upgradeCheck.value = data.data
+    if (!upgradeCheck.value?.has_update) {
+      ElMessage.success('当前已是最新版本')
+    }
+  } catch (e) {
+    upgradeError.value = e instanceof Error ? e.message : '检查更新失败'
+  } finally {
+    checking.value = false
+  }
+}
+
+async function runUpgrade() {
+  if (!upgradeCheck.value?.has_update) return
+  try {
+    await ElMessageBox.confirm(
+      `确定升级到 v${upgradeCheck.value.latest} 吗？升级期间服务将短暂中断，完成后自动重启。`,
+      '升级确认',
+      { confirmButtonText: '升级', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+
+  upgrading.value = true
+  upgradeError.value = ''
+  upgradeLoading.value = true
+  upgradeProgress.value = 5
+  upgradeStatusText.value = '正在下载升级包…'
+
+  try {
+    // The server exits right after responding, so a failed fetch is expected.
+    await apiFetch('/api/upgrade/run', { method: 'POST' }).catch(() => undefined)
+  } catch {
+    // connection drop is expected
+  }
+
+  upgradeProgress.value = 60
+  upgradeStatusText.value = '升级包已就位，等待服务重启…'
+  waitForRestart()
+}
+
+function waitForRestart() {
+  let attempts = 0
+  healthTimer = window.setInterval(async () => {
+    try {
+      const resp = await fetch('/api/health', { cache: 'no-store' })
+      if (resp.ok) {
+        window.clearInterval(healthTimer)
+        upgradeProgress.value = 100
+        upgradeStatusText.value = '升级完成，正在刷新…'
+        await new Promise((r) => setTimeout(r, 600))
+        window.location.reload()
+        return
+      }
+    } catch {
+      // server still down — keep polling
+    }
+    attempts += 1
+    upgradeProgress.value = Math.min(60 + attempts * 2, 95)
+    upgradeStatusText.value = `等待服务重启… (${attempts * 2}s)`
+  }, 2000)
+}
+
 onMounted(() => {
   configStore.fetchConfig()
+  fetchVersion()
+  checkUpgrade()
+})
+
+onBeforeUnmount(() => {
+  if (healthTimer) window.clearInterval(healthTimer)
 })
 </script>
 
@@ -287,6 +446,92 @@ onMounted(() => {
   padding: 1px 4px;
   border-radius: 4px;
   background: var(--bg-hover);
+}
+
+/* About & Upgrade */
+.about-card {
+  grid-column: 1 / -1;
+}
+
+.about-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.about-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.about-label {
+  color: var(--text-subtle);
+  font-size: 13px;
+  min-width: 72px;
+}
+
+.about-value {
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.about-date {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.font-mono {
+  font-family: monospace;
+}
+
+.about-changelog {
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--bg-hover);
+}
+
+.about-changelog-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 8px;
+}
+
+.about-changelog-body {
+  font-size: 12px;
+  color: var(--text-subtle);
+  line-height: 1.6;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.about-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.about-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.about-progress-text {
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+
+.about-error {
+  font-size: 12px;
+  color: #ef4444;
+  word-break: break-all;
 }
 
 @media (max-width: 480px) {
