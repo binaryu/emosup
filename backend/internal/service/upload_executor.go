@@ -342,39 +342,6 @@ func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, a
 		speedTracker := utils.NewSpeedTracker()
 		speedTracker.Sample(completedBytes, time.Now())
 
-		// reportLiveProgress is called from HTTP body reads; it updates the
-		// smoothed speed and pushes SSE updates at most once per second so the
-		// panel stays real-time even while a single large part is in flight.
-		reportLiveProgress := func(partBytes int64) {
-			if partBytes <= 0 {
-				return
-			}
-			liveBytes.Add(partBytes)
-			if e.tuner != nil {
-				e.tuner.RecordUploadBytes(partBytes)
-			}
-			now := time.Now()
-			stateMu.Lock()
-			total := completedBytes + liveBytes.Load()
-			speed := speedTracker.Sample(total, now)
-			done := total >= fileSize && fileSize > 0
-			stateMu.Unlock()
-
-			eventMu.Lock()
-			if done || now.Sub(lastSSE) >= time.Second {
-				lastSSE = now
-				e.eventBus.Publish(eventbus.TaskEvent{
-					TaskID:  task.ID,
-					Status:  "uploading",
-					UlProg:  calculateProgress(total, fileSize),
-					UlSpeed: speed,
-					UlDone:  total,
-					UlTotal: fileSize,
-				})
-			}
-			eventMu.Unlock()
-		}
-
 		recordWorkerError := func(workerErr error) {
 			stateMu.Lock()
 			defer stateMu.Unlock()
@@ -399,6 +366,53 @@ func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, a
 				presign := presigns[idx]
 				startByte := int64(presign.Number-1) * chunkSize
 				partSize := partSizeForMultipartPresign(presign.Number, chunkSize, fileSize)
+
+				// reportLiveProgress is called from HTTP body reads; it updates
+				// the smoothed speed and pushes SSE updates at most once per
+				// second so the panel stays real-time even while a single large
+				// part is in flight.
+				//
+				// partAcked clamps each part's counted bytes to partSize:
+				// retries in putFileSectionWithRetry re-read the whole part and
+				// would otherwise double-count bytes, inflating the reported
+				// speed (e.g. 400MB/s on a 10MB/s line when the server returns
+				// 429/5xx often).
+				var partAcked int64
+				reportLiveProgress := func(partBytes int64) {
+					if partBytes <= 0 || partAcked >= partSize {
+						return
+					}
+					newCount := minInt64(partAcked+partBytes, partSize)
+					delta := newCount - partAcked
+					if delta <= 0 {
+						return
+					}
+					partAcked = newCount
+					liveBytes.Add(delta)
+					if e.tuner != nil {
+						e.tuner.RecordUploadBytes(delta)
+					}
+					now := time.Now()
+					stateMu.Lock()
+					total := completedBytes + liveBytes.Load()
+					speed := speedTracker.Sample(total, now)
+					done := total >= fileSize && fileSize > 0
+					stateMu.Unlock()
+
+					eventMu.Lock()
+					if done || now.Sub(lastSSE) >= time.Second {
+						lastSSE = now
+						e.eventBus.Publish(eventbus.TaskEvent{
+							TaskID:  task.ID,
+							Status:  "uploading",
+							UlProg:  calculateProgress(total, fileSize),
+							UlSpeed: speed,
+							UlDone:  total,
+							UlTotal: fileSize,
+						})
+					}
+					eventMu.Unlock()
+				}
 
 				if canceled, cancelErr := e.taskService.IsTaskCanceled(workerCtx, task.ID); cancelErr != nil {
 					recordWorkerError(cancelErr)
@@ -429,7 +443,10 @@ func (e *UploadExecutor) uploadMultipart(ctx context.Context, task model.Task, a
 				stateMu.Lock()
 				uploaded[presign.Number] = part
 				completedBytes += partSize
-				liveBytes.Add(-partSize)
+				// Remove exactly what this part contributed to liveBytes
+				// (which is ≤ partSize thanks to the clamp above).
+				liveBytes.Add(-partAcked)
+				partAcked = 0
 				currentBytes := completedBytes
 				speed := speedTracker.Sample(currentBytes, time.Now())
 				stateMu.Unlock()

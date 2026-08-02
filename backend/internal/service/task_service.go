@@ -1440,6 +1440,13 @@ func maxInt64(a, b int64) int64 {
 	return b
 }
 
+func minInt64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // resolveLocalMediaRoot uses the same rules as LocalService.Root.
 func resolveLocalMediaRoot(localRoot, downloadDir string) string {
 	dataRoot := ""

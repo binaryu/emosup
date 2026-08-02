@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"emosup/backend/internal/client"
+	"emosup/backend/internal/eventbus"
 	"emosup/backend/internal/model"
 	"emosup/backend/internal/store"
 )
@@ -996,4 +997,99 @@ func (c *blockingMultipartClient) UploadMultipartPart(ctx context.Context, part 
 
 func (c *blockingMultipartClient) UploadMultipartPartWithProgress(ctx context.Context, part client.EmosMultipartPart, filePath string, startByte, partSize int64, _ func(int64)) (string, error) {
 	return c.UploadMultipartPart(ctx, part, filePath, startByte, partSize)
+}
+
+// retryReportingClient simulates putFileSectionWithRetry re-reading a part on
+// retry: the progress callback fires with the full part size twice.
+type retryReportingClient struct {
+	*stubEmosUploadClient
+}
+
+func (c *retryReportingClient) UploadMultipartPartWithProgress(_ context.Context, part client.EmosMultipartPart, _ string, _ int64, partSize int64, progress func(int64)) (string, error) {
+	if progress != nil {
+		progress(partSize / 2)
+		progress(partSize / 2)
+		progress(partSize / 2) // retry re-read: would double-count without clamping
+	}
+	return c.stubEmosUploadClient.UploadMultipartPart(context.Background(), part, "", 0, 0)
+}
+
+// TestMultipartRetryDoesNotInflateProgress verifies that retries re-reading a
+// part cannot push the reported progress above the file size or inflate the
+// speed (the regression that showed 400MB/s on a 10MB/s line).
+func TestMultipartRetryDoesNotInflateProgress(t *testing.T) {
+	t.Parallel()
+
+	const fileSize = 4 * 1024 * 1024
+	fileStore := newTaskTestStore(t)
+	cfg, err := fileStore.LoadConfig()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Worker.UploadChunkSizeMB = 1
+	cfg.Worker.UploadPartConcurrency = 2
+	cfg.Emos.Token = "demo-token"
+	if err := fileStore.SaveConfig(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	taskService := NewTaskService(fileStore)
+	presigns := make([]client.EmosMultipartPart, 4)
+	for i := 1; i <= 4; i++ {
+		presigns[i-1] = client.EmosMultipartPart{Number: i, UploadURL: fmt.Sprintf("https://upload.example/part/%d", i)}
+	}
+	client := &retryReportingClient{stubEmosUploadClient: &stubEmosUploadClient{
+		tokenResult: client.EmosUploadTokenResult{
+			Storage: "r2", FileID: "file-multipart", UploadType: "multipart",
+			MultipartSizeMin: 1024 * 1024, MultipartSizeMax: 1024 * 1024,
+		},
+		presigns: presigns,
+	}}
+	bus := eventbus.New()
+	events := bus.Subscribe()
+	defer bus.Unsubscribe(events)
+
+	executor := NewUploadExecutor(taskService, client, bus, nil)
+	taskID := seedUploadPendingTaskWithFileSize(t, taskService, fileStore, fileSize)
+
+	done := make(chan error, 1)
+	go func() { done <- executor.Execute(context.Background(), taskID) }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("execute multipart upload with retries: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("multipart upload timed out")
+	}
+
+	// Drain queued SSE events and assert none ever reported more than the
+	// file size (retry re-reads used to inflate liveBytes beyond it).
+	maxReported := int64(0)
+	for {
+		select {
+		case evt := <-events:
+			if evt.UlDone > maxReported {
+				maxReported = evt.UlDone
+			}
+			continue
+		default:
+		}
+		break
+	}
+	if maxReported > fileSize {
+		t.Fatalf("SSE reported %d bytes > file size %d (retry double-count)", maxReported, fileSize)
+	}
+
+	task, err := taskService.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.Upload.Progress > 100 || task.Upload.UploadedBytes > fileSize {
+		t.Fatalf("progress inflated: %d%% bytes=%d > %d", int(task.Upload.Progress), task.Upload.UploadedBytes, fileSize)
+	}
+	if task.Status != model.TaskStatusCompleted {
+		t.Fatalf("expected completed, got %s", task.Status)
+	}
 }
