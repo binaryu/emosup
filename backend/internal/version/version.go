@@ -2,7 +2,7 @@
 //
 // Set at build time via:
 //
-//	go build -ldflags "-X emosup/backend/internal/version.Version=v1.2.1"
+//	go build -ldflags "-X emosup/backend/internal/version.Version=v1.2.2"
 package version
 
 // Version is the emosup release version; "dev" for local builds.
