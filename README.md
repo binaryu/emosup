@@ -17,7 +17,7 @@ OpenList / 本地文件 → Emos 异步转存面板。
 
 ```bash
 
-curl -fsSL https://raw.githubusercontent.com/binaryu/emosup/main/scripts/install.sh | sudo bash
+curl -fsSL https://gh-proxy.com/raw.githubusercontent.com/binaryu/emosup/main/scripts/install.sh | sudo bash
 ```
 
 打开 `http://服务器IP:端口`，默认账号 **`admin` / `admin`**（请立刻改密码）。
@@ -71,9 +71,12 @@ sudo bash /opt/emosup/install.sh uninstall
 | 变量 | 说明 | 默认 |
 |------|------|------|
 | `EMOSUP_PORT` | 监听端口 | `8080` |
+| `EMOSUP_HOST` | 监听地址 | `0.0.0.0` |
 | `EMOSUP_DATA_DIR` | 数据目录 | `/opt/emosup/data` |
 | `EMOSUP_FRONTEND_DIST` | 前端目录 | `/opt/emosup/frontend` |
 | `EMOSUP_LOCAL_ROOT` | 本地浏览根目录（可选） | 面板配置 / downloads |
+| `EMOSUP_DOWNLOADS_DIR` | 下载缓存目录（可选） | 面板配置 download_dir |
+| `EMOSUP_DOWNLOADS_HOST` | 下载缓存宿主机路径（Docker 映射用） | 同容器内路径 |
 
 本地媒体目录也可在面板 **系统配置 → 本地媒体** 里改，无需改环境变量。
 
@@ -108,6 +111,8 @@ docker compose up -d
 | 应用数据 | `EMOSUP_DATA_DIR` | `/app/backend/data` |
 | 下载缓存 | （在 data 卷内） | `.../downloads` |
 | 本地媒体 | `EMOSUP_MEDIA_DIR` | `/media` |
+
+Docker 的本地媒体根目录默认固定为容器内 `/media`（面板里改无效，因为环境变量优先）；如需换容器内路径，在 `.env` 中加一行 `EMOSUP_LOCAL_ROOT=/other/path` 并保证该路径已挂载进容器。
 
 ---
 
