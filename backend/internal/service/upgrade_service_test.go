@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCompareVersions(t *testing.T) {
@@ -210,5 +211,40 @@ func TestBuildRestartScript(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Errorf("restart script missing %q", want)
 		}
+	}
+}
+
+// TestUpgradeStartStatusErrorSurface verifies the background upgrade records
+// its state: running while in flight, and the error text once it fails — the
+// exact information that was previously swallowed by the frontend.
+func TestUpgradeStartStatusErrorSurface(t *testing.T) {
+	svc := NewUpgradeService(nil)
+
+	if err := svc.Start(); err != nil {
+		t.Fatalf("start upgrade: %v", err)
+	}
+	if err := svc.Start(); err == nil {
+		t.Fatal("second concurrent start must fail")
+	}
+	if st := svc.Status(); !st.Running || st.Stage == "" {
+		t.Fatalf("expected running state, got %+v", st)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		st := svc.Status()
+		if !st.Running {
+			if st.Error == "" {
+				t.Fatalf("expected an error to surface in test env, got %+v", st)
+			}
+			if st.Success {
+				t.Fatalf("upgrade must not succeed in test env, got %+v", st)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("upgrade run did not finish")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

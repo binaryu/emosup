@@ -394,19 +394,81 @@ async function runUpgrade() {
   upgrading.value = true
   upgradeError.value = ''
   upgradeLoading.value = true
-  upgradeProgress.value = 5
-  upgradeStatusText.value = '正在下载升级包…'
+  upgradeProgress.value = 10
+  upgradeStatusText.value = '正在启动升级…'
 
   try {
-    // The server exits right after responding, so a failed fetch is expected.
-    await apiFetch('/api/upgrade/run', { method: 'POST' }).catch(() => undefined)
-  } catch {
-    // connection drop is expected
+    const resp = await apiFetch('/api/upgrade/run', { method: 'POST' })
+    const data = await resp.json()
+    if (!data.success) {
+      upgradeError.value = data.message || '启动升级失败'
+      upgrading.value = false
+      upgradeLoading.value = false
+      return
+    }
+  } catch (e) {
+    upgradeError.value = e instanceof Error ? e.message : '启动升级失败'
+    upgrading.value = false
+    upgradeLoading.value = false
+    return
   }
 
-  upgradeProgress.value = 60
-  upgradeStatusText.value = '升级包已就位，等待服务重启…'
-  waitForRestart()
+  pollUpgradeStatus()
+}
+
+function upgradeStageText(stage: string) {
+  switch (stage) {
+    case 'checking': return '正在检查版本…'
+    case 'downloading': return '正在下载升级包…'
+    case 'installing': return '正在安装升级文件…'
+    case 'restarting': return '升级文件已就位，等待服务重启…'
+    default: return '升级中…'
+  }
+}
+
+let upgradeTimer: number | undefined
+let statusFailures = 0
+
+function pollUpgradeStatus() {
+  if (upgradeTimer) window.clearInterval(upgradeTimer)
+  upgradeTimer = window.setInterval(async () => {
+    try {
+      const resp = await apiFetch('/api/upgrade/status')
+      const data = await resp.json()
+      if (!data.success) {
+        // Shouldn't normally happen; keep polling.
+        return
+      }
+      statusFailures = 0
+      const st = data.data
+      if (st.error) {
+        window.clearInterval(upgradeTimer)
+        upgradeError.value = `升级失败：${st.error}`
+        upgrading.value = false
+        upgradeLoading.value = false
+        return
+      }
+      if (st.running) {
+        upgradeStatusText.value = upgradeStageText(st.stage)
+        upgradeProgress.value = Math.min(upgradeProgress.value + 2, 80)
+        return
+      }
+      if (st.success) {
+        window.clearInterval(upgradeTimer)
+        upgradeProgress.value = 90
+        upgradeStatusText.value = '升级完成，等待服务重启…'
+        waitForRestart()
+      }
+    } catch {
+      // Server is likely restarting — hand over to the health poller.
+      statusFailures += 1
+      if (statusFailures >= 2) {
+        window.clearInterval(upgradeTimer)
+        upgradeStatusText.value = '服务正在重启…'
+        waitForRestart()
+      }
+    }
+  }, 2000)
 }
 
 function waitForRestart() {
@@ -442,6 +504,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (healthTimer) window.clearInterval(healthTimer)
+  if (upgradeTimer) window.clearInterval(upgradeTimer)
 })
 </script>
 

@@ -1,10 +1,7 @@
 package handler
 
 import (
-	"log"
 	"net/http"
-	"os"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,6 +19,7 @@ func NewUpgradeHandler(service *service.UpgradeService) *UpgradeHandler {
 func (h *UpgradeHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/upgrade/check", h.check)
 	router.POST("/upgrade/run", h.run)
+	router.GET("/upgrade/status", h.status)
 }
 
 func (h *UpgradeHandler) check(c *gin.Context) {
@@ -33,27 +31,17 @@ func (h *UpgradeHandler) check(c *gin.Context) {
 	respondOK(c, result)
 }
 
+// run starts the upgrade in the background and returns immediately; the
+// download/install continues even if the browser times out or disconnects.
+// Progress and errors are read via GET /upgrade/status.
 func (h *UpgradeHandler) run(c *gin.Context) {
-	result, err := h.service.Run(c.Request.Context())
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+	if err := h.service.Start(); err != nil {
+		respondError(c, http.StatusConflict, err.Error())
 		return
 	}
-	respondOK(c, result)
-
-	// The new files are already in place; exit shortly after the response
-	// has been flushed. Exiting non-zero triggers systemd Restart=on-failure
-	// (the unit created by install.sh), so the service comes back up even if
-	// the detached restart script cannot run systemctl. The restart script
-	// (spawned by Run) is the fallback for units without that policy.
-	go func() {
-		time.Sleep(1500 * time.Millisecond)
-		log.Printf("upgrade to %s complete, exiting for restart", result.Version)
-		os.Exit(exitCodeRestart)
-	}()
+	respondOK(c, gin.H{"started": true})
 }
 
-// exitCodeRestart is returned when the upgrade succeeded and the process
-// should be restarted; systemd units with Restart=on-failure use it to
-// bring the service back automatically.
-const exitCodeRestart = 42
+func (h *UpgradeHandler) status(c *gin.Context) {
+	respondOK(c, h.service.Status())
+}

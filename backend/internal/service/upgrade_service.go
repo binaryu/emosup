@@ -50,10 +50,26 @@ type UpgradeResult struct {
 	Version string `json:"version"`
 }
 
+// UpgradeStatus is the live state of a background upgrade, exposed via
+// /api/upgrade/status so the panel can show real progress and errors without
+// blocking on the (potentially slow) download.
+type UpgradeStatus struct {
+	Running bool   `json:"running"`
+	Stage   string `json:"stage"` // checking | downloading | installing | restarting
+	Version string `json:"version"`
+	Error   string `json:"error"`
+	Success bool   `json:"success"`
+}
+
+// ExitCodeRestart is returned when the upgrade succeeded and the process
+// should be restarted; systemd units with Restart=on-failure use it to bring
+// the service back automatically.
+const ExitCodeRestart = 42
+
 type UpgradeService struct {
-	mu      sync.Mutex
-	running bool
-	store   *store.FileStore
+	store      *store.FileStore
+	statusMu   sync.Mutex
+	lastStatus UpgradeStatus
 }
 
 func NewUpgradeService(store *store.FileStore) *UpgradeService {
@@ -163,18 +179,65 @@ func compareVersions(a, b string) int {
 	return 0
 }
 
-// Run downloads the release for the current platform, verifies its checksum,
-// swaps program files (preserving data/ and emosup.env) and schedules a restart.
-func (s *UpgradeService) Run(ctx context.Context) (*UpgradeResult, error) {
-	s.mu.Lock()
-	if s.running {
-		s.mu.Unlock()
-		return nil, errors.New("升级已在进行中，请稍候")
+// Start launches the upgrade in a background goroutine detached from the HTTP
+// request context, so a slow download or a browser timeout can never abort the
+// installation mid-way. Returns an error when an upgrade is already running.
+func (s *UpgradeService) Start() error {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	if s.lastStatus.Running {
+		return errors.New("升级已在进行中，请稍候")
 	}
-	s.running = true
-	defer func() { s.running = false }()
-	s.mu.Unlock()
+	s.lastStatus = UpgradeStatus{Running: true, Stage: "checking"}
+	go s.runAsync()
+	return nil
+}
 
+// Status returns the current upgrade state.
+func (s *UpgradeService) Status() UpgradeStatus {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	return s.lastStatus
+}
+
+func (s *UpgradeService) setStage(stage string) {
+	s.statusMu.Lock()
+	s.lastStatus.Stage = stage
+	s.statusMu.Unlock()
+}
+
+func (s *UpgradeService) runAsync() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	result, err := s.run(ctx)
+
+	s.statusMu.Lock()
+	s.lastStatus.Running = false
+	if err != nil {
+		s.lastStatus.Error = err.Error()
+		s.lastStatus.Success = false
+		s.statusMu.Unlock()
+		log.Printf("upgrade failed: %v", err)
+		return
+	}
+	s.lastStatus.Success = true
+	s.lastStatus.Version = result.Version
+	s.statusMu.Unlock()
+
+	log.Printf("upgrade to %s complete, exiting for restart", result.Version)
+	// The new files are already in place; exit shortly so the response has
+	// been flushed. Non-zero exit triggers systemd Restart=on-failure; the
+	// detached restart script covers units without that policy.
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		os.Exit(ExitCodeRestart)
+	}()
+}
+
+// run downloads the release for the current platform, verifies its checksum,
+// swaps program files (preserving data/ and emosup.env) and schedules a restart.
+func (s *UpgradeService) run(ctx context.Context) (*UpgradeResult, error) {
 	if runtime.GOOS != "linux" {
 		return nil, errors.New("自动升级仅支持 Linux 部署")
 	}
@@ -195,6 +258,7 @@ func (s *UpgradeService) Run(ctx context.Context) (*UpgradeResult, error) {
 		return nil, fmt.Errorf("当前已是最新版本 (%s)", check.Latest)
 	}
 
+	s.setStage("downloading")
 	tmpDir, err := os.MkdirTemp("", "emosup-upgrade-*")
 	if err != nil {
 		return nil, fmt.Errorf("创建临时目录失败: %w", err)
@@ -204,8 +268,10 @@ func (s *UpgradeService) Run(ctx context.Context) (*UpgradeResult, error) {
 	arch := runtime.GOARCH
 	asset := fmt.Sprintf("emosup-linux-%s.tar.gz", arch)
 	urlPath := fmt.Sprintf("/%s/releases/download/v%s/%s", s.repo(), check.Latest, asset)
+	downloadURL := s.githubDownloadURL(urlPath)
+	log.Printf("upgrade: downloading %s", downloadURL)
 
-	if err := downloadFile(ctx, s.githubDownloadURL(urlPath), filepath.Join(tmpDir, asset), 15*time.Minute); err != nil {
+	if err := downloadFile(ctx, downloadURL, filepath.Join(tmpDir, asset), 15*time.Minute); err != nil {
 		return nil, fmt.Errorf("下载升级包失败: %w", err)
 	}
 	if err := downloadFile(ctx, s.githubDownloadURL(urlPath+".sha256"), filepath.Join(tmpDir, asset+".sha256"), 30*time.Second); err != nil {
@@ -215,6 +281,7 @@ func (s *UpgradeService) Run(ctx context.Context) (*UpgradeResult, error) {
 		return nil, err
 	}
 
+	s.setStage("installing")
 	extracted, err := extractTarGz(filepath.Join(tmpDir, asset), tmpDir)
 	if err != nil {
 		return nil, fmt.Errorf("解压升级包失败: %w", err)
@@ -224,6 +291,7 @@ func (s *UpgradeService) Run(ctx context.Context) (*UpgradeResult, error) {
 		return nil, err
 	}
 
+	s.setStage("restarting")
 	if err := scheduleRestart(installDir, os.Getpid()); err != nil {
 		return nil, fmt.Errorf("升级文件已替换，但启动重启脚本失败: %w", err)
 	}
@@ -541,7 +609,7 @@ func upgradeLogPath() string {
 // scheduleRestart spawns a detached script that waits for this process to exit
 // and then brings the service back up. Layered strategy:
 //
-//  1. The server itself exits with a non-zero code (exitCodeRestart), so
+//  1. The server itself exits with a non-zero code (ExitCodeRestart), so
 //     systemd units with Restart=on-failure restart automatically — no
 //     systemctl permissions needed.
 //  2. The script, for units without Restart=on-failure: systemctl restart the
