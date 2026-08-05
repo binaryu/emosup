@@ -4,7 +4,7 @@
       <div class="brand">
         <span class="brand-badge">EM</span>
         <div class="brand-text" v-show="!isCollapsed">
-          <strong>Emos Upload</strong>
+          <strong>{{ configStore.config.server.web_title || 'Emos Upload' }}</strong>
           <p>Task Manager</p>
         </div>
       </div>
@@ -63,7 +63,7 @@
         <button class="menu-toggle" @click="sidebarOpen = !sidebarOpen">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
         </button>
-        <span class="mobile-title">Emos Upload</span>
+        <span class="mobile-title">{{ configStore.config.server.web_title || 'Emos Upload' }}</span>
         <span v-if="appVersion" class="mobile-version">{{ appVersion }}</span>
       </div>
       
@@ -79,11 +79,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { useConfigStore } from '@/stores/config'
 import { apiFetch } from '@/utils/api'
 
 const authStore = useAuthStore()
+const configStore = useConfigStore()
 
 const appVersion = ref('')
 
@@ -152,6 +154,7 @@ onMounted(() => {
   if (!authStore.username) {
     authStore.fetchMe()
   }
+  configStore.fetchConfig()
 
   const savedTheme = localStorage.getItem('theme')
   if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -159,6 +162,15 @@ onMounted(() => {
     document.documentElement.classList.add('dark')
   }
 })
+
+watch(
+  () => configStore.config.server.web_title,
+  (title) => {
+    const value = (title || '').trim()
+    document.title = value || 'Emos Upload Panel'
+  },
+  { immediate: true },
+)
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)

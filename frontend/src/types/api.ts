@@ -19,6 +19,8 @@ export interface ApiResponse<T> {
 export interface ServerConfig {
   host: string
   port: number
+  /** Custom site title shown in the browser tab and sidebar. */
+  web_title: string
 }
 
 export interface LocalConfig {

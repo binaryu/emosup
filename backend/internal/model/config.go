@@ -1,5 +1,7 @@
 package model
 
+import "strings"
+
 type AppConfig struct {
 	Server   ServerConfig   `json:"server"`
 	Auth     AuthConfig     `json:"auth"`
@@ -27,6 +29,8 @@ type AuthConfig struct {
 type ServerConfig struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`
+	// WebTitle is the site title shown in the browser tab and sidebar.
+	WebTitle string `json:"web_title"`
 }
 
 type OpenListConfig struct {
@@ -69,8 +73,9 @@ func DefaultAppConfig() AppConfig {
 	return AppConfig{
 		Server: ServerConfig{
 			// 0.0.0.0 so binary/systemd installs are reachable on LAN/WAN by default.
-			Host: "0.0.0.0",
-			Port: 8080,
+			Host:     "0.0.0.0",
+			Port:     8080,
+			WebTitle: "Emos Upload Panel",
 		},
 		Auth: AuthConfig{
 			Username:      "admin",
@@ -106,6 +111,9 @@ func NormalizeAppConfig(cfg AppConfig) AppConfig {
 	}
 	if cfg.Server.Port <= 0 {
 		cfg.Server.Port = defaults.Server.Port
+	}
+	if strings.TrimSpace(cfg.Server.WebTitle) == "" {
+		cfg.Server.WebTitle = defaults.Server.WebTitle
 	}
 
 	if cfg.Auth.Username == "" {

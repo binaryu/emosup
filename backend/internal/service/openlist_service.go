@@ -129,12 +129,18 @@ func (s *OpenListService) GetRawLink(ctx context.Context, path string) (string, 
 		return "", err
 	}
 
+	return s.GetRawLinkWithAccess(ctx, access, path)
+}
+
+// GetRawLinkWithAccess fetches a raw link with a pre-built access so callers
+// that process many files (e.g. scans) avoid reloading config per file.
+func (s *OpenListService) GetRawLinkWithAccess(ctx context.Context, access client.OpenListAccess, path string) (string, error) {
 	rawURL, err := s.client.GetRawLink(ctx, access, path)
 	if err != nil {
 		return "", err
 	}
 
-	return client.ResolveMaybeRelativeURL(cfg.OpenList.BaseURL, rawURL), nil
+	return client.ResolveMaybeRelativeURL(access.BaseURL, rawURL), nil
 }
 
 func IsVideoFile(name string) bool {

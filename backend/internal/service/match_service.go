@@ -23,14 +23,57 @@ func NewMatchService() *MatchService {
 	return &MatchService{}
 }
 
+// VideoTreeIndex pre-indexes an Emos video tree once so per-file matching and
+// has_media lookups are O(1) instead of scanning every season/episode.
+type VideoTreeIndex struct {
+	videoType string
+	itemType  string
+	itemID    int64
+	title     string
+	episodes  map[int]map[int][]model.MatchCandidate
+	hasMedia  map[int64]*bool
+}
+
+func (s *MatchService) BuildIndex(tree client.EmosVideoTree) *VideoTreeIndex {
+	idx := &VideoTreeIndex{
+		videoType: tree.VideoType,
+		itemType:  tree.ItemType,
+		itemID:    tree.ItemID,
+		title:     tree.Title,
+		episodes:  make(map[int]map[int][]model.MatchCandidate),
+		hasMedia:  make(map[int64]*bool),
+	}
+	for _, season := range tree.Seasons {
+		eps, ok := idx.episodes[season.SeasonNumber]
+		if !ok {
+			eps = make(map[int][]model.MatchCandidate)
+			idx.episodes[season.SeasonNumber] = eps
+		}
+		for _, episode := range season.Episodes {
+			eps[episode.EpisodeNumber] = append(eps[episode.EpisodeNumber], model.MatchCandidate{
+				ItemType: episode.ItemType,
+				ItemID:   episode.ItemID,
+				Title:    buildEpisodeTitle(tree.Title, season.SeasonNumber, episode.EpisodeNumber, episode.EpisodeTitle),
+			})
+			hasMedia := episode.HasMedia
+			idx.hasMedia[episode.ItemID] = &hasMedia
+		}
+	}
+	return idx
+}
+
 func (s *MatchService) Match(tree client.EmosVideoTree, parsed model.ParsedEpisodeInfo) MatchResult {
-	if tree.VideoType == "movie" {
+	return s.BuildIndex(tree).Match(parsed)
+}
+
+func (idx *VideoTreeIndex) Match(parsed model.ParsedEpisodeInfo) MatchResult {
+	if idx.videoType == "movie" {
 		return MatchResult{
 			Status:           model.MatchStatusMatched,
 			Candidates:       []model.MatchCandidate{},
-			SelectedItemType: tree.ItemType,
-			SelectedItemID:   tree.ItemID,
-			SelectedTitle:    tree.Title,
+			SelectedItemType: idx.itemType,
+			SelectedItemID:   idx.itemID,
+			SelectedTitle:    idx.title,
 		}
 	}
 
@@ -51,22 +94,7 @@ func (s *MatchService) Match(tree client.EmosVideoTree, parsed model.ParsedEpiso
 		seasonNumber = 0
 	}
 
-	candidates := make([]model.MatchCandidate, 0, 1)
-	for _, season := range tree.Seasons {
-		if season.SeasonNumber != seasonNumber {
-			continue
-		}
-		for _, episode := range season.Episodes {
-			if episode.EpisodeNumber != *parsed.Episode {
-				continue
-			}
-			candidates = append(candidates, model.MatchCandidate{
-				ItemType: episode.ItemType,
-				ItemID:   episode.ItemID,
-				Title:    buildEpisodeTitle(tree.Title, season.SeasonNumber, episode.EpisodeNumber, episode.EpisodeTitle),
-			})
-		}
-	}
+	candidates := idx.episodes[seasonNumber][*parsed.Episode]
 
 	switch len(candidates) {
 	case 0:
@@ -90,6 +118,10 @@ func (s *MatchService) Match(tree client.EmosVideoTree, parsed model.ParsedEpiso
 			Candidates: candidates,
 		}
 	}
+}
+
+func (idx *VideoTreeIndex) LookupHasMedia(itemID int64) *bool {
+	return idx.hasMedia[itemID]
 }
 
 func buildEpisodeTitle(seriesTitle string, seasonNumber, episodeNumber int, episodeTitle string) string {

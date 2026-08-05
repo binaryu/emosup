@@ -26,6 +26,7 @@ var (
 	reCnEpisode      = regexp.MustCompile(`第\s*([0-9]{1,3}|[一二三四五六七八九十壹贰叁肆伍陆柒捌玖拾廿百]+)\s*[集话話]`)
 	reEpisodeToken   = regexp.MustCompile(`(?i)\b(?:EP?|E)(\d{1,3})\b`)
 	reBracketEpisode = regexp.MustCompile(`\[(\d{1,3})\]`)
+	reLeadingEpisode = regexp.MustCompile(`(?i)^(\d{1,3})([\s_.\-–—]+)(.+?)\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
 	reEpisodeSuffix  = regexp.MustCompile(`(?i)(?:^|[\s_.\-–—]+)(\d{1,3})\s*\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
 	reNumericFile    = regexp.MustCompile(`(?i)^(\d{1,3})\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
 	reCompactEpisode = regexp.MustCompile(`(?i)^(.+?)(\d{1,3})\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
@@ -101,6 +102,23 @@ func ParseEpisodeInfo(fileName, fullPath string) model.ParsedEpisodeInfo {
 		}
 	}
 
+	// "001 标题.mkv" / "530 标题 6.mp4": episode number at the start of the
+	// filename. Checked before the trailing-number rule so titles that end in
+	// digits (e.g. "530 神秘大三角 6.mp4") are not misread as episode 6.
+	// Leading numbers are unambiguous, so allow the full 1-3 digit range
+	// (long-running animes routinely exceed 200 episodes).
+	if info.Episode == nil {
+		if matched := reLeadingEpisode.FindStringSubmatch(name); len(matched) == 5 {
+			if loc := reLeadingEpisode.FindStringSubmatchIndex(name); len(loc) >= 6 && safeLeadingEpisode(name, loc[4], matched[1]) {
+				ep := mustAtoi(matched[1])
+				if ep > 0 {
+					info.Episode = intPtr(ep)
+					info.RawText = matched[0]
+				}
+			}
+		}
+	}
+
 	// Name - 01.mkv
 	if info.Episode == nil {
 		if matched := reEpisodeSuffix.FindStringSubmatch(name); len(matched) >= 2 {
@@ -145,9 +163,10 @@ func finalizeParsed(info model.ParsedEpisodeInfo, fullPath string) model.ParsedE
 	if info.Season == nil {
 		if season := parseSeasonFromPath(fullPath); season != nil {
 			info.Season = season
-		} else if info.Episode != nil &&
-			(reBracketEpisode.MatchString(info.RawText) ||
-				(info.RawText == filepath.Base(fullPath) && reCompactEpisode.MatchString(info.RawText))) {
+	} else if info.Episode != nil &&
+		(reBracketEpisode.MatchString(info.RawText) ||
+			reLeadingEpisode.MatchString(info.RawText) ||
+			(info.RawText == filepath.Base(fullPath) && reCompactEpisode.MatchString(info.RawText))) {
 			if season := seasonFromBracketShowName(fullPath); season != nil {
 				info.Season = season
 			} else {
@@ -306,6 +325,24 @@ func validCompactEpisode(showPart, showName, episodeText string, episode int) bo
 		return false
 	}
 	return true
+}
+
+// safeLeadingEpisode rejects version-like leading numbers such as "5.1.mkv"
+// (audio channel) where the digits are directly followed by ".digits.".
+func safeLeadingEpisode(name string, sepStart int, episodeText string) bool {
+	if len(name) <= sepStart || name[sepStart] != '.' {
+		return true
+	}
+	// "5.1.mkv" / "7.1.2.mkv": single digit directly after the dot
+	if len(episodeText) == 1 && sepStart+2 < len(name) && name[sepStart+1] >= '0' && name[sepStart+1] <= '9' && name[sepStart+2] == '.' {
+		return false
+	}
+	// "5.12.mkv": digit run directly after the dot
+	i := sepStart + 1
+	for i < len(name) && name[i] >= '0' && name[i] <= '9' {
+		i++
+	}
+	return !(i < len(name) && name[i] == '.')
 }
 
 func safeEpisodeSuffix(name string, epStart int, episodeText string) bool {

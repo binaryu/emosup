@@ -29,6 +29,10 @@
               </el-form-item>
             </el-col>
           </el-row>
+          <el-form-item label="网页标题">
+            <el-input v-model="configStore.config.server.web_title" placeholder="Emos Upload Panel" clearable />
+            <p class="field-hint">显示在浏览器标签页与侧边栏顶部的标题，留空恢复默认。</p>
+          </el-form-item>
         </el-form>
       </el-card>
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"emosup/backend/internal/client"
@@ -127,60 +128,38 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 		tree.VideoType = scan.VideoType
 	}
 
-	items := make([]model.ScanItem, 0, len(entries))
-	for _, entry := range entries {
-		item := model.ScanItem{
-			ID:              utils.NewID("item"),
-			ScanSessionID:   scan.ID,
-			OpenListPath:    entry.Path,
-			FileName:        entry.Name,
-			FileSize:        entry.Size,
-			IsVideo:         true,
-			MatchCandidates: []model.MatchCandidate{},
-			CreatedAt:       now,
-			UpdatedAt:       now,
+	// Load the OpenList access once so per-file raw-link fetches skip the
+	// config reload + token check for every one of the (possibly hundreds of)
+	// video files.
+	var openListAccess client.OpenListAccess
+	if !isLocal {
+		cfg, cfgErr := s.store.LoadConfig()
+		if cfgErr != nil {
+			log.Printf("scan config load failed: scan=%s err=%v", scan.ID, cfgErr)
+			scan.Status = model.ScanSessionStatusFailed
+			scan.UpdatedAt = time.Now()
+			_ = s.store.SaveScan(scan)
+			return model.ScanSession{}, cfgErr
 		}
-
-		if isLocal {
-			// Local files: use the local path as raw_url, file is already downloaded
-			item.RawURL = entry.Name
-		} else {
-			rawURL, rawErr := s.openListService.GetRawLink(ctx, entry.Path)
-			if rawErr != nil {
-				item.MatchStatus = model.MatchStatusInvalid
-				item.MatchReason = "获取 OpenList 直链失败: " + rawErr.Error()
-				items = append(items, item)
-				log.Printf("scan item raw link failed: scan=%s file=%s err=%v", scan.ID, entry.Path, rawErr)
-				continue
-			}
-			item.RawURL = rawURL
+		openListAccess = s.openListService.buildAccess(cfg)
+		if err := s.openListService.ensureToken(ctx, &openListAccess); err != nil {
+			log.Printf("scan openlist auth failed: scan=%s err=%v", scan.ID, err)
+			scan.Status = model.ScanSessionStatusFailed
+			scan.UpdatedAt = time.Now()
+			_ = s.store.SaveScan(scan)
+			return model.ScanSession{}, err
 		}
-		item.Parsed = utils.ParseEpisodeInfo(entry.Name, entry.Path)
-		matchResult := s.matchService.Match(tree, item.Parsed)
-		item.MatchStatus = matchResult.Status
-		item.MatchReason = matchResult.Reason
-		item.MatchCandidates = matchResult.Candidates
-		item.SelectedItemType = matchResult.SelectedItemType
-		item.SelectedItemID = matchResult.SelectedItemID
-		item.SelectedTitle = matchResult.SelectedTitle
-		item.Confirmed = matchResult.Status == model.MatchStatusMatched &&
-			item.SelectedItemID > 0 &&
-			strings.TrimSpace(item.SelectedItemType) != ""
+	}
 
-		// Look up has_media from tree for matched episodes
-		if item.SelectedItemID > 0 && tree.VideoType == "tv" {
-		item.HasMedia = lookupHasMedia(&tree, item.SelectedItemID)
-		}
-		log.Printf(
-			"scan item parsed and matched: scan=%s file=%s season=%v episode=%v status=%s",
-			scan.ID,
-			entry.Name,
-			item.Parsed.Season,
-			item.Parsed.Episode,
-			item.MatchStatus,
-		)
+	treeIndex := s.matchService.BuildIndex(tree)
 
-		items = append(items, item)
+	items, err := s.processEntries(ctx, scan.ID, treeIndex, isLocal, openListAccess, entries, now)
+	if err != nil {
+		log.Printf("scan aborted: scan=%s err=%v", scan.ID, err)
+		scan.Status = model.ScanSessionStatusFailed
+		scan.UpdatedAt = time.Now()
+		_ = s.store.SaveScan(scan)
+		return model.ScanSession{}, err
 	}
 
 	scan.Items = items
@@ -313,6 +292,147 @@ func (s *ScanService) localListRecursive(ctx context.Context, path string, resul
 	}
 }
 
+// scanItemConcurrency bounds the worker pool used to process scan entries.
+// Each OpenList raw-link fetch is an independent HTTP round trip; processing
+// hundreds of files sequentially would take minutes and hit request timeouts.
+const scanItemConcurrency = 12
+
+type scanItemJob struct {
+	index int
+	entry client.OpenListEntry
+}
+
+type scanItemResult struct {
+	index int
+	item  model.ScanItem
+	err   error
+}
+
+// processEntries parses, matches and fetches raw links for all collected
+// entries concurrently (bounded worker pool), preserving input order.
+func (s *ScanService) processEntries(ctx context.Context, scanID string, treeIndex *VideoTreeIndex, isLocal bool, openListAccess client.OpenListAccess, entries []client.OpenListEntry, now time.Time) ([]model.ScanItem, error) {
+	workerCount := scanItemConcurrency
+	if len(entries) < workerCount {
+		workerCount = len(entries)
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	jobs := make(chan scanItemJob)
+	results := make(chan scanItemResult, len(entries))
+
+	var wg sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				item, err := s.processScanEntry(ctx, scanID, treeIndex, isLocal, openListAccess, now, job.entry)
+				if err != nil {
+					cancel()
+					results <- scanItemResult{index: job.index, err: err}
+					return
+				}
+				results <- scanItemResult{index: job.index, item: item}
+			}
+		}()
+	}
+
+sendJobs:
+	for i, entry := range entries {
+		select {
+		case jobs <- scanItemJob{index: i, entry: entry}:
+		case <-ctx.Done():
+			break sendJobs
+		}
+	}
+	close(jobs)
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	items := make([]model.ScanItem, len(entries))
+	var scanErr error
+	for res := range results {
+		if res.err != nil {
+			if scanErr == nil {
+				scanErr = res.err
+			}
+			continue
+		}
+		items[res.index] = res.item
+	}
+	if scanErr != nil {
+		return nil, scanErr
+	}
+	return items, nil
+}
+
+// processScanEntry builds a ScanItem for one entry: fetches the raw link
+// (OpenList only), parses episode info, matches against the pre-indexed tree
+// and looks up has_media. A cancelled context is fatal (the request died);
+// per-file raw-link failures only mark that item invalid.
+func (s *ScanService) processScanEntry(ctx context.Context, scanID string, treeIndex *VideoTreeIndex, isLocal bool, openListAccess client.OpenListAccess, now time.Time, entry client.OpenListEntry) (model.ScanItem, error) {
+	if err := ctx.Err(); err != nil {
+		return model.ScanItem{}, err
+	}
+
+	item := model.ScanItem{
+		ID:              utils.NewID("item"),
+		ScanSessionID:   scanID,
+		OpenListPath:    entry.Path,
+		FileName:        entry.Name,
+		FileSize:        entry.Size,
+		IsVideo:         true,
+		MatchCandidates: []model.MatchCandidate{},
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+
+	if isLocal {
+		// Local files: use the local path as raw_url, file is already downloaded
+		item.RawURL = entry.Name
+	} else {
+		rawURL, rawErr := s.openListService.GetRawLinkWithAccess(ctx, openListAccess, entry.Path)
+		if rawErr != nil {
+			item.MatchStatus = model.MatchStatusInvalid
+			item.MatchReason = "获取 OpenList 直链失败: " + rawErr.Error()
+			log.Printf("scan item raw link failed: scan=%s file=%s err=%v", scanID, entry.Path, rawErr)
+			return item, nil
+		}
+		item.RawURL = rawURL
+	}
+
+	item.Parsed = utils.ParseEpisodeInfo(entry.Name, entry.Path)
+	matchResult := treeIndex.Match(item.Parsed)
+	item.MatchStatus = matchResult.Status
+	item.MatchReason = matchResult.Reason
+	item.MatchCandidates = matchResult.Candidates
+	item.SelectedItemType = matchResult.SelectedItemType
+	item.SelectedItemID = matchResult.SelectedItemID
+	item.SelectedTitle = matchResult.SelectedTitle
+	item.Confirmed = matchResult.Status == model.MatchStatusMatched &&
+		item.SelectedItemID > 0 &&
+		strings.TrimSpace(item.SelectedItemType) != ""
+
+	// Look up has_media from the indexed tree for matched episodes
+	if item.SelectedItemID > 0 && treeIndex.videoType == "tv" {
+		item.HasMedia = treeIndex.LookupHasMedia(item.SelectedItemID)
+	}
+	log.Printf(
+		"scan item parsed and matched: scan=%s file=%s season=%v episode=%v status=%s",
+		scanID,
+		entry.Name,
+		item.Parsed.Season,
+		item.Parsed.Episode,
+		item.MatchStatus,
+	)
+
+	return item, nil
+}
+
 func (s *ScanService) DeleteScan(_ context.Context, id string) error {
 	err := s.store.DeleteScan(id)
 	if err != nil {
@@ -406,16 +526,4 @@ func (s *ScanService) UpdateScanItem(ctx context.Context, scanID, itemID string,
 
 	log.Printf("scan item updated: scan=%s item=%s confirmed=%v", scanID, itemID, updatedItem.Confirmed)
 	return scan, updatedItem, nil
-}
-
-func lookupHasMedia(tree *client.EmosVideoTree, itemID int64) *bool {
-	for _, season := range tree.Seasons {
-		for _, episode := range season.Episodes {
-			if episode.ItemID == itemID {
-				hasMedia := episode.HasMedia
-				return &hasMedia
-			}
-		}
-	}
-	return nil
 }

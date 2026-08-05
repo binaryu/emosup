@@ -7,6 +7,7 @@ const defaultConfig: AppConfig = {
   server: {
     host: '0.0.0.0',
     port: 8080,
+    web_title: 'Emos Upload Panel',
   },
   auth: {
     username: 'admin',
@@ -49,9 +50,11 @@ export const useConfigStore = defineStore('config', {
   state: () => ({
     config: structuredClone(defaultConfig) as AppConfig,
     loading: false,
+    loaded: false,
   }),
   actions: {
-    async fetchConfig() {
+    async fetchConfig(force = false) {
+      if (this.loaded && !force) return
       this.loading = true
       try {
         const data = await apiGet<AppConfig>('/api/config')
@@ -77,6 +80,7 @@ export const useConfigStore = defineStore('config', {
             auto_tune: data.worker?.auto_tune ?? true,
           },
         }
+        this.loaded = true
       } finally {
         this.loading = false
       }

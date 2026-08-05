@@ -186,6 +186,45 @@ func TestParseEpisodeInfo(t *testing.T) {
 			season:   ptr(2),
 			episode:  ptr(4),
 		},
+		{
+			name:     "leading episode number with cn title",
+			fileName: "001 狼来了(上).mp4",
+			fullPath: "/TV/动画/001 狼来了(上).mp4",
+			season:   ptr(1),
+			episode:  ptr(1),
+		},
+		{
+			name:     "leading episode number with trailing digit title",
+			fileName: "530 神秘大三角 6.mp4",
+			fullPath: "/TV/动画/530 神秘大三角 6.mp4",
+			season:   ptr(1),
+			episode:  ptr(530),
+		},
+		{
+			name:     "leading episode number dot separator",
+			fileName: "002.狼来了(下).mp4",
+			fullPath: "/TV/动画/002.狼来了(下).mp4",
+			season:   ptr(1),
+			episode:  ptr(2),
+		},
+		{
+			name:     "leading audio channel is not episode",
+			fileName: "5.1.mkv",
+			fullPath: "/TV/Show/5.1.mkv",
+			episode:  nil,
+		},
+		{
+			name:     "leading audio channel dot variant is not episode",
+			fileName: "7.1.mkv",
+			fullPath: "/TV/Show/7.1.mkv",
+			episode:  nil,
+		},
+		{
+			name:     "four digit year is not leading episode",
+			fileName: "2001 太空漫游.mkv",
+			fullPath: "/TV/电影/2001 太空漫游.mkv",
+			episode:  nil,
+		},
 	}
 
 	for _, testCase := range tests {
