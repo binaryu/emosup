@@ -39,6 +39,15 @@
                 创建任务
               </el-button>
               <el-button
+                type="danger"
+                plain
+                :disabled="(selectedItemIdsByScan[scan.id] || []).length === 0"
+                :loading="scanStore.deleting"
+                @click="deleteSelectedItems(scan.id)"
+              >
+                删除选中
+              </el-button>
+              <el-button
                 type="warning"
                 plain
                 size="small"
@@ -50,6 +59,7 @@
                 type="danger"
                 plain
                 size="small"
+                :loading="scanStore.deleting"
                 @click="deleteScan(scan.id)"
               >
                 删除扫描
@@ -77,6 +87,7 @@
             stripe
             @select="(rows: ScanItem[]) => { selectedItemIdsByScan = { ...selectedItemIdsByScan, [scan.id]: rows.map(r => r.id) } }"
             @select-all="(rows: ScanItem[]) => { selectedItemIdsByScan = { ...selectedItemIdsByScan, [scan.id]: rows.map(r => r.id) } }"
+            @row-click="(row: ScanItem, _column: unknown, event: MouseEvent) => onRowClick(scan.id, row, event)"
           >
             <el-table-column type="expand" width="48">
               <template #default="{ row }">
@@ -230,6 +241,7 @@ const scanStore = useScanStore()
 const taskStore = useTaskStore()
 
 const selectedItemIdsByScan = ref<Record<string, string[]>>({})
+const lastClickedIndexByScan = ref<Record<string, number>>({})
 const viewMode = ref<'table' | 'card'>(typeof window !== 'undefined' && window.innerWidth < 768 ? 'card' : 'table')
 const expandedItemIds = ref<Set<string>>(new Set())
 const tableRefs = ref<Record<string, TableInstance | null>>({})
@@ -249,17 +261,80 @@ function setTableRef(scanId: string, el: unknown) {
   tableRefs.value[scanId] = (el as TableInstance | null) || null
 }
 
+function tableEl(scanId: string): HTMLElement | null {
+  const table = tableRefs.value[scanId]
+  if (!table) return null
+  return ((table as unknown as { $el: HTMLElement }).$el as HTMLElement) || null
+}
+
+function syncTableSelection(scanId: string) {
+  const table = tableRefs.value[scanId]
+  if (!table) return
+  const scan = scanStore.scans.find((s) => s.id === scanId)
+  if (!scan) return
+  const ids = new Set(selectedItemIdsByScan.value[scanId] ?? [])
+  for (const row of scan.items) {
+    table.toggleRowSelection(row, ids.has(row.id))
+  }
+}
+
 function restoreTableSelection() {
   nextTick(() => {
     for (const scan of scanStore.scans) {
-      const table = tableRefs.value[scan.id]
-      if (!table) continue
-      const ids = new Set(selectedItemIdsByScan.value[scan.id] ?? [])
-      for (const row of scan.items) {
-        table.toggleRowSelection(row, ids.has(row.id))
-      }
+      syncTableSelection(scan.id)
     }
   })
+}
+
+function onRowClick(scanId: string, row: ScanItem, event: MouseEvent) {
+  const target = event.target as HTMLElement
+  if (target.closest('.el-checkbox, .el-table__expand-icon, button, a, input, textarea')) {
+    return
+  }
+  const scan = scanStore.scans.find((s) => s.id === scanId)
+  if (!scan || !canCreateTask(row, scan.source)) return
+
+  const idx = scan.items.indexOf(row)
+  if (idx < 0) return
+
+  if (event.shiftKey && lastClickedIndexByScan.value[scanId] !== undefined) {
+    // Shift+click: select the whole range from the last clicked row.
+    const [from, to] = [lastClickedIndexByScan.value[scanId], idx].sort((a, b) => a - b)
+    const ids = new Set(selectedItemIdsByScan.value[scanId] ?? [])
+    for (let i = from; i <= to; i++) {
+      const r = scan.items[i]
+      if (canCreateTask(r, scan.source)) ids.add(r.id)
+    }
+    selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scanId]: [...ids] }
+    syncTableSelection(scanId)
+  } else if (event.ctrlKey || event.metaKey) {
+    // Ctrl+click: toggle this row.
+    const table = tableRefs.value[scanId]
+    table?.toggleRowSelection(row, !isItemSelected(scanId, row.id))
+  }
+  lastClickedIndexByScan.value = { ...lastClickedIndexByScan.value, [scanId]: idx }
+}
+
+// Ctrl+wheel: hold Ctrl and scroll — every row passing under the mouse cursor
+// gets selected, for fast bulk selection of long lists.
+function onCtrlWheel(event: WheelEvent) {
+  if (!event.ctrlKey || viewMode.value !== 'table') return
+  const hit = document.elementFromPoint(event.clientX, event.clientY)
+  if (!hit) return
+  const rowEl = (hit as HTMLElement).closest('tr.el-table__row') as HTMLElement | null
+  if (!rowEl) return
+
+  for (const scan of scanStore.scans) {
+    const el = tableEl(scan.id)
+    if (!el || !el.contains(rowEl)) continue
+    const rows = Array.from(el.querySelectorAll('tr.el-table__row')) as HTMLElement[]
+    const idx = rows.indexOf(rowEl)
+    const row = scan.items[idx]
+    if (row && canCreateTask(row, scan.source)) {
+      tableRefs.value[scan.id]?.toggleRowSelection(row, true)
+    }
+    break
+  }
 }
 
 function isItemSelected(scanId: string, itemId: string) {
@@ -370,10 +445,50 @@ async function deleteItem(scanId: string, row: ScanItem) {
   }
 
   try {
-    await scanStore.deleteScanItem(scanId, row.id)
+    const scan = await scanStore.deleteScanItem(scanId, row.id)
     ElMessage.success('已删除')
+    handleScanEmptied(scanId, scan)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '删除失败')
+  }
+}
+
+async function deleteSelectedItems(scanId: string) {
+  const itemIds = selectedItemIdsByScan.value[scanId] ?? []
+  if (!itemIds.length) {
+    ElMessage.warning('请先勾选要删除的扫描项')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${itemIds.length} 个扫描项吗？此操作不可撤销。`,
+      '批量删除扫描项',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const scan = await scanStore.deleteScanItems(scanId, itemIds)
+    selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scanId]: [] }
+    ElMessage.success(`已删除 ${itemIds.length} 个扫描项`)
+    handleScanEmptied(scanId, scan)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '删除失败')
+  }
+}
+
+function handleScanEmptied(scanId: string, scan: ScanSession) {
+  if (scan.total_count !== 0) return
+  const exists = scanStore.scans.some((s) => s.id === scanId)
+  if (!exists) {
+    if (scanStore.scans.length === 0) router.push('/tasks')
   }
 }
 
@@ -474,11 +589,13 @@ async function createTasks(scanId: string) {
 onMounted(() => {
   syncViewMode()
   window.addEventListener('resize', syncViewMode)
+  window.addEventListener('wheel', onCtrlWheel, { passive: true })
   scanStore.fetchScans()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', syncViewMode)
+  window.removeEventListener('wheel', onCtrlWheel)
 })
 </script>
 

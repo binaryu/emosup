@@ -444,14 +444,21 @@ func (s *ScanService) DeleteScan(_ context.Context, id string) error {
 	return nil
 }
 
-func (s *ScanService) DeleteScanItem(_ context.Context, scanID, itemID string) (model.ScanSession, error) {
-	scan, err := s.store.DeleteScanItem(scanID, itemID)
+func (s *ScanService) DeleteScanItem(ctx context.Context, scanID, itemID string) (model.ScanSession, error) {
+	return s.DeleteScanItems(ctx, scanID, []string{itemID})
+}
+
+func (s *ScanService) DeleteScanItems(_ context.Context, scanID string, itemIDs []string) (model.ScanSession, error) {
+	if len(itemIDs) == 0 {
+		return model.ScanSession{}, errors.New("no scan items to delete")
+	}
+	scan, err := s.store.DeleteScanItems(scanID, itemIDs)
 	if err != nil {
-		log.Printf("scan item delete failed: scan=%s item=%s err=%v", scanID, itemID, err)
+		log.Printf("scan items delete failed: scan=%s items=%d err=%v", scanID, len(itemIDs), err)
 		return model.ScanSession{}, err
 	}
 
-	log.Printf("scan item deleted: scan=%s item=%s remaining=%d", scanID, itemID, scan.TotalCount)
+	log.Printf("scan items deleted: scan=%s count=%d remaining=%d", scanID, len(itemIDs), scan.TotalCount)
 	return scan, nil
 }
 

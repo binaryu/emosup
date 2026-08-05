@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -174,5 +175,62 @@ func TestScanItemsCRUD(t *testing.T) {
 	log, err := s.GetTaskLog("tlog")
 	if err != nil || len(log.Items) != 1 || log.Items[0].Message != "hello" {
 		t.Fatalf("log=%+v err=%v", log, err)
+	}
+}
+
+func TestDeleteScanItemsBatch(t *testing.T) {
+	s := NewFileStore(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	now := time.Now()
+	items := make([]model.ScanItem, 0, 3)
+	for i := 1; i <= 3; i++ {
+		id := fmt.Sprintf("item_%d", i)
+		status := model.MatchStatusUnmatched
+		if i == 1 {
+			status = model.MatchStatusMatched
+		}
+		items = append(items, model.ScanItem{
+			ID: id, ScanSessionID: "scan_b", FileName: id, IsVideo: true,
+			MatchStatus: status, CreatedAt: now, UpdatedAt: now,
+		})
+	}
+	if err := s.SaveScan(model.ScanSession{
+		ID: "scan_b", Path: "/tv", TMDBID: 9, Status: model.ScanSessionStatusCompleted,
+		Items: items, TotalCount: 3, MatchedCount: 1, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	scan, err := s.DeleteScanItems("scan_b", []string{"item_1", "item_3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scan.Items) != 1 || scan.Items[0].ID != "item_2" {
+		t.Fatalf("items after batch delete: %+v", scan.Items)
+	}
+	if scan.TotalCount != 1 || scan.MatchedCount != 0 || scan.UnmatchedCount != 1 {
+		t.Fatalf("counts after batch delete: total=%d matched=%d unmatched=%d",
+			scan.TotalCount, scan.MatchedCount, scan.UnmatchedCount)
+	}
+
+	// Deleting the last item empties the scan.
+	scan, err = s.DeleteScanItems("scan_b", []string{"item_2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scan.TotalCount != 0 || len(scan.Items) != 0 {
+		t.Fatalf("expected empty scan, got total=%d items=%d", scan.TotalCount, len(scan.Items))
+	}
+
+	// Unknown ids error out.
+	if _, err := s.DeleteScanItems("scan_b", []string{"nope"}); err == nil {
+		t.Fatal("expected error deleting unknown items")
+	}
+	if _, err := s.DeleteScanItems("scan_b", nil); err == nil {
+		t.Fatal("expected error deleting empty id list")
 	}
 }

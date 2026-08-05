@@ -23,6 +23,27 @@ func (h *ScanHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.DELETE("/scans/:id", h.deleteScan)
 	router.PATCH("/scans/:id/items/:itemId", h.updateScanItem)
 	router.DELETE("/scans/:id/items/:itemId", h.deleteScanItem)
+	router.DELETE("/scans/:id/items", h.deleteScanItems)
+}
+
+type DeleteScanItemsRequest struct {
+	ItemIDs []string `json:"item_ids"`
+}
+
+func (h *ScanHandler) deleteScanItems(c *gin.Context) {
+	var req DeleteScanItemsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	scan, err := h.service.DeleteScanItems(c.Request.Context(), c.Param("id"), req.ItemIDs)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+
+	respondOK(c, scan)
 }
 
 func (h *ScanHandler) listScans(c *gin.Context) {

@@ -635,13 +635,29 @@ func (s *FileStore) DeleteScan(id string) error {
 }
 
 func (s *FileStore) DeleteScanItem(scanID, itemID string) (model.ScanSession, error) {
+	return s.DeleteScanItems(scanID, []string{itemID})
+}
+
+// DeleteScanItems removes the given scan items in a single transaction and
+// returns the refreshed scan session.
+func (s *FileStore) DeleteScanItems(scanID string, itemIDs []string) (model.ScanSession, error) {
+	if len(itemIDs) == 0 {
+		return model.ScanSession{}, errors.New("no scan items to delete")
+	}
 	tx, err := s.beginWrite(context.Background())
 	if err != nil {
 		return model.ScanSession{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	res, err := tx.Exec(`DELETE FROM scan_items WHERE scan_session_id = ? AND id = ?`, scanID, itemID)
+	placeholders := make([]string, len(itemIDs))
+	args := make([]any, 0, len(itemIDs)+1)
+	args = append(args, scanID)
+	for i, id := range itemIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	res, err := tx.Exec(`DELETE FROM scan_items WHERE scan_session_id = ? AND id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 	if err != nil {
 		return model.ScanSession{}, err
 	}

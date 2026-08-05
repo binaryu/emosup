@@ -7,6 +7,7 @@ export const useScanStore = defineStore('scans', {
   state: () => ({
     scans: [] as ScanSession[],
     loading: false,
+    deleting: false,
   }),
   actions: {
     async fetchScans() {
@@ -54,32 +55,43 @@ export const useScanStore = defineStore('scans', {
       }
     },
     async deleteScan(scanId: string) {
-      this.loading = true
+      this.deleting = true
       try {
         await apiSend(`/api/scans/${scanId}`, 'DELETE')
         this.scans = this.scans.filter((item) => item.id !== scanId)
       } finally {
-        this.loading = false
+        this.deleting = false
       }
     },
     async deleteScanItem(scanId: string, itemId: string) {
-      this.loading = true
+      return this.deleteScanItems(scanId, [itemId])
+    },
+    /** Batch-delete scan items in one request; returns the refreshed scan. */
+    async deleteScanItems(scanId: string, itemIds: string[]) {
+      this.deleting = true
       try {
-        const data = await apiSend<ScanSession>(`/api/scans/${scanId}/items/${itemId}`, 'DELETE')
-
-        const scan = this.scans.find((item) => item.id === scanId)
-        if (scan) {
-          scan.items = data.items
-          scan.total_count = data.total_count
-          scan.matched_count = data.matched_count
-          scan.unmatched_count = data.unmatched_count
-          scan.updated_at = data.updated_at
-        }
-
+        const data = await apiSend<ScanSession>(`/api/scans/${scanId}/items`, 'DELETE', {
+          item_ids: itemIds,
+        })
+        this.applyScan(scanId, data)
         return data
       } finally {
-        this.loading = false
+        this.deleting = false
       }
+    },
+    /** Replace the cached scan with a server-fresh one; removes the card if empty. */
+    applyScan(scanId: string, data: ScanSession) {
+      const scan = this.scans.find((item) => item.id === scanId)
+      if (!scan) return
+      if (data.total_count === 0) {
+        this.scans = this.scans.filter((item) => item.id !== scanId)
+        return
+      }
+      scan.items = data.items
+      scan.total_count = data.total_count
+      scan.matched_count = data.matched_count
+      scan.unmatched_count = data.unmatched_count
+      scan.updated_at = data.updated_at
     },
   },
 })
