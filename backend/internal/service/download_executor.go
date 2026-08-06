@@ -342,14 +342,24 @@ func (e *DownloadExecutor) downloadWithResume(ctx context.Context, task model.Ta
 var downloadHTTPClient = &http.Client{
 	Timeout: 0,
 	Transport: &http.Transport{
-		MaxIdleConns:       10,
-		IdleConnTimeout:    90 * time.Second,
-		DisableCompression: true,
-		WriteBufferSize:    256 * 1024,
-		ReadBufferSize:     256 * 1024,
-		ForceAttemptHTTP2:  true,
+		MaxIdleConns:          10,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		DisableCompression:    true,
+		WriteBufferSize:       256 * 1024,
+		ReadBufferSize:        256 * 1024,
+		ForceAttemptHTTP2:     true,
 	},
 }
+
+// Segment retry policy: a failed segment is retried on its own (other segments
+// keep downloading) instead of tearing the whole multi-thread download down.
+// Only after the segment exhausts its attempts does the executor fall back to
+// single-thread resume.
+const (
+	segmentMaxAttempts = 3
+	segmentRetryBackoff = 2 * time.Second
+)
 
 func (e *DownloadExecutor) downloadOnce(ctx context.Context, task model.Task, access client.OpenListAccess, cfg model.AppConfig, rawURL, localPath string) error {
 	threads := cfg.Worker.DownloadThreads
@@ -667,11 +677,30 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 			if idx == threads-1 {
 				end = totalSize - 1
 			}
-			results <- segmentResult{index: idx, err: e.downloadSegment(downloadCtx, file, access, cfg, rawURL, start, end, idx, func(n int64) {
-				progressMu.Lock()
-				totalDone += n
-				progressMu.Unlock()
-			})}
+
+			var segErr error
+			for attempt := 1; attempt <= segmentMaxAttempts; attempt++ {
+				segErr = e.downloadSegment(downloadCtx, file, access, cfg, rawURL, start, end, idx, func(n int64) {
+					progressMu.Lock()
+					totalDone += n
+					progressMu.Unlock()
+				})
+				if segErr == nil {
+					results <- segmentResult{index: idx}
+					return
+				}
+				if attempt < segmentMaxAttempts {
+					log.Printf("[download] segment %d attempt %d/%d failed, retrying: task=%s err=%v", idx, attempt, segmentMaxAttempts, task.ID, segErr)
+					e.taskLog(downloadCtx, task.ID, "warn", fmt.Sprintf("segment %d attempt %d/%d failed, retrying: %v", idx, attempt, segmentMaxAttempts, segErr))
+					select {
+					case <-downloadCtx.Done():
+						results <- segmentResult{index: idx, err: segErr}
+						return
+					case <-time.After(segmentRetryBackoff * time.Duration(attempt)):
+					}
+				}
+			}
+			results <- segmentResult{index: idx, err: segErr}
 		}(i)
 	}
 
@@ -741,8 +770,8 @@ func (e *DownloadExecutor) downloadMulti(ctx context.Context, task model.Task, a
 			if result.err != nil && firstErr == nil {
 				firstErr = result.err
 				cancel()
-				log.Printf("[download] segment %d failed: %v", result.index, result.err)
-				e.taskLog(ctx, task.ID, "warn", fmt.Sprintf("multi-thread segment failed, fallback to single-thread: %v", result.err))
+				log.Printf("[download] segment %d failed after %d attempts, fallback to single-thread: %v", result.index, segmentMaxAttempts, result.err)
+				e.taskLog(ctx, task.ID, "warn", fmt.Sprintf("multi-thread segment failed after %d attempts, fallback to single-thread: %v", segmentMaxAttempts, result.err))
 			}
 			reportProgress(true)
 		case <-ticker.C:

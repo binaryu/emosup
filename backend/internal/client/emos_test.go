@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestGetUploadTokenParsesFlexibleData(t *testing.T) {
@@ -214,7 +217,6 @@ func TestUploadFileRetriesTemporaryFailure(t *testing.T) {
 
 func TestUploadMultipartPartReturnsUnquotedETag(t *testing.T) {
 	t.Parallel()
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Content-Range") != "" {
 			t.Errorf("multipart part should not include Content-Range")
@@ -238,6 +240,50 @@ func TestUploadMultipartPartReturnsUnquotedETag(t *testing.T) {
 	}
 	if etag != "etag-123" {
 		t.Fatalf("expected unquoted etag, got %q", etag)
+	}
+}
+
+// TestUploadStallAbortsFast simulates the mainland-VPS → R2 scenario: the
+// server accepts the connection but never responds. The upload must fail with
+// a clear "stalled" error within the (shrunk) stall timeout instead of
+// hanging for the whole client timeout.
+func TestUploadStallAbortsFast(t *testing.T) {
+	oldTimeout := uploadStallTimeout
+	uploadStallTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { uploadStallTimeout = oldTimeout })
+
+	// A raw http.Server (not httptest) so Close() force-kills the stalled
+	// connections without waiting for the never-responding handler.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})}
+	go func() { _ = server.Serve(ln) }()
+	t.Cleanup(func() { _ = server.Close() })
+
+	filePath := filepath.Join(t.TempDir(), "stall.mkv")
+	if err := os.WriteFile(filePath, make([]byte, 8<<20), 0o644); err != nil {
+		t.Fatalf("write upload file: %v", err)
+	}
+
+	start := time.Now()
+	_, err = NewHTTPEmosClient().UploadMultipartPart(context.Background(), EmosMultipartPart{
+		Number:    1,
+		UploadURL: "http://" + ln.Addr().String() + "/part",
+	}, filePath, 0, 8<<20)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected stalled upload to return an error")
+	}
+	if !strings.Contains(err.Error(), "stalled") {
+		t.Fatalf("expected 'stalled' error, got: %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("stalled upload took %s, expected fast failure", elapsed)
 	}
 }
 

@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -99,8 +101,17 @@ type EmosSaveError struct {
 const (
 	uploadRetryMaxAttempts = 5
 	uploadRetryBackoff     = 500 * time.Millisecond
+	// uploadRequestTimeout bounds a single chunk upload attempt. It used to be
+	// 10 minutes, which turned a stalled connection (e.g. mainland VPS → R2)
+	// into a silent 50-minute hang across retries before any error surfaced.
+	uploadRequestTimeout = 3 * time.Minute
 )
 
+// uploadStallTimeout aborts an in-flight chunk upload when no bytes are
+// handed to the transport for this long (connection stalled, upstream
+// stopped responding). Slow-but-progressing uploads are never affected
+// because every read resets the timer. Variable so tests can shrink it.
+var uploadStallTimeout = 60 * time.Second
 func (e *EmosSaveError) Error() string {
 	if e == nil {
 		return ""
@@ -168,8 +179,24 @@ type HTTPEmosClient struct {
 
 func NewHTTPEmosClient() *HTTPEmosClient {
 	return &HTTPEmosClient{
-		apiClient:    &http.Client{Timeout: 60 * time.Second},
-		uploadClient: &http.Client{Timeout: 10 * time.Minute},
+		apiClient: &http.Client{Timeout: 60 * time.Second},
+		uploadClient: &http.Client{
+			Timeout: uploadRequestTimeout,
+			Transport: &http.Transport{
+				// Fail fast when the storage endpoint is unreachable or the
+				// connection is silently dropped (common for mainland VPS →
+				// Cloudflare R2): dial/TLS stalls error within seconds instead
+				// of blocking the upload for minutes.
+				DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+				TLSHandshakeTimeout:   15 * time.Second,
+				ResponseHeaderTimeout: 60 * time.Second,
+				IdleConnTimeout:       90 * time.Second,
+				MaxIdleConns:          32,
+				MaxIdleConnsPerHost:   16,
+				DisableCompression:    true,
+				ForceAttemptHTTP2:     true,
+			},
+		},
 	}
 }
 
@@ -520,17 +547,58 @@ func (c *HTTPEmosClient) putFileSectionWithRetry(
 			return "", err
 		}
 
+		// Each attempt gets its own context so a detected stall only aborts
+		// this attempt and the retry loop can try again.
+		attemptCtx, attemptCancel := context.WithCancel(ctx)
+
+		var lastProgressAt atomic.Int64
+		lastProgressAt.Store(time.Now().UnixNano())
+		var stalled atomic.Bool
+		stopMonitor := make(chan struct{})
+		monitorInterval := uploadStallTimeout / 2
+		if monitorInterval < 100*time.Millisecond {
+			monitorInterval = 100 * time.Millisecond
+		}
+		if monitorInterval > 5*time.Second {
+			monitorInterval = 5 * time.Second
+		}
+		go func() {
+			ticker := time.NewTicker(monitorInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stopMonitor:
+					return
+				case <-attemptCtx.Done():
+					return
+				case <-ticker.C:
+					if time.Since(time.Unix(0, lastProgressAt.Load())) > uploadStallTimeout {
+						stalled.Store(true)
+						attemptCancel()
+						return
+					}
+				}
+			}
+		}()
+
 		var reqBody io.Reader = io.NewSectionReader(file, startByte, partSize)
-		if progress != nil {
-			reqBody = &progressSectionReader{r: reqBody, fn: progress}
+		reqBody = &progressSectionReader{
+			r: reqBody,
+			fn: func(n int64) {
+				lastProgressAt.Store(time.Now().UnixNano())
+				if progress != nil {
+					progress(n)
+				}
+			},
 		}
 		request, err := http.NewRequestWithContext(
-			ctx,
+			attemptCtx,
 			http.MethodPut,
 			uploadURL,
 			reqBody,
 		)
 		if err != nil {
+			attemptCancel()
 			return "", err
 		}
 		request.ContentLength = partSize
@@ -540,8 +608,14 @@ func (c *HTTPEmosClient) putFileSectionWithRetry(
 		}
 
 		response, err := c.uploadClient.Do(request)
+		close(stopMonitor)
 		if err != nil {
-			lastErr = err
+			if stalled.Load() {
+				lastErr = fmt.Errorf("%s stalled: no network progress for %s (connection to the storage endpoint may be blocked)", operation, uploadStallTimeout)
+			} else {
+				lastErr = err
+			}
+			attemptCancel()
 			if attempt < uploadRetryMaxAttempts {
 				if waitErr := waitUploadRetry(ctx, attempt); waitErr != nil {
 					return "", waitErr
@@ -549,6 +623,7 @@ func (c *HTTPEmosClient) putFileSectionWithRetry(
 			}
 			continue
 		}
+		attemptCancel()
 
 		body, readErr := io.ReadAll(io.LimitReader(response.Body, 4096))
 		response.Body.Close()
