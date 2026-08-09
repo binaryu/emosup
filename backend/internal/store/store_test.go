@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -232,5 +233,109 @@ func TestDeleteScanItemsBatch(t *testing.T) {
 	}
 	if _, err := s.DeleteScanItems("scan_b", nil); err == nil {
 		t.Fatal("expected error deleting empty id list")
+	}
+}
+
+func TestMigrateAddsKeepLocalFileColumn(t *testing.T) {
+	root := t.TempDir()
+	// Create a legacy DB with the old tasks schema (no keep_local_file).
+	dbPath := filepath.Join(root, "emosup.db")
+	legacy, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`CREATE TABLE tasks (
+	  id TEXT PRIMARY KEY,
+	  scan_session_id TEXT NOT NULL DEFAULT '',
+	  scan_item_id TEXT NOT NULL DEFAULT '',
+	  status TEXT NOT NULL DEFAULT '',
+	  paused INTEGER NOT NULL DEFAULT 0,
+	  retry_count INTEGER NOT NULL DEFAULT 0,
+	  source_type TEXT NOT NULL DEFAULT '',
+	  source_path TEXT NOT NULL DEFAULT '',
+	  source_raw_url TEXT NOT NULL DEFAULT '',
+	  source_file_name TEXT NOT NULL DEFAULT '',
+	  source_file_size INTEGER NOT NULL DEFAULT 0,
+	  parsed_season INTEGER, parsed_episode INTEGER, parsed_is_special INTEGER NOT NULL DEFAULT 0,
+	  target_tmdb_id INTEGER NOT NULL DEFAULT 0,
+	  target_item_type TEXT NOT NULL DEFAULT '',
+	  target_item_id INTEGER NOT NULL DEFAULT 0,
+	  target_title TEXT NOT NULL DEFAULT '',
+	  dl_save_dir TEXT NOT NULL DEFAULT '',
+	  dl_local_path TEXT NOT NULL DEFAULT '',
+	  dl_status TEXT NOT NULL DEFAULT '',
+	  dl_total_bytes INTEGER NOT NULL DEFAULT 0,
+	  dl_completed_bytes INTEGER NOT NULL DEFAULT 0,
+	  dl_progress REAL NOT NULL DEFAULT 0,
+	  dl_speed INTEGER NOT NULL DEFAULT 0,
+	  ul_storage TEXT NOT NULL DEFAULT '',
+	  ul_file_id TEXT NOT NULL DEFAULT '',
+	  ul_upload_url TEXT NOT NULL DEFAULT '',
+	  ul_upload_type TEXT NOT NULL DEFAULT '',
+	  ul_multipart_size_min INTEGER NOT NULL DEFAULT 0,
+	  ul_multipart_size_max INTEGER NOT NULL DEFAULT 0,
+	  ul_multipart_presigns TEXT NOT NULL DEFAULT '[]',
+	  ul_multipart_parts TEXT NOT NULL DEFAULT '[]',
+	  ul_media_id TEXT NOT NULL DEFAULT '',
+	  ul_total_bytes INTEGER NOT NULL DEFAULT 0,
+	  ul_uploaded_bytes INTEGER NOT NULL DEFAULT 0,
+	  ul_progress REAL NOT NULL DEFAULT 0,
+	  ul_speed INTEGER NOT NULL DEFAULT 0,
+	  ul_status TEXT NOT NULL DEFAULT '',
+	  ul_save_retry_count INTEGER NOT NULL DEFAULT 0,
+	  ul_last_save_error TEXT NOT NULL DEFAULT '',
+	  result_error_message TEXT NOT NULL DEFAULT '',
+	  result_error_stage TEXT NOT NULL DEFAULT '',
+	  result_error_code TEXT NOT NULL DEFAULT '',
+	  result_last_error_at TEXT,
+	  created_at TEXT NOT NULL,
+	  updated_at TEXT NOT NULL,
+	  finished_at TEXT
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewFileStore(root)
+	if err := s.Init(); err != nil {
+		t.Fatalf("init with legacy db: %v", err)
+	}
+	defer s.Close()
+
+	// Insert a legacy task row without keep_local_file, then verify it loads.
+	if _, err := s.db.Exec(`INSERT INTO tasks(
+	  id, status, source_file_name, created_at, updated_at
+	) VALUES ('task_legacy', 'completed', 'old.mkv', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.GetTask("task_legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.KeepLocalFile {
+		t.Fatal("legacy task should default keep_local_file=false")
+	}
+
+	// And a new task round-trips the flag.
+	now := time.Now()
+	saved := model.Task{
+		ID:            "task_keep",
+		Status:        model.TaskStatusCompleted,
+		KeepLocalFile: true,
+		Source:        model.TaskSource{FileName: "kept.mkv"},
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := s.SaveTask(saved); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetTask("task_keep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.KeepLocalFile {
+		t.Fatal("keep_local_file did not round-trip")
 	}
 }

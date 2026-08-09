@@ -51,12 +51,68 @@ export interface OpenListConfig {
 
 export interface DownloadConfig {
   dir: string
+  keep_local_files: boolean
 }
 
 export interface EmosConfig {
   base_url: string
   token: string
   storage: string
+}
+
+export interface QBittorrentConfig {
+  base_url: string
+  username: string
+  password: string
+  save_path: string
+}
+
+export interface QBittorrentTorrent {
+  hash: string
+  name: string
+  state: string
+  progress: number
+  size: number
+  downloaded: number
+  uploaded: number
+  ratio: number
+  save_path: string
+  content_path: string
+  category: string
+  added_on: number
+  completion_on: number
+  dlspeed: number
+  upspeed: number
+}
+
+export interface QBittorrentFile {
+  index: number
+  name: string
+  size: number
+  progress: number
+  priority: number
+  is_seed: boolean
+}
+
+export interface CacheEntry {
+  path: string
+  name: string
+  size: number
+  modified_at: string
+  is_temp: boolean
+  referenced: boolean
+  task_id?: string
+  task_status?: string
+  task_file_name?: string
+  keep_local_file?: boolean
+}
+
+export interface CacheListResult {
+  dir: string
+  entries: CacheEntry[]
+  total_size: number
+  orphan_count: number
+  active_ref_count: number
 }
 
 export interface WorkerConfig {
@@ -80,6 +136,7 @@ export interface AppConfig {
   download: DownloadConfig
   emos: EmosConfig
   worker: WorkerConfig
+  qbittorrent: QBittorrentConfig
 }
 
 export interface OpenListEntry {
@@ -146,6 +203,7 @@ export interface Task {
   status: TaskStatus
   retry_count: number
   paused: boolean
+  keep_local_file?: boolean
   created_at: string
   updated_at: string
   finished_at?: string

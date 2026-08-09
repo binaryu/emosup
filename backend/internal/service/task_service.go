@@ -43,6 +43,9 @@ func (e *TaskServiceError) Error() string {
 type BatchCreateTasksRequest struct {
 	ScanSessionID string   `json:"scan_session_id"`
 	ItemIDs       []string `json:"item_ids"`
+	// KeepLocalFile keeps the local file after a successful upload (BT/PT
+	// seeding). nil = fall back to config Download.KeepLocalFiles.
+	KeepLocalFile *bool `json:"keep_local_file"`
 }
 
 type BatchCreateTasksResult struct {
@@ -142,6 +145,15 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, req BatchCreateTasks
 	seen := make(map[string]struct{}, len(req.ItemIDs))
 	tasksToCreate := make([]model.Task, 0, len(req.ItemIDs))
 
+	keepLocalFile := cfg.Download.KeepLocalFiles
+	if req.KeepLocalFile != nil {
+		keepLocalFile = *req.KeepLocalFile
+	}
+	// BT/PT downloads must keep their files so qBittorrent can keep seeding.
+	if isDiskSource(scan.Source) && strings.EqualFold(scan.Source, "bt") {
+		keepLocalFile = true
+	}
+
 	for _, rawItemID := range req.ItemIDs {
 		itemID := strings.TrimSpace(rawItemID)
 		if itemID == "" {
@@ -163,7 +175,7 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, req BatchCreateTasks
 			result.Failed = append(result.Failed, FailedTaskItem{ItemID: itemID, Reason: reason})
 			continue
 		}
-		tasksToCreate = append(tasksToCreate, newTaskFromScan(scan, scanItem, cfg.Emos.Storage, cfg.Local.Root, cfg.Download.Dir))
+		tasksToCreate = append(tasksToCreate, newTaskFromScan(scan, scanItem, cfg.Emos.Storage, cfg.Local.Root, cfg.Download.Dir, keepLocalFile))
 	}
 
 	if len(tasksToCreate) > 0 {
@@ -435,6 +447,11 @@ func (s *TaskService) DeleteTask(ctx context.Context, id string) error {
 }
 
 func (s *TaskService) removeTaskDownloadedFiles(task model.Task) {
+	// Tasks flagged to keep local files (BT/PT seeding) are never deleted.
+	if task.KeepLocalFile {
+		return
+	}
+
 	localPath := strings.TrimSpace(task.Download.LocalPath)
 	if localPath == "" {
 		return
@@ -1259,7 +1276,7 @@ func (s *TaskService) markTaskCanceled(taskID, downloadStatus, message string) (
 	return task, nil
 }
 
-func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage, localRootCfg, downloadDir string) model.Task {
+func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage, localRootCfg, downloadDir string, keepLocalFile bool) model.Task {
 	now := time.Now()
 	title := strings.TrimSpace(item.SelectedTitle)
 	if title == "" {
@@ -1269,7 +1286,7 @@ func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage, local
 		storage = "default"
 	}
 
-	isLocal := strings.EqualFold(scan.Source, "local")
+	isLocal := isDiskSource(scan.Source)
 	sourceType := "openlist"
 	status := model.TaskStatusQueued
 	localPath := ""
@@ -1278,7 +1295,11 @@ func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage, local
 	uploadStatus := "pending"
 
 	if isLocal {
-		sourceType = "local"
+		if strings.EqualFold(scan.Source, "bt") {
+			sourceType = "bt"
+		} else {
+			sourceType = "local"
+		}
 		status = model.TaskStatusUploadPending
 		// Resolve against local media root (same rules as LocalService.Root).
 		localRoot := resolveLocalMediaRoot(localRootCfg, downloadDir)
@@ -1294,6 +1315,7 @@ func newTaskFromScan(scan model.ScanSession, item model.ScanItem, storage, local
 		ScanSessionID: scan.ID,
 		ScanItemID:    item.ID,
 		Status:        status,
+		KeepLocalFile: keepLocalFile,
 		RetryCount:    0,
 		Source: model.TaskSource{
 			Type:     sourceType,
@@ -1344,8 +1366,8 @@ func validateScanItemForTask(scan model.ScanSession, item model.ScanItem) string
 	if !item.IsVideo {
 		return "scan item is not a video file"
 	}
-	// Only OpenList scans require raw_url; local files are already on disk
-	if !strings.EqualFold(scan.Source, "local") && strings.TrimSpace(item.RawURL) == "" {
+	// Only OpenList scans require raw_url; local/BT files are already on disk
+	if !isDiskSource(scan.Source) && strings.TrimSpace(item.RawURL) == "" {
 		return "raw_url is required"
 	}
 	return ""

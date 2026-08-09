@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import ConfigView from '@/views/ConfigView.vue'
 import BrowseView from '@/views/BrowseView.vue'
+import BTView from '@/views/BTView.vue'
+import CacheView from '@/views/CacheView.vue'
 import ScanResultsView from '@/views/ScanResultsView.vue'
 import TaskQueueView from '@/views/TaskQueueView.vue'
 import TaskDetailView from '@/views/TaskDetailView.vue'
@@ -34,6 +36,16 @@ const router = createRouter({
           path: 'browse',
           name: 'browse',
           component: BrowseView,
+        },
+        {
+          path: 'bt',
+          name: 'bt',
+          component: BTView,
+        },
+        {
+          path: 'cache',
+          name: 'cache',
+          component: CacheView,
         },
         {
           path: 'scans',

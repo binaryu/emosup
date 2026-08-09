@@ -23,6 +23,7 @@ type Task struct {
 	ScanItemID    string       `json:"scan_item_id"`
 	Status        TaskStatus   `json:"status"`
 	Paused        bool         `json:"paused"`
+	KeepLocalFile bool         `json:"keep_local_file"`
 	RetryCount    int          `json:"retry_count"`
 	Source        TaskSource   `json:"source"`
 	Parsed        TaskParsed   `json:"parsed"`

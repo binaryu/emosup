@@ -3,13 +3,14 @@ package model
 import "strings"
 
 type AppConfig struct {
-	Server   ServerConfig   `json:"server"`
-	Auth     AuthConfig     `json:"auth"`
-	Local    LocalConfig    `json:"local"`
-	OpenList OpenListConfig `json:"openlist"`
-	Download DownloadConfig `json:"download"`
-	Emos     EmosConfig     `json:"emos"`
-	Worker   WorkerConfig   `json:"worker"`
+	Server      ServerConfig      `json:"server"`
+	Auth        AuthConfig        `json:"auth"`
+	Local       LocalConfig       `json:"local"`
+	OpenList    OpenListConfig    `json:"openlist"`
+	Download    DownloadConfig    `json:"download"`
+	Emos        EmosConfig        `json:"emos"`
+	Worker      WorkerConfig      `json:"worker"`
+	QBittorrent QBittorrentConfig `json:"qbittorrent"`
 }
 
 // LocalConfig controls on-disk media browsing (binary/Docker local source).
@@ -44,12 +45,25 @@ type OpenListConfig struct {
 type DownloadConfig struct {
 	// Dir is where downloaded files are cached before upload.
 	Dir string `json:"dir"`
+	// KeepLocalFiles keeps local files after a successful upload instead of
+	// deleting them, so BT/PT downloads can keep seeding.
+	KeepLocalFiles bool `json:"keep_local_files"`
 }
 
 type EmosConfig struct {
 	BaseURL string `json:"base_url"`
 	Token   string `json:"token"`
 	Storage string `json:"storage"`
+}
+
+// QBittorrentConfig controls the qBittorrent WebUI integration (magnet/BT downloads).
+type QBittorrentConfig struct {
+	BaseURL  string `json:"base_url"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	// SavePath is where added torrents are downloaded. Must be inside the
+	// local media root so emosup can scan the files. Empty = <local root>/BT.
+	SavePath string `json:"save_path"`
 }
 
 type WorkerConfig struct {

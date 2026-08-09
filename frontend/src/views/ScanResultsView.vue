@@ -4,6 +4,7 @@
       title="扫描结果"
       subtitle="确认匹配结果后，可以直接把扫描项批量创建成任务快照，进入后续任务队列。"
     >
+      <el-checkbox v-model="keepLocalFileOnCreate">保留本地文件</el-checkbox>
       <el-button @click="router.push('/tasks')">前往任务队列</el-button>
       <el-button :loading="scanStore.loading" @click="scanStore.fetchScans()">刷新</el-button>
     </PageHeaderCard>
@@ -15,12 +16,12 @@
             <div>
               <strong>{{ scan.path }}</strong>
               <el-tag
-                :type="scan.source === 'local' ? 'warning' : 'primary'"
+                :type="scan.source === 'openlist' ? 'primary' : 'warning'"
                 size="small"
                 effect="plain"
                 style="margin-left: 10px"
               >
-                {{ scan.source === 'local' ? '本地' : 'OpenList' }}
+                {{ scan.source === 'openlist' ? 'OpenList' : scan.source === 'bt' ? 'BT 下载' : '本地' }}
               </el-tag>
               <p>
                 TMDB ID: {{ scan.tmdb_id }} / 类型: {{ scan.video_type || '自动' }} / 共
@@ -245,6 +246,7 @@ const lastClickedIndexByScan = ref<Record<string, number>>({})
 const viewMode = ref<'table' | 'card'>(typeof window !== 'undefined' && window.innerWidth < 768 ? 'card' : 'table')
 const expandedItemIds = ref<Set<string>>(new Set())
 const tableRefs = ref<Record<string, TableInstance | null>>({})
+const keepLocalFileOnCreate = ref(false)
 
 function syncViewMode() {
   if (typeof window === 'undefined') return
@@ -366,7 +368,7 @@ function toggleExpand(itemId: string) {
 }
 
 function canCreateTask(row: ScanItem, scanSource?: string) {
-  const isLocal = scanSource === 'local'
+  const isLocal = scanSource === 'local' || scanSource === 'bt'
   return Boolean(
     row.confirmed &&
       row.selected_item_type &&
@@ -513,7 +515,7 @@ async function createSingleTask(scanId: string, row: ScanItem) {
   }
 
   try {
-    const result = await taskStore.batchCreateTasks(scanId, [row.id])
+    const result = await taskStore.batchCreateTasks(scanId, [row.id], keepLocalFileOnCreate.value ? true : undefined)
     if (result.created.length) {
       ElMessage.success('已加入任务队列')
       // Remove from local scan data
@@ -550,7 +552,7 @@ async function createTasks(scanId: string) {
   }
 
   try {
-    const result = await taskStore.batchCreateTasks(scanId, itemIds)
+    const result = await taskStore.batchCreateTasks(scanId, itemIds, keepLocalFileOnCreate.value ? true : undefined)
     selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scanId]: [] }
 
     // Remove created items from local scan data

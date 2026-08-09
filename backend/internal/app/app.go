@@ -63,6 +63,10 @@ func New() (*App, error) {
 	uploadExecutor := service.NewUploadExecutor(taskService, emosClient, eventBus, tuner)
 	tmdbClient := client.NewTMDBClient()
 
+	qbClient := client.NewHTTPQBittorrentClient()
+	qbittorrentService := service.NewQBittorrentService(fileStore, qbClient, localService, scanService)
+	cacheService := service.NewCacheService(fileStore)
+
 	// Load full config from store (not redacted) for scheduler settings.
 	cfg, err := fileStore.LoadConfig()
 	if err != nil {
@@ -93,6 +97,8 @@ func New() (*App, error) {
 		Proxy:        handler.NewProxyHandler(fileStore, openListClient),
 		Scan:         handler.NewScanHandler(scanService),
 		Task:         handler.NewTaskHandler(taskService),
+		QBittorrent:  handler.NewQBittorrentHandler(qbittorrentService),
+		Cache:        handler.NewCacheHandler(cacheService),
 		Upgrade:      handler.NewUpgradeHandler(service.NewUpgradeService(fileStore)),
 		FrontendDist: frontendDist,
 	})

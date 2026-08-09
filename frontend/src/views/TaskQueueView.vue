@@ -126,6 +126,7 @@
               <div class="status-row">
                 <StatusTag :status="row.status" />
                 <StatusTag v-if="subStatus(row)" :status="subStatus(row)" size="small" />
+                <el-tag v-if="row.keep_local_file" type="warning" size="small" effect="plain">保留</el-tag>
               </div>
               <template v-if="row.status === 'downloading'">
                 <el-progress :percentage="Math.round(row.download.progress || 0)" :stroke-width="6" :show-text="false" />
@@ -209,6 +210,7 @@
           <div class="card-status-row">
             <StatusTag :status="row.status" />
             <StatusTag v-if="subStatus(row)" :status="subStatus(row)" size="small" />
+            <el-tag v-if="row.keep_local_file" type="warning" size="small" effect="plain">保留</el-tag>
             <span v-if="row.parsed.season != null || row.parsed.episode != null" class="card-ep">S{{ row.parsed.season ?? '?' }}E{{ row.parsed.episode ?? '?' }}</span>
           </div>
           <svg class="card-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>

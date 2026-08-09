@@ -628,12 +628,15 @@ func (e *UploadExecutor) saveWithRetry(ctx context.Context, task model.Task, acc
 			FileID:   task.Upload.FileID,
 		})
 		if err == nil {
-			// Delete local file after successful upload to save disk space
-			if localPath := strings.TrimSpace(task.Download.LocalPath); localPath != "" {
-				if rmErr := os.Remove(localPath); rmErr != nil {
-					log.Printf("failed to remove local file after upload: %s err=%v", localPath, rmErr)
-				} else {
-					log.Printf("local file removed after upload: %s", localPath)
+			// Delete local file after successful upload to save disk space,
+			// unless the task keeps it (BT/PT seeding).
+			if !task.KeepLocalFile {
+				if localPath := strings.TrimSpace(task.Download.LocalPath); localPath != "" {
+					if rmErr := os.Remove(localPath); rmErr != nil {
+						log.Printf("failed to remove local file after upload: %s err=%v", localPath, rmErr)
+					} else {
+						log.Printf("local file removed after upload: %s", localPath)
+					}
 				}
 			}
 			_, completeErr := e.taskService.MarkUploadCompleted(ctx, task.ID, result.MediaID)

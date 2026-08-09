@@ -58,6 +58,12 @@
               placeholder="OpenList 任务下载到此目录"
             />
           </el-form-item>
+          <el-form-item label="上传后保留本地文件">
+            <el-switch v-model="configStore.config.download.keep_local_files" />
+            <p class="field-hint">
+              上传完成后不删除本地文件（BT/PT 做种、或需要留档时开启）。默认关闭，自动删除以节省磁盘。
+            </p>
+          </el-form-item>
           <p class="field-hint">
             「本地媒体」扫描使用浏览根目录（须为已存在的绝对路径）。二进制部署可设为任意本机路径，如 <code>/home/user/downloads</code>。
             环境变量 <code>EMOSUP_LOCAL_ROOT</code> 优先级更高（Docker 常用）。
@@ -127,6 +133,42 @@
               </el-form-item>
             </el-col>
           </el-row>
+        </el-form>
+      </el-card>
+
+      <!-- qBittorrent -->
+      <el-card class="setting-card">
+        <template #header>
+          <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            qBittorrent
+          </div>
+        </template>
+        <el-form label-position="top" class="compact-form">
+          <el-form-item label="WebUI 地址">
+            <el-input v-model="configStore.config.qbittorrent.base_url" placeholder="http://127.0.0.1:8080" />
+          </el-form-item>
+          <el-row :gutter="12">
+            <el-col :span="12">
+              <el-form-item label="用户名">
+                <el-input v-model="configStore.config.qbittorrent.username" placeholder="admin" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="密码">
+                <el-input v-model="configStore.config.qbittorrent.password" type="password" show-password />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-form-item label="下载保存目录">
+            <el-input v-model="configStore.config.qbittorrent.save_path" placeholder="留空则使用本地媒体根目录/BT" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" plain :loading="testingQB" @click="testQBittorrent">测试连接</el-button>
+          </el-form-item>
+          <p class="field-hint">
+            用于「BT 下载」页添加磁力链接；保存目录须在本地媒体根目录下，否则无法扫描。上传转存后本地文件默认保留（做种）。
+          </p>
         </el-form>
       </el-card>
 
@@ -296,10 +338,26 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import { useConfigStore } from '@/stores/config'
+import { useQBittorrentStore } from '@/stores/qbittorrent'
 import type { UpgradeCheck } from '@/types/api'
 import { apiFetch } from '@/utils/api'
 
 const configStore = useConfigStore()
+const qbStore = useQBittorrentStore()
+
+const testingQB = ref(false)
+
+async function testQBittorrent() {
+  testingQB.value = true
+  try {
+    await qbStore.testConnection()
+    ElMessage.success('qBittorrent 连接成功')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '连接失败')
+  } finally {
+    testingQB.value = false
+  }
+}
 
 const currentVersion = ref('')
 const upgradeCheck = ref<UpgradeCheck | null>(null)

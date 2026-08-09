@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   status TEXT NOT NULL DEFAULT '',
   paused INTEGER NOT NULL DEFAULT 0,
   retry_count INTEGER NOT NULL DEFAULT 0,
+  keep_local_file INTEGER NOT NULL DEFAULT 0,
   source_type TEXT NOT NULL DEFAULT '',
   source_path TEXT NOT NULL DEFAULT '',
   source_raw_url TEXT NOT NULL DEFAULT '',
@@ -270,6 +271,7 @@ func (s *FileStore) migrateTaskColumns() error {
 		{name: "ul_multipart_size_max", ddl: "ALTER TABLE tasks ADD COLUMN ul_multipart_size_max INTEGER NOT NULL DEFAULT 0"},
 		{name: "ul_multipart_presigns", ddl: "ALTER TABLE tasks ADD COLUMN ul_multipart_presigns TEXT NOT NULL DEFAULT '[]'"},
 		{name: "ul_multipart_parts", ddl: "ALTER TABLE tasks ADD COLUMN ul_multipart_parts TEXT NOT NULL DEFAULT '[]'"},
+		{name: "keep_local_file", ddl: "ALTER TABLE tasks ADD COLUMN keep_local_file INTEGER NOT NULL DEFAULT 0"},
 	}
 	for _, column := range columns {
 		exists, err := s.columnExists("tasks", column.name)
@@ -741,7 +743,7 @@ func (s *FileStore) upsertTask(task model.Task) error {
 	defer s.writeMu.Unlock()
 	_, err := s.db.Exec(`
 INSERT INTO tasks(
-  id, scan_session_id, scan_item_id, status, paused, retry_count,
+  id, scan_session_id, scan_item_id, status, paused, retry_count, keep_local_file,
   source_type, source_path, source_raw_url, source_file_name, source_file_size,
   parsed_season, parsed_episode, parsed_is_special,
   target_tmdb_id, target_item_type, target_item_id, target_title,
@@ -752,19 +754,20 @@ INSERT INTO tasks(
   result_error_message, result_error_stage, result_error_code, result_last_error_at,
   created_at, updated_at, finished_at
 ) VALUES (
-  ?,?,?,?,?,?,
+  ?,?,?,?,?,?,?,
   ?,?,?,?,?,
   ?,?,?,
   ?,?,?,?,
   ?,?,?,?,?,?,?,
-  ?,?,?,?,?,?,?,?,?,?,?,?,?,
+  ?,?,?,?,?,?,
+  ?,?,?,?,?,?,?,
   ?,?,?,
   ?,?,?,?,
   ?,?,?
 )
 ON CONFLICT(id) DO UPDATE SET
   scan_session_id=excluded.scan_session_id, scan_item_id=excluded.scan_item_id, status=excluded.status,
-  paused=excluded.paused, retry_count=excluded.retry_count,
+  paused=excluded.paused, retry_count=excluded.retry_count, keep_local_file=excluded.keep_local_file,
   source_type=excluded.source_type, source_path=excluded.source_path, source_raw_url=excluded.source_raw_url,
   source_file_name=excluded.source_file_name, source_file_size=excluded.source_file_size,
   parsed_season=excluded.parsed_season, parsed_episode=excluded.parsed_episode, parsed_is_special=excluded.parsed_is_special,
@@ -783,7 +786,7 @@ ON CONFLICT(id) DO UPDATE SET
   result_error_message=excluded.result_error_message, result_error_stage=excluded.result_error_stage,
   result_error_code=excluded.result_error_code, result_last_error_at=excluded.result_last_error_at,
   updated_at=excluded.updated_at, finished_at=excluded.finished_at`,
-		task.ID, task.ScanSessionID, task.ScanItemID, string(task.Status), boolToInt(task.Paused), task.RetryCount,
+		task.ID, task.ScanSessionID, task.ScanItemID, string(task.Status), boolToInt(task.Paused), task.RetryCount, boolToInt(task.KeepLocalFile),
 		task.Source.Type, task.Source.Path, task.Source.RawURL, task.Source.FileName, task.Source.FileSize,
 		season, episode, boolToInt(task.Parsed.IsSpecial),
 		task.Target.TMDBID, task.Target.ItemType, task.Target.ItemID, task.Target.Title,
@@ -809,7 +812,7 @@ func (s *FileStore) GetTask(id string) (model.Task, error) {
 }
 
 const taskColumns = `
-  id, scan_session_id, scan_item_id, status, paused, retry_count,
+  id, scan_session_id, scan_item_id, status, paused, retry_count, keep_local_file,
   source_type, source_path, source_raw_url, source_file_name, source_file_size,
   parsed_season, parsed_episode, parsed_is_special,
   target_tmdb_id, target_item_type, target_item_id, target_title,
@@ -829,12 +832,13 @@ func scanTask(row scannable) (model.Task, error) {
 	var t model.Task
 	var status, created, updated string
 	var paused, special int
+	var keepLocal int
 	var season, episode sql.NullInt64
 	var lastErr, finished sql.NullString
 	var presignsJSON, partsJSON string
 
 	err := row.Scan(
-		&t.ID, &t.ScanSessionID, &t.ScanItemID, &status, &paused, &t.RetryCount,
+		&t.ID, &t.ScanSessionID, &t.ScanItemID, &status, &paused, &t.RetryCount, &keepLocal,
 		&t.Source.Type, &t.Source.Path, &t.Source.RawURL, &t.Source.FileName, &t.Source.FileSize,
 		&season, &episode, &special,
 		&t.Target.TMDBID, &t.Target.ItemType, &t.Target.ItemID, &t.Target.Title,
@@ -853,6 +857,7 @@ func scanTask(row scannable) (model.Task, error) {
 	}
 	t.Status = model.TaskStatus(status)
 	t.Paused = paused != 0
+	t.KeepLocalFile = keepLocal != 0
 	t.Parsed.IsSpecial = special != 0
 	if season.Valid {
 		v := int(season.Int64)
@@ -936,7 +941,7 @@ func upsertTaskTx(ctx context.Context, tx *sql.Tx, task model.Task) error {
 
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO tasks(
-  id, scan_session_id, scan_item_id, status, paused, retry_count,
+  id, scan_session_id, scan_item_id, status, paused, retry_count, keep_local_file,
   source_type, source_path, source_raw_url, source_file_name, source_file_size,
   parsed_season, parsed_episode, parsed_is_special,
   target_tmdb_id, target_item_type, target_item_id, target_title,
@@ -947,19 +952,20 @@ INSERT INTO tasks(
   result_error_message, result_error_stage, result_error_code, result_last_error_at,
   created_at, updated_at, finished_at
 ) VALUES (
-  ?,?,?,?,?,?,
+  ?,?,?,?,?,?,?,
   ?,?,?,?,?,
   ?,?,?,
   ?,?,?,?,
   ?,?,?,?,?,?,?,
-  ?,?,?,?,?,?,?,?,?,?,?,?,?,
+  ?,?,?,?,?,?,
+  ?,?,?,?,?,?,?,
   ?,?,?,
   ?,?,?,?,
   ?,?,?
 )
 ON CONFLICT(id) DO UPDATE SET
   scan_session_id=excluded.scan_session_id, scan_item_id=excluded.scan_item_id, status=excluded.status,
-  paused=excluded.paused, retry_count=excluded.retry_count,
+  paused=excluded.paused, retry_count=excluded.retry_count, keep_local_file=excluded.keep_local_file,
   source_type=excluded.source_type, source_path=excluded.source_path, source_raw_url=excluded.source_raw_url,
   source_file_name=excluded.source_file_name, source_file_size=excluded.source_file_size,
   parsed_season=excluded.parsed_season, parsed_episode=excluded.parsed_episode, parsed_is_special=excluded.parsed_is_special,
@@ -978,7 +984,7 @@ ON CONFLICT(id) DO UPDATE SET
   result_error_message=excluded.result_error_message, result_error_stage=excluded.result_error_stage,
   result_error_code=excluded.result_error_code, result_last_error_at=excluded.result_last_error_at,
   updated_at=excluded.updated_at, finished_at=excluded.finished_at`,
-		task.ID, task.ScanSessionID, task.ScanItemID, string(task.Status), boolToInt(task.Paused), task.RetryCount,
+		task.ID, task.ScanSessionID, task.ScanItemID, string(task.Status), boolToInt(task.Paused), task.RetryCount, boolToInt(task.KeepLocalFile),
 		task.Source.Type, task.Source.Path, task.Source.RawURL, task.Source.FileName, task.Source.FileSize,
 		season, episode, boolToInt(task.Parsed.IsSpecial),
 		task.Target.TMDBID, task.Target.ItemType, task.Target.ItemID, task.Target.Title,

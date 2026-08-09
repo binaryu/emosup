@@ -100,7 +100,7 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 		return model.ScanSession{}, err
 	}
 
-	isLocal := strings.EqualFold(req.Source, "local")
+	isLocal := isDiskSource(req.Source)
 	entries, err := s.collectVideoEntries(ctx, isLocal, targets)
 	if err != nil {
 		log.Printf("scan collect failed: scan=%s err=%v", scan.ID, err)
@@ -296,6 +296,12 @@ func (s *ScanService) localListRecursive(ctx context.Context, path string, resul
 // Each OpenList raw-link fetch is an independent HTTP round trip; processing
 // hundreds of files sequentially would take minutes and hit request timeouts.
 const scanItemConcurrency = 12
+
+// isDiskSource reports whether a scan source reads files already on local
+// disk (local media / qBittorrent BT downloads) instead of OpenList.
+func isDiskSource(source string) bool {
+	return strings.EqualFold(source, "local") || strings.EqualFold(source, "bt")
+}
 
 type scanItemJob struct {
 	index int

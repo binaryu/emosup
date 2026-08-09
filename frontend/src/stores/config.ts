@@ -26,11 +26,18 @@ const defaultConfig: AppConfig = {
   },
   download: {
     dir: './data/downloads',
+    keep_local_files: false,
   },
   emos: {
     base_url: 'https://emos.best',
     token: '',
     storage: 'default',
+  },
+  qbittorrent: {
+    base_url: '',
+    username: '',
+    password: '',
+    save_path: '',
   },
   worker: {
     poll_interval_seconds: 5,
@@ -73,6 +80,7 @@ export const useConfigStore = defineStore('config', {
           openlist: { ...defaultConfig.openlist, ...(data.openlist || {}) },
           download: { ...defaultConfig.download, ...(data.download || {}) },
           emos: { ...defaultConfig.emos, ...(data.emos || {}) },
+          qbittorrent: { ...defaultConfig.qbittorrent, ...(data.qbittorrent || {}) },
           worker: {
             ...defaultConfig.worker,
             ...(data.worker || {}),
