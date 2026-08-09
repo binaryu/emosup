@@ -100,13 +100,13 @@ export const useTaskStore = defineStore('tasks', {
       this.runtime = data
       return data
     },
-    async batchCreateTasks(scanSessionId: string, itemIds: string[], keepLocalFile?: boolean) {
+    async batchCreateTasks(scanSessionId: string, itemIds: string[], keepLocalFile = false) {
       this.loading = true
       try {
         return await apiSend<BatchCreateTasksResponse>('/api/tasks/batch-create', 'POST', {
           scan_session_id: scanSessionId,
           item_ids: itemIds,
-          ...(keepLocalFile !== undefined ? { keep_local_file: keepLocalFile } : {}),
+          keep_local_file: keepLocalFile,
         })
       } finally {
         this.loading = false

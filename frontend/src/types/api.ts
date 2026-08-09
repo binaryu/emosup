@@ -51,7 +51,6 @@ export interface OpenListConfig {
 
 export interface DownloadConfig {
   dir: string
-  keep_local_files: boolean
 }
 
 export interface EmosConfig {

@@ -4,7 +4,6 @@
       title="扫描结果"
       subtitle="确认匹配结果后，可以直接把扫描项批量创建成任务快照，进入后续任务队列。"
     >
-      <el-checkbox v-model="keepLocalFileOnCreate">保留本地文件</el-checkbox>
       <el-button @click="router.push('/tasks')">前往任务队列</el-button>
       <el-button :loading="scanStore.loading" @click="scanStore.fetchScans()">刷新</el-button>
     </PageHeaderCard>
@@ -31,8 +30,10 @@
 
             <div class="scan-actions">
               <span class="selection-text">已选 {{ (selectedItemIdsByScan[scan.id] || []).length }} 项</span>
+              <el-checkbox v-model="keepLocalByScan[scan.id]">保留本地文件</el-checkbox>
               <el-button
                 type="primary"
+                size="small"
                 :disabled="(selectedItemIdsByScan[scan.id] || []).length === 0"
                 :loading="taskStore.loading"
                 @click="createTasks(scan.id)"
@@ -42,6 +43,7 @@
               <el-button
                 type="danger"
                 plain
+                size="small"
                 :disabled="(selectedItemIdsByScan[scan.id] || []).length === 0"
                 :loading="scanStore.deleting"
                 @click="deleteSelectedItems(scan.id)"
@@ -246,7 +248,11 @@ const lastClickedIndexByScan = ref<Record<string, number>>({})
 const viewMode = ref<'table' | 'card'>(typeof window !== 'undefined' && window.innerWidth < 768 ? 'card' : 'table')
 const expandedItemIds = ref<Set<string>>(new Set())
 const tableRefs = ref<Record<string, TableInstance | null>>({})
-const keepLocalFileOnCreate = ref(false)
+const keepLocalByScan = ref<Record<string, boolean>>({})
+
+function keepLocalFor(scanId: string) {
+  return Boolean(keepLocalByScan.value[scanId])
+}
 
 function syncViewMode() {
   if (typeof window === 'undefined') return
@@ -515,7 +521,7 @@ async function createSingleTask(scanId: string, row: ScanItem) {
   }
 
   try {
-    const result = await taskStore.batchCreateTasks(scanId, [row.id], keepLocalFileOnCreate.value ? true : undefined)
+    const result = await taskStore.batchCreateTasks(scanId, [row.id], keepLocalFor(scanId))
     if (result.created.length) {
       ElMessage.success('已加入任务队列')
       // Remove from local scan data
@@ -552,7 +558,7 @@ async function createTasks(scanId: string) {
   }
 
   try {
-    const result = await taskStore.batchCreateTasks(scanId, itemIds, keepLocalFileOnCreate.value ? true : undefined)
+    const result = await taskStore.batchCreateTasks(scanId, itemIds, keepLocalFor(scanId))
     selectedItemIdsByScan.value = { ...selectedItemIdsByScan.value, [scanId]: [] }
 
     // Remove created items from local scan data
@@ -630,11 +636,19 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.scan-actions .el-checkbox {
+  --el-checkbox-height: 24px;
+  margin-right: 0;
+  white-space: nowrap;
 }
 
 .selection-text {
   color: var(--text-subtle);
   font-size: 13px;
+  line-height: 24px;
 }
 
 .table-scroll {

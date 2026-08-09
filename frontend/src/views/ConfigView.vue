@@ -58,15 +58,10 @@
               placeholder="OpenList 任务下载到此目录"
             />
           </el-form-item>
-          <el-form-item label="上传后保留本地文件">
-            <el-switch v-model="configStore.config.download.keep_local_files" />
-            <p class="field-hint">
-              上传完成后不删除本地文件（BT/PT 做种、或需要留档时开启）。默认关闭，自动删除以节省磁盘。
-            </p>
-          </el-form-item>
           <p class="field-hint">
             「本地媒体」扫描使用浏览根目录（须为已存在的绝对路径）。二进制部署可设为任意本机路径，如 <code>/home/user/downloads</code>。
             环境变量 <code>EMOSUP_LOCAL_ROOT</code> 优先级更高（Docker 常用）。
+            上传后是否保留本地文件在「扫描结果」页创建任务时按需选择。
           </p>
         </el-form>
       </el-card>
@@ -167,7 +162,7 @@
             <el-button type="primary" plain :loading="testingQB" @click="testQBittorrent">测试连接</el-button>
           </el-form-item>
           <p class="field-hint">
-            用于「BT 下载」页添加磁力链接；保存目录须在本地媒体根目录下，否则无法扫描。上传转存后本地文件默认保留（做种）。
+            用于「BT 下载」页添加磁力链接；保存目录须在本地媒体根目录下，否则无法扫描。上传后是否保留本地文件在「扫描结果」页按需勾选。
           </p>
         </el-form>
       </el-card>
@@ -225,18 +220,15 @@
                 active-text="开"
                 inactive-text="关"
               />
-              <span style="font-size:11px;color:var(--text-subtle)">根据实测带宽与剩余磁盘自动调整并行任务数 / 下载线程 / 上传分片（只增不减，不会低于上方设置值）</span>
             </el-form-item>
             <el-form-item label="下载线程">
               <el-input-number v-model="configStore.config.worker.download_threads" :min="1" :max="16" class="full-width" :controls="false" />
-              <span style="font-size:11px;color:var(--text-subtle)">多线程分段下载，4线程约4倍速</span>
             </el-form-item>
             <el-form-item label="分片(MB)">
               <el-input-number v-model="configStore.config.worker.upload_chunk_size_mb" :min="1" :max="512" class="full-width" :controls="false" />
             </el-form-item>
             <el-form-item label="分片并发">
               <el-input-number v-model="configStore.config.worker.upload_part_concurrency" :min="1" :max="10" class="full-width" :controls="false" />
-              <span style="font-size:11px;color:var(--text-subtle)">multipart 预签名分片并发上传</span>
             </el-form-item>
             <el-form-item label="重试间隔(s)">
               <el-input-number v-model="configStore.config.worker.save_retry_interval_seconds" :min="5" class="full-width" :controls="false" />
@@ -244,14 +236,18 @@
             <el-form-item label="最大重试">
               <el-input-number v-model="configStore.config.worker.save_retry_max_attempts" :min="1" :max="20" class="full-width" :controls="false" />
             </el-form-item>
-            <el-form-item label="TMDB API Key">
+            <el-form-item label="TMDB API Key" class="full-span">
               <el-input v-model="configStore.config.worker.tmdb_api_key" placeholder="api.themoviedb.org 申请" />
             </el-form-item>
-            <el-form-item label="代理下载目录名">
+            <el-form-item label="代理下载目录名" class="full-span">
               <el-input v-model="configStore.config.worker.proxy_backends" placeholder="quark,夸克,115" />
-              <span style="font-size: 11px; color: var(--text-subtle)">逗号分隔的根目录名，匹配到的走本地代理下载（用于夸克等 302 不兼容的网盘）</span>
             </el-form-item>
           </div>
+          <p class="field-hint">
+            自动调优：根据实测带宽与剩余磁盘自动提高并行任务数 / 下载线程 / 上传分片与分片并发，只增不减，不会低于上方设置值。
+            下载线程：多线程分段下载，4 线程约 4 倍速。分片并发：multipart 预签名分片并发上传。
+            代理下载目录名：逗号分隔的根目录名，匹配到的走本地代理下载（用于夸克等 302 不兼容的网盘）。
+          </p>
         </el-form>
       </el-card>
 
@@ -627,6 +623,18 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
+}
+
+.worker-card {
+  grid-column: 1 / -1;
+}
+
+.metrics-grid .full-span {
+  grid-column: 1 / -1;
+}
+
+.metrics-grid :deep(.el-form-item) {
+  margin-bottom: 0;
 }
 
 .field-hint {

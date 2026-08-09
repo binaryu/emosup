@@ -2,13 +2,13 @@
   <div class="bt-view">
     <PageHeaderCard
       title="BT 下载"
-      subtitle="通过 qBittorrent 添加磁力链接，下载完成后直接扫描匹配并转存（文件保留供做种）。"
+      subtitle="通过 qBittorrent 添加磁力链接，下载完成后直接扫描匹配并转存；是否保留本地文件在创建任务时按需勾选。"
     >
       <el-button :loading="qbStore.loading" @click="load" class="tool-btn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         <span class="btn-label">刷新</span>
       </el-button>
-      <el-button type="primary" :loading="qbStore.loading" @click="openAddDialog">
+      <el-button type="primary" class="tool-btn" :loading="qbStore.loading" @click="openAddDialog">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         <span class="btn-label">添加磁力链接</span>
       </el-button>
@@ -111,7 +111,7 @@
         placeholder="每行一个磁力链接 (magnet:?xt=...) 或 .torrent 直链"
       />
       <p class="field-hint" style="margin-top: 8px">
-        下载到 qBittorrent 保存目录（系统配置可改），完成后点「扫描」转存，本地文件保留做种。
+        下载到 qBittorrent 保存目录（系统配置可改），完成后点「扫描」转存；是否保留本地文件在「扫描结果」页创建任务时勾选。
       </p>
       <template #footer>
         <el-button @click="addDialogVisible = false">取消</el-button>
@@ -301,6 +301,11 @@ onMounted(async () => {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .btn-label {
   margin-left: 6px;

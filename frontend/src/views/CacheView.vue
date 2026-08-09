@@ -8,10 +8,12 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         <span class="btn-label">刷新</span>
       </el-button>
-      <el-button type="warning" plain :disabled="!orphanRows.length" @click="selectOrphans">
+      <el-button type="warning" plain :disabled="!orphanRows.length" class="tool-btn" @click="selectOrphans">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
         <span class="btn-label">全选未引用 ({{ orphanRows.length }})</span>
       </el-button>
-      <el-button type="danger" :disabled="!selectedPaths.length" :loading="cacheStore.loading" @click="deleteSelected">
+      <el-button type="danger" :disabled="!selectedPaths.length" :loading="cacheStore.loading" class="tool-btn" @click="deleteSelected">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
         <span class="btn-label">删除选中 ({{ selectedPaths.length }})</span>
       </el-button>
     </PageHeaderCard>
@@ -183,6 +185,11 @@ onMounted(load)
 </script>
 
 <style scoped>
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .btn-label {
   margin-left: 6px;
 }

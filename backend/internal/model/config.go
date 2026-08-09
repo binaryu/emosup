@@ -45,9 +45,6 @@ type OpenListConfig struct {
 type DownloadConfig struct {
 	// Dir is where downloaded files are cached before upload.
 	Dir string `json:"dir"`
-	// KeepLocalFiles keeps local files after a successful upload instead of
-	// deleting them, so BT/PT downloads can keep seeding.
-	KeepLocalFiles bool `json:"keep_local_files"`
 }
 
 type EmosConfig struct {

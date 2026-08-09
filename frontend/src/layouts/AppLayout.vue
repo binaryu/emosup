@@ -26,7 +26,7 @@
 
         <div v-if="appVersion" class="version-row" :title="'Emos Upload ' + appVersion">
           <span class="nav-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
           </span>
           <span class="nav-label" v-show="!isCollapsed">{{ appVersion }}</span>
         </div>
@@ -36,7 +36,7 @@
             <svg v-if="isDark" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
             <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
           </span>
-          <span class="nav-label" v-show="!isCollapsed">{{ isDark ? 'Light Mode' : 'Dark Mode' }}</span>
+          <span class="nav-label" v-show="!isCollapsed">{{ isDark ? '浅色模式' : '深色模式' }}</span>
         </button>
 
         <button class="action-btn" @click="handleLogout" title="退出登录">
@@ -293,9 +293,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 14px;
+  padding: 10px 14px;
   color: var(--text-subtle);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   overflow: hidden;
   white-space: nowrap;
@@ -303,7 +303,7 @@ onUnmounted(() => {
 
 .sidebar.is-collapsed .user-row {
   justify-content: center;
-  padding: 8px;
+  padding: 10px;
 }
 
 .user-row .nav-label {
@@ -315,9 +315,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 14px;
+  padding: 10px 14px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   font-family: monospace;
   overflow: hidden;
   white-space: nowrap;
@@ -325,7 +325,7 @@ onUnmounted(() => {
 
 .sidebar.is-collapsed .version-row {
   justify-content: center;
-  padding: 8px;
+  padding: 10px;
 }
 
 .version-row .nav-label {
@@ -335,14 +335,14 @@ onUnmounted(() => {
 
 .action-btn {
   width: 100%;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-radius: 10px;
   background: transparent;
   border: none;
   color: var(--text-subtle);
   cursor: pointer;
   font-weight: 500;
-  font-size: 14px;
+  font-size: 15px;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
@@ -353,7 +353,7 @@ onUnmounted(() => {
 
 .sidebar.is-collapsed .action-btn {
   justify-content: center;
-  padding: 12px;
+  padding: 10px;
 }
 
 .action-btn:hover {

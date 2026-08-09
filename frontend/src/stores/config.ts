@@ -26,7 +26,6 @@ const defaultConfig: AppConfig = {
   },
   download: {
     dir: './data/downloads',
-    keep_local_files: false,
   },
   emos: {
     base_url: 'https://emos.best',

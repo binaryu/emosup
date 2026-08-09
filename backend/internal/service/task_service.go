@@ -44,7 +44,7 @@ type BatchCreateTasksRequest struct {
 	ScanSessionID string   `json:"scan_session_id"`
 	ItemIDs       []string `json:"item_ids"`
 	// KeepLocalFile keeps the local file after a successful upload (BT/PT
-	// seeding). nil = fall back to config Download.KeepLocalFiles.
+	// seeding, or local retention). nil = false.
 	KeepLocalFile *bool `json:"keep_local_file"`
 }
 
@@ -145,13 +145,9 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, req BatchCreateTasks
 	seen := make(map[string]struct{}, len(req.ItemIDs))
 	tasksToCreate := make([]model.Task, 0, len(req.ItemIDs))
 
-	keepLocalFile := cfg.Download.KeepLocalFiles
+	keepLocalFile := false
 	if req.KeepLocalFile != nil {
 		keepLocalFile = *req.KeepLocalFile
-	}
-	// BT/PT downloads must keep their files so qBittorrent can keep seeding.
-	if isDiskSource(scan.Source) && strings.EqualFold(scan.Source, "bt") {
-		keepLocalFile = true
 	}
 
 	for _, rawItemID := range req.ItemIDs {
