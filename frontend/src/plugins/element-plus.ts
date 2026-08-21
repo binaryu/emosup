@@ -3,6 +3,7 @@ import {
   ElAlert,
   ElButton,
   ElCard,
+  ElCheckbox,
   ElCol,
   ElDescriptions,
   ElDescriptionsItem,
@@ -28,6 +29,7 @@ import {
 import 'element-plus/es/components/alert/style/css'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/card/style/css'
+import 'element-plus/es/components/checkbox/style/css'
 import 'element-plus/es/components/col/style/css'
 import 'element-plus/es/components/descriptions/style/css'
 import 'element-plus/es/components/descriptions-item/style/css'
@@ -55,6 +57,7 @@ const components: Component[] = [
   ElAlert,
   ElButton,
   ElCard,
+  ElCheckbox,
   ElCol,
   ElDescriptions,
   ElDescriptionsItem,
