@@ -29,8 +29,10 @@
             </div>
 
             <div class="scan-actions">
-              <span class="selection-text">已选 {{ (selectedItemIdsByScan[scan.id] || []).length }} 项</span>
-              <el-checkbox v-model="keepLocalByScan[scan.id]">保留本地文件</el-checkbox>
+              <el-checkbox
+                :model-value="keepLocalFor(scan.id)"
+                @update:model-value="(value: boolean) => setKeepLocal(scan.id, value)"
+              >保留本地文件</el-checkbox>
               <el-button
                 type="primary"
                 size="small"
@@ -252,6 +254,10 @@ const keepLocalByScan = ref<Record<string, boolean>>({})
 
 function keepLocalFor(scanId: string) {
   return Boolean(keepLocalByScan.value[scanId])
+}
+
+function setKeepLocal(scanId: string, value: boolean) {
+  keepLocalByScan.value = { ...keepLocalByScan.value, [scanId]: value }
 }
 
 function syncViewMode() {
