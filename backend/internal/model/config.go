@@ -73,8 +73,10 @@ type WorkerConfig struct {
 	SaveRetryMaxAttempts     int    `json:"save_retry_max_attempts"`
 	TMDBAPIKey               string `json:"tmdb_api_key"`
 	ProxyBackends            string `json:"proxy_backends"`
-	// AutoTune adapts concurrency/threads/chunk size to measured bandwidth
-	// and free disk space (tuned values act as floors above the fixed ones).
+	// AutoTune adapts task concurrency, per-task download threads and upload
+	// parallelism/chunk size to measured bandwidth (tuned values act as floors
+	// above the fixed ones). The scheduler gates downloads by free disk space
+	// using real task sizes, so tuned concurrency can never fill the disk.
 	// nil means enabled (default) so pre-existing configs opt in automatically.
 	AutoTune *bool `json:"auto_tune"`
 }

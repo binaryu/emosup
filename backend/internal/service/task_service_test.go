@@ -330,3 +330,147 @@ func (c *stubOpenListClient) GetRawLink(context.Context, client.OpenListAccess, 
 func (c *stubOpenListClient) Login(context.Context, client.OpenListAccess) (string, error) {
 	return "", nil
 }
+
+func TestGetNextUploadTask(t *testing.T) {
+	t.Parallel()
+
+	fileStore := newTaskTestStore(t)
+	taskService := NewTaskService(fileStore)
+	scan := seedTaskTestScan(t, fileStore)
+
+	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
+		ScanSessionID: scan.ID,
+		ItemIDs:       []string{"item-confirmed"},
+	})
+	if err != nil {
+		t.Fatalf("create tasks: %v", err)
+	}
+	if len(result.Created) != 1 {
+		t.Fatalf("expected 1 created task, got %d", len(result.Created))
+	}
+	taskA := result.Created[0].TaskID
+
+	// Clone into a second task (only confirmed items create tasks).
+	taskAFull, err := taskService.GetTask(context.Background(), taskA)
+	if err != nil {
+		t.Fatalf("get task A: %v", err)
+	}
+	taskB := taskAFull
+	taskB.ID = "task-b"
+	taskB.ScanItemID = "item-unconfirmed"
+	taskB.Source.FileSize = 2048
+	if err := fileStore.SaveTask(taskB); err != nil {
+		t.Fatalf("save task B: %v", err)
+	}
+
+	// A: parked completed download (upload_pending). B: queued download.
+	if _, err := fileStore.UpdateTask(taskA, func(task *model.Task) error {
+		task.Status = model.TaskStatusUploadPending
+		task.Download.Status = "complete"
+		task.Download.CompletedBytes = 1024
+		return nil
+	}); err != nil {
+		t.Fatalf("update task A: %v", err)
+	}
+
+	// Upload getter returns the parked upload first.
+	got, found, err := taskService.GetNextUploadTask(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GetNextUploadTask: %v", err)
+	}
+	if !found || got.ID != taskA {
+		t.Fatalf("expected upload task %s, got found=%v id=%s", taskA, found, got.ID)
+	}
+
+	// Saving retries outrank upload_pending.
+	if _, err := fileStore.UpdateTask(taskB.ID, func(task *model.Task) error {
+		task.Status = model.TaskStatusSaving
+		return nil
+	}); err != nil {
+		t.Fatalf("update task B: %v", err)
+	}
+	got, found, err = taskService.GetNextUploadTask(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GetNextUploadTask: %v", err)
+	}
+	if !found || got.ID != taskB.ID {
+		t.Fatalf("expected saving task %s first, got found=%v id=%s", taskB.ID, found, got.ID)
+	}
+
+	// Excluding both leaves nothing.
+	exclude := map[string]struct{}{taskA: {}, taskB.ID: {}}
+	if _, found, err = taskService.GetNextUploadTask(context.Background(), exclude); err != nil {
+		t.Fatalf("GetNextUploadTask: %v", err)
+	}
+	if found {
+		t.Fatal("expected no upload task when both are excluded")
+	}
+
+	// Paused tasks are skipped.
+	if _, err := fileStore.UpdateTask(taskA, func(task *model.Task) error {
+		task.Paused = true
+		return nil
+	}); err != nil {
+		t.Fatalf("pause task A: %v", err)
+	}
+	got, found, err = taskService.GetNextUploadTask(context.Background(), map[string]struct{}{taskB.ID: {}})
+	if err != nil {
+		t.Fatalf("GetNextUploadTask: %v", err)
+	}
+	if found {
+		t.Fatalf("expected paused task %s to be skipped, got %s", taskA, got.ID)
+	}
+}
+
+func TestGetNextDownloadTask(t *testing.T) {
+	t.Parallel()
+
+	fileStore := newTaskTestStore(t)
+	taskService := NewTaskService(fileStore)
+	scan := seedTaskTestScan(t, fileStore)
+
+	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
+		ScanSessionID: scan.ID,
+		ItemIDs:       []string{"item-confirmed"},
+	})
+	if err != nil {
+		t.Fatalf("create tasks: %v", err)
+	}
+	taskA := result.Created[0].TaskID
+
+	taskAFull, err := taskService.GetTask(context.Background(), taskA)
+	if err != nil {
+		t.Fatalf("get task A: %v", err)
+	}
+	taskB := taskAFull
+	taskB.ID = "task-b"
+	taskB.ScanItemID = "item-unconfirmed"
+	taskB.Source.FileSize = 2048
+	if err := fileStore.SaveTask(taskB); err != nil {
+		t.Fatalf("save task B: %v", err)
+	}
+
+	// Only queued tasks are downloadable; upload_pending is not.
+	if _, err := fileStore.UpdateTask(taskB.ID, func(task *model.Task) error {
+		task.Status = model.TaskStatusUploadPending
+		return nil
+	}); err != nil {
+		t.Fatalf("update task B: %v", err)
+	}
+
+	got, found, err := taskService.GetNextDownloadTask(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GetNextDownloadTask: %v", err)
+	}
+	if !found || got.ID != taskA {
+		t.Fatalf("expected download task %s, got found=%v id=%s", taskA, found, got.ID)
+	}
+
+	// Excluding the queued task leaves nothing (parked uploads excluded).
+	if _, found, err = taskService.GetNextDownloadTask(context.Background(), map[string]struct{}{taskA: {}}); err != nil {
+		t.Fatalf("GetNextDownloadTask: %v", err)
+	}
+	if found {
+		t.Fatal("expected no download task when the only queued task is excluded")
+	}
+}

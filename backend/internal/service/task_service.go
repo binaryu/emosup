@@ -310,27 +310,15 @@ func (s *TaskService) GetNextQueuedTask(ctx context.Context) (model.Task, bool, 
 	return model.Task{}, false, nil
 }
 
-func (s *TaskService) GetNextRunnableTask(ctx context.Context, excludeIDs map[string]struct{}) (model.Task, bool, error) {
+// GetNextUploadTask returns the next uploadable task (saving retries first,
+// then parked completed downloads). Uploads are scheduled from their own pool
+// so completed files are uploaded promptly instead of piling up on disk.
+func (s *TaskService) GetNextUploadTask(ctx context.Context, excludeIDs map[string]struct{}) (model.Task, bool, error) {
 	tasks, err := s.ListAllTasks(ctx)
 	if err != nil {
 		return model.Task{}, false, err
 	}
-
-	// Safety: if any upload is active, don't start new downloads (disk space protection)
-	hasUploading := false
-	for _, t := range tasks {
-		if t.Status == model.TaskStatusUploading || t.Status == model.TaskStatusSaving {
-			hasUploading = true
-			break
-		}
-	}
-
-	priorities := []model.TaskStatus{
-		model.TaskStatusSaving,
-		model.TaskStatusUploadPending,
-		model.TaskStatusQueued,
-	}
-	for _, status := range priorities {
+	for _, status := range []model.TaskStatus{model.TaskStatusSaving, model.TaskStatusUploadPending} {
 		for _, task := range tasks {
 			if task.Status != status {
 				continue
@@ -341,14 +329,32 @@ func (s *TaskService) GetNextRunnableTask(ctx context.Context, excludeIDs map[st
 			if task.Paused {
 				continue
 			}
-			// Don't start new downloads while uploading (disk space protection)
-			if hasUploading && status == model.TaskStatusQueued {
-				continue
-			}
 			return task, true, nil
 		}
 	}
+	return model.Task{}, false, nil
+}
 
+// GetNextDownloadTask returns the next queued download. Downloads are capped
+// by the scheduler at the user-configured max concurrency and gated by free
+// disk space (real task sizes), so no additional guards are needed here.
+func (s *TaskService) GetNextDownloadTask(ctx context.Context, excludeIDs map[string]struct{}) (model.Task, bool, error) {
+	tasks, err := s.ListAllTasks(ctx)
+	if err != nil {
+		return model.Task{}, false, err
+	}
+	for _, task := range tasks {
+		if task.Status != model.TaskStatusQueued {
+			continue
+		}
+		if _, excluded := excludeIDs[task.ID]; excluded {
+			continue
+		}
+		if task.Paused {
+			continue
+		}
+		return task, true, nil
+	}
 	return model.Task{}, false, nil
 }
 

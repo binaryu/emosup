@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"sync"
+	"syscall"
 	"time"
 
 	"emosup/backend/internal/eventbus"
@@ -63,16 +64,52 @@ func NewManager(
 	}
 }
 
-// effectiveCeiling returns how many tasks may run in parallel this poll:
-// the fixed user cap, raised by the auto-tuner when it is enabled.
-func (m *Manager) effectiveCeiling() int {
+// downloadCeiling returns how many download tasks may run in parallel: the
+// user cap, raised by the auto-tuner based on measured bandwidth. The number
+// actually started is further gated by free disk space in tick(), so raising
+// this can never fill the disk.
+func (m *Manager) downloadCeiling() int {
 	ceiling := m.maxConcurrency
 	if m.tuner != nil {
 		if snap := m.tuner.Snapshot(); snap.Enabled {
-			ceiling = max(ceiling, max(snap.DownloadConcurrency, snap.UploadConcurrency))
+			ceiling = max(ceiling, snap.DownloadConcurrency)
 		}
 	}
 	return ceiling
+}
+
+// uploadCeiling returns how many upload tasks may run in parallel: the user
+// cap, raised by the auto-tuner. Uploads are bandwidth-bound (they free disk
+// as they complete), so raising them is safe.
+func (m *Manager) uploadCeiling() int {
+	ceiling := m.maxConcurrency
+	if m.tuner != nil {
+		if snap := m.tuner.Snapshot(); snap.Enabled {
+			ceiling = max(ceiling, snap.UploadConcurrency)
+		}
+	}
+	return ceiling
+}
+
+// downloadDiskHeadroom keeps this much free space untouched by downloads.
+const downloadDiskHeadroom = int64(5e9)
+
+// taskDiskBytes returns the expected on-disk footprint of a task; 0 when the
+// size is unknown (the per-task download guard still applies then).
+func taskDiskBytes(task model.Task) int64 {
+	if task.Download.TotalBytes > 0 {
+		return task.Download.TotalBytes
+	}
+	if task.Download.CompletedBytes > 0 {
+		return task.Download.CompletedBytes
+	}
+	return task.Source.FileSize
+}
+
+// diskAllowsDownload reports whether free disk can hold the next file on top
+// of what is already committed, keeping downloadDiskHeadroom free.
+func diskAllowsDownload(free, committed, next int64) bool {
+	return free >= committed+next+downloadDiskHeadroom
 }
 
 func max(a, b int) int {
@@ -147,36 +184,116 @@ func (m *Manager) tick(ctx context.Context) error {
 	}
 
 	m.mu.Lock()
-	activeCount := len(m.activeTasks)
 	m.maxConcurrency = maxConc
+	activeIDs := make(map[string]struct{}, len(m.activeTasks))
+	dlActive, ulActive := 0, 0
+	for id, stage := range m.activeTasks {
+		activeIDs[id] = struct{}{}
+		switch stage {
+		case "download":
+			dlActive++
+		default:
+			ulActive++
+		}
+	}
 	m.mu.Unlock()
 
-	// Pick up to (effectiveCeiling - activeCount) tasks
-	ceiling := m.effectiveCeiling()
-	if activeCount >= ceiling {
+	// 1) Uploads first, from their own pool (bandwidth-bound, no disk risk):
+	// completed downloads are uploaded promptly instead of piling up on disk.
+	ulCeiling := m.uploadCeiling()
+	for ulActive < ulCeiling {
+		task, found, err := m.taskService.GetNextUploadTask(ctx, activeIDs)
+		if err != nil {
+			return err
+		}
+		if !found {
+			break
+		}
+		log.Printf("scheduler picked upload task: %s status=%s", task.ID, task.Status)
+		m.startTask(ctx, task)
+		activeIDs[task.ID] = struct{}{}
+		ulActive++
+	}
+
+	// 2) Downloads: capped at the user max raised by the auto-tuner, AND
+	// gated by free disk space using real task sizes, so concurrent downloads
+	// can never fill the disk.
+	dlCeiling := m.downloadCeiling()
+	if dlActive >= dlCeiling {
 		return nil
 	}
-	for i := 0; i < ceiling-activeCount; i++ {
-		m.mu.RLock()
-		activeIDs := make(map[string]struct{}, len(m.activeTasks))
-		for id := range m.activeTasks {
-			activeIDs[id] = struct{}{}
-		}
-		m.mu.RUnlock()
-
-		task, found, err := m.taskService.GetNextRunnableTask(ctx, activeIDs)
+	committed, err := m.diskCommittedBytes(ctx, activeIDs)
+	if err != nil {
+		return err
+	}
+	free := m.freeDiskBytes(cfg.Download.Dir)
+	diskKnown := free >= 0
+	for dlActive < dlCeiling {
+		task, found, err := m.taskService.GetNextDownloadTask(ctx, activeIDs)
 		if err != nil {
 			return err
 		}
 		if !found {
 			return nil
 		}
-
-		log.Printf("scheduler picked task: %s status=%s", task.ID, task.Status)
+		next := taskDiskBytes(task)
+		if diskKnown && !diskAllowsDownload(free, committed, next) {
+			// Disk cannot hold the next file — stop admitting downloads this
+			// tick; uploads (step 1) keep draining parked files.
+			return nil
+		}
+		log.Printf("scheduler picked download task: %s status=%s", task.ID, task.Status)
 		m.startTask(ctx, task)
+		activeIDs[task.ID] = struct{}{}
+		committed += next
+		dlActive++
 	}
 
 	return nil
+}
+
+// diskCommittedBytes sums the on-disk footprint of downloads in flight and
+// files that are downloaded but not yet uploaded (parked awaiting an upload
+// slot). Queued-but-not-started tasks are not counted; the tick adds their
+// size as it admits them.
+func (m *Manager) diskCommittedBytes(ctx context.Context, activeIDs map[string]struct{}) (int64, error) {
+	tasks, err := m.taskService.ListAllTasks(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var committed int64
+	for _, task := range tasks {
+		_, active := activeIDs[task.ID]
+		switch {
+		case active && (task.Status == model.TaskStatusQueued ||
+			task.Status == model.TaskStatusDownloading ||
+			task.Status == model.TaskStatusDownloadCompleted):
+			committed += taskDiskBytes(task)
+		case active && (task.Status == model.TaskStatusUploadPending ||
+			task.Status == model.TaskStatusUploading ||
+			task.Status == model.TaskStatusSaving):
+			// Uploading/saving tasks still hold the file on disk until the
+			// upload finishes and deletes it.
+			committed += taskDiskBytes(task)
+		case !active && task.Status == model.TaskStatusUploadPending:
+			committed += taskDiskBytes(task)
+		}
+	}
+	return committed, nil
+}
+
+// freeDiskBytes returns free bytes in dir; -1 when it cannot be measured
+// (empty dir or statfs error), which disables the download admission gate.
+func (m *Manager) freeDiskBytes(dir string) int64 {
+	if dir == "" {
+		return -1
+	}
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(dir, &stat); err != nil {
+		log.Printf("scheduler disk check failed: dir=%s err=%v", dir, err)
+		return -1
+	}
+	return int64(stat.Bavail) * int64(stat.Bsize)
 }
 
 func (m *Manager) recover(ctx context.Context) (RecoverySummary, error) {

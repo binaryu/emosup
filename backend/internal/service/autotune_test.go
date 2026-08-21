@@ -133,28 +133,8 @@ func TestTunerPlateauTriggersCooldown(t *testing.T) {
 	}
 }
 
-func TestDiskAllowance(t *testing.T) {
-	cases := []struct {
-		free int64
-		want int
-	}{
-		{0, 1},
-		{4e9, 1},            // below headroom
-		{6e9, 1},            // just above headroom → 1 file
-		{25e9, 8}, // (25-5)/2+1 = 11 → clamped to maxDownloadConc
-		{1e12, maxDownloadConc},
-	}
-	for _, c := range cases {
-		if got := diskAllowance(c.free); got != c.want {
-			t.Errorf("diskAllowance(%d) = %d, want %d", c.free, got, c.want)
-		}
-	}
-}
-
 func TestTunerSnapshotDerivation(t *testing.T) {
 	tuner := newTestTuner(t)
-	// Unlimited disk for this test.
-	tuner.diskFn = func() int64 { return 1e12 }
 
 	tuner.mu.Lock()
 	tuner.dlUnits = 16
@@ -165,27 +145,14 @@ func TestTunerSnapshotDerivation(t *testing.T) {
 	if !snap.Enabled {
 		t.Fatal("expected snapshot enabled")
 	}
-	if snap.DownloadConcurrency != 8 {
-		t.Fatalf("concurrency = %d, want 8 (disk unlimited → clamped to max)", snap.DownloadConcurrency)
-	}
-	if snap.DownloadThreads <= 0 || snap.DownloadThreads > maxDownloadThreads {
-		t.Fatalf("threads out of range: %d", snap.DownloadThreads)
+	if snap.DownloadConcurrency != maxDownloadConc {
+		t.Fatalf("concurrency = %d, want %d (dlUnits 16 clamped)", snap.DownloadConcurrency, maxDownloadConc)
 	}
 	if snap.DownloadConcurrency*snap.DownloadThreads < 16 {
 		t.Fatalf("concurrency×threads must cover dlUnits: %d×%d", snap.DownloadConcurrency, snap.DownloadThreads)
 	}
 	if snap.UploadParts != 6 || snap.UploadChunkMB != 24 {
 		t.Fatalf("upload snapshot wrong: parts=%d chunk=%d", snap.UploadParts, snap.UploadChunkMB)
-	}
-
-	// Disk-constrained: only 1 file fits → concurrency 1, threads carry the load.
-	tuner.diskFn = func() int64 { return 6e9 }
-	snap = tuner.Snapshot()
-	if snap.DownloadConcurrency != 1 {
-		t.Fatalf("expected concurrency 1 with little disk, got %d", snap.DownloadConcurrency)
-	}
-	if snap.DownloadThreads != maxDownloadThreads {
-		t.Fatalf("expected max threads with single file, got %d", snap.DownloadThreads)
 	}
 }
 

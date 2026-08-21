@@ -3,15 +3,14 @@ package service
 import (
 	"math"
 	"sync"
-	"syscall"
 	"time"
 
 	"emosup/backend/internal/store"
 	"emosup/backend/internal/utils"
 )
 
-// Auto-tune controller: adapts parallelism to measured bandwidth and free
-// disk space, AIMD-style (additive increase / multiplicative decrease).
+// Auto-tune controller: adapts parallelism to measured bandwidth, AIMD-style
+// (additive increase / multiplicative decrease).
 //
 // Tuned quantities (all applied as floors above the user-configured values
 // when enabled):
@@ -21,20 +20,24 @@ import (
 //	UploadConcurrency   — parallel upload tasks the scheduler may run
 //	UploadParts         — per-task multipart part concurrency
 //	UploadChunkMB       — multipart chunk size
+//
+// The tuner only measures bandwidth. Disk space is enforced by the scheduler
+// using real task sizes (a download starts only while free space minus a
+// headroom still covers committed + next file bytes), so tuned download
+// concurrency can never fill the disk — big disks keep the full parallelism,
+// small disks are tightened automatically.
 const (
-	tuneInterval          = 2 * time.Second
-	maxDLUnits            = 16
-	maxULUnits            = 10
-	maxDownloadConc       = 8
-	maxDownloadThreads    = 8
-	diskHeadroomBytes     = 5e9
-	diskPerFileBytes      = 2e9 // assume ~2GB per pending file
-	gainThreshold         = 0.15
-	plateauLimit          = 3
-	cooldownAfterPlateau  = 90 * time.Second
-	cooldownAfterDrop     = 30 * time.Second
-	slowStartUnits        = 4
-	idleResetAfter        = 6 * time.Second
+	tuneInterval         = 2 * time.Second
+	maxDLUnits           = 16
+	maxULUnits           = 10
+	maxDownloadConc      = 8
+	maxDownloadThreads   = 8
+	gainThreshold        = 0.15
+	plateauLimit         = 3
+	cooldownAfterPlateau = 90 * time.Second
+	cooldownAfterDrop    = 30 * time.Second
+	slowStartUnits       = 4
+	idleResetAfter       = 6 * time.Second
 )
 
 type TuneSnapshot struct {
@@ -60,7 +63,6 @@ type Tuner struct {
 	plateau  int
 	cooldown time.Time
 	stop     chan struct{}
-	diskFn   func() int64 // test hook
 }
 
 func NewTuner(store *store.FileStore) *Tuner {
@@ -125,17 +127,6 @@ func (t *Tuner) enabled() bool {
 	return cfg.Worker.AutoTune == nil || *cfg.Worker.AutoTune
 }
 
-func (t *Tuner) downloadDir() string {
-	if t.store == nil {
-		return ""
-	}
-	cfg, err := t.store.LoadConfig()
-	if err != nil {
-		return ""
-	}
-	return cfg.Download.Dir
-}
-
 // Snapshot returns the current tuned floors. Callers combine them with the
 // user-configured values (max) before use.
 func (t *Tuner) Snapshot() TuneSnapshot {
@@ -148,9 +139,11 @@ func (t *Tuner) Snapshot() TuneSnapshot {
 
 	dl := t.dlUnits
 	ul := t.ulUnits
-	disk := diskAllowance(t.freeDiskLocked())
 
-	conc := clamp(minInt(disk, dl), 1, maxDownloadConc)
+	// Spread bandwidth across tasks and per-task threads: concurrency is the
+	// number of parallel downloads, threads pick up the remainder. The
+	// scheduler further gates concurrency by real free disk space.
+	conc := clamp(dl, 1, maxDownloadConc)
 	threads := clamp(int(math.Ceil(float64(dl)/float64(conc))), 1, maxDownloadThreads)
 
 	return TuneSnapshot{
@@ -161,21 +154,6 @@ func (t *Tuner) Snapshot() TuneSnapshot {
 		UploadParts:         clamp(ul, 1, maxULUnits),
 		UploadChunkMB:       clamp(ul*4, 4, 64),
 	}
-}
-
-func (t *Tuner) freeDiskLocked() int64 {
-	if t.diskFn != nil {
-		return t.diskFn()
-	}
-	dir := t.downloadDir()
-	if dir == "" {
-		return 0
-	}
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(dir, &stat); err != nil {
-		return 0
-	}
-	return int64(stat.Bavail) * int64(stat.Bsize)
 }
 
 // tick runs the AIMD controller once. now is injected for testability.
@@ -230,15 +208,6 @@ func (t *Tuner) adjustUnits(units *int, last *float64, lastAt *time.Time, rate f
 			t.plateau = 0
 		}
 	}
-}
-
-// diskAllowance computes how many concurrent downloads the free space can hold.
-func diskAllowance(free int64) int {
-	if free <= diskHeadroomBytes {
-		return 1
-	}
-	n := int((free-diskHeadroomBytes)/diskPerFileBytes) + 1
-	return clamp(n, 1, maxDownloadConc)
 }
 
 func clamp(v, lo, hi int) int {
