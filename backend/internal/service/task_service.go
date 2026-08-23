@@ -579,7 +579,10 @@ func (s *TaskService) SyncDownloadStatus(_ context.Context, taskID string, dlSta
 	return s.store.UpdateTask(taskID, func(task *model.Task) error {
 		task.UpdatedAt = now
 		task.Download.Status = dlStatus.Status
-		task.Download.TotalBytes = maxInt64(task.Download.TotalBytes, dlStatus.TotalLength)
+		// The total may understate the real file (stale scan size, missing
+		// Content-Length); never let completed exceed it, so progress bars
+		// can't show done > total.
+		task.Download.TotalBytes = maxInt64(maxInt64(task.Download.TotalBytes, dlStatus.TotalLength), dlStatus.CompletedLength)
 		task.Download.CompletedBytes = dlStatus.CompletedLength
 		task.Download.Progress = calculateProgress(task.Download.CompletedBytes, task.Download.TotalBytes)
 		task.Download.Speed = dlStatus.DownloadSpeed

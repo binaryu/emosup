@@ -331,6 +331,44 @@ func (c *stubOpenListClient) Login(context.Context, client.OpenListAccess) (stri
 	return "", nil
 }
 
+func TestSyncDownloadStatusTotalSelfCorrects(t *testing.T) {
+	t.Parallel()
+
+	fileStore := newTaskTestStore(t)
+	taskService := NewTaskService(fileStore)
+	scan := seedTaskTestScan(t, fileStore)
+
+	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
+		ScanSessionID: scan.ID,
+		ItemIDs:       []string{"item-confirmed"},
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	taskID := result.Created[0].TaskID
+
+	// Stale small total (9G): the real download (12G) exceeds it. The record
+	// must self-correct so the progress bar never shows done > total.
+	if _, err := taskService.SyncDownloadStatus(context.Background(), taskID, client.DownloadStatus{
+		Status: "active", TotalLength: 9e9, CompletedLength: 12e9,
+	}); err != nil {
+		t.Fatalf("sync status: %v", err)
+	}
+	task, err := taskService.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.Download.TotalBytes != 12e9 {
+		t.Fatalf("total = %d, want 12e9 (self-corrected to completed)", task.Download.TotalBytes)
+	}
+	if task.Download.CompletedBytes != 12e9 {
+		t.Fatalf("completed = %d, want 12e9", task.Download.CompletedBytes)
+	}
+	if task.Download.Progress > 100 {
+		t.Fatalf("progress %.1f exceeds 100", task.Download.Progress)
+	}
+}
+
 func TestGetNextUploadTask(t *testing.T) {
 	t.Parallel()
 

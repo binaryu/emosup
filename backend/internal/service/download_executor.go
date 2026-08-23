@@ -470,19 +470,26 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 			return
 		}
 
+		// The recorded total may understate the real file (stale scan size,
+		// missing Content-Length). Once done passes it, report the truth so
+		// the progress bar never shows done > total.
+		displayTotal := totalBytes
+		if doneBytes > displayTotal {
+			displayTotal = doneBytes
+		}
 		progress := float64(0)
 		speed := speedTracker.Sample(doneBytes, now)
-		if totalBytes > 0 {
-			progress = float64(doneBytes) * 100 / float64(totalBytes)
+		if displayTotal > 0 {
+			progress = float64(doneBytes) * 100 / float64(displayTotal)
 		}
 
 		if shouldPersist {
 			lastPersist = now
 			log.Printf("[download] progress: task=%s %.1f%% %s/%s %s/s",
-				task.ID, progress, formatBytes(doneBytes), formatBytes(totalBytes), formatBytes(speed))
+				task.ID, progress, formatBytes(doneBytes), formatBytes(displayTotal), formatBytes(speed))
 			if _, syncErr := e.taskService.SyncDownloadStatus(ctx, task.ID, client.DownloadStatus{
 				Status:          "active",
-				TotalLength:     totalBytes,
+				TotalLength:     displayTotal,
 				CompletedLength: doneBytes,
 				DownloadSpeed:   speed,
 			}); syncErr != nil {
@@ -494,7 +501,7 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 			lastSSE = now
 			e.eventBus.Publish(eventbus.TaskEvent{
 				TaskID: task.ID, Status: "downloading",
-				DlProg: progress, DlSpeed: speed, DlDone: doneBytes, DlTotal: totalBytes,
+				DlProg: progress, DlSpeed: speed, DlDone: doneBytes, DlTotal: displayTotal,
 			})
 		}
 		if shouldSSE && e.tuner != nil && doneBytes > lastMetered {
@@ -532,8 +539,8 @@ func (e *DownloadExecutor) downloadSingle(ctx context.Context, task model.Task, 
 	if err != nil {
 		return fmt.Errorf("stat downloaded file %s: %w", localPath, err)
 	}
-	if info.Size() <= 0 {
-		return fmt.Errorf("file empty after download: %s", localPath)
+	if totalBytes > 0 && info.Size() < totalBytes {
+		return fmt.Errorf("downloaded file smaller than expected: expected=%s got=%s", formatBytes(totalBytes), formatBytes(info.Size()))
 	}
 	if task.Source.FileSize > 0 && info.Size() < task.Source.FileSize {
 		return fmt.Errorf("downloaded file smaller than expected: expected=%s got=%s", formatBytes(task.Source.FileSize), formatBytes(info.Size()))
