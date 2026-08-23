@@ -94,8 +94,8 @@ func (m *Manager) uploadCeiling() int {
 // downloadDiskHeadroom keeps this much free space untouched by downloads.
 const downloadDiskHeadroom = int64(5e9)
 
-// taskDiskBytes returns the expected on-disk footprint of a task; 0 when the
-// size is unknown (the per-task download guard still applies then).
+// taskDiskBytes returns the expected full on-disk footprint of a task; 0 when
+// the size is unknown (the per-task download guard still applies then).
 func taskDiskBytes(task model.Task) int64 {
 	if task.Download.TotalBytes > 0 {
 		return task.Download.TotalBytes
@@ -106,8 +106,29 @@ func taskDiskBytes(task model.Task) int64 {
 	return task.Source.FileSize
 }
 
+// taskRemainingBytes returns how many more bytes a task will still write to
+// disk. Files that are fully written (parked, uploading, kept) return 0 —
+// their bytes are already reflected in statfs free space, so counting them
+// again would double-count and stall new downloads.
+func taskRemainingBytes(task model.Task) int64 {
+	size := task.Download.TotalBytes
+	if size <= 0 {
+		size = task.Source.FileSize
+	}
+	if size <= 0 {
+		return 0
+	}
+	done := task.Download.CompletedBytes
+	if done >= size {
+		return 0
+	}
+	return size - done
+}
+
 // diskAllowsDownload reports whether free disk can hold the next file on top
-// of what is already committed, keeping downloadDiskHeadroom free.
+// of the bytes still to be written by in-flight downloads, keeping
+// downloadDiskHeadroom free. Bytes already on disk are excluded from
+// committed because statfs free already accounts for them.
 func diskAllowsDownload(free, committed, next int64) bool {
 	return free >= committed+next+downloadDiskHeadroom
 }
@@ -252,10 +273,12 @@ func (m *Manager) tick(ctx context.Context) error {
 	return nil
 }
 
-// diskCommittedBytes sums the on-disk footprint of downloads in flight and
-// files that are downloaded but not yet uploaded (parked awaiting an upload
-// slot). Queued-but-not-started tasks are not counted; the tick adds their
-// size as it admits them.
+// diskCommittedBytes sums the bytes still to be written by in-flight
+// downloads (queued-but-started and downloading). Fully written files —
+// parked, uploading, saving or kept — are NOT counted: statfs free space
+// already reflects them, so counting them again would double-count and stall
+// new downloads. Queued-but-not-started tasks are not counted either; the
+// tick adds their size as it admits them.
 func (m *Manager) diskCommittedBytes(ctx context.Context, activeIDs map[string]struct{}) (int64, error) {
 	tasks, err := m.taskService.ListAllTasks(ctx)
 	if err != nil {
@@ -263,20 +286,12 @@ func (m *Manager) diskCommittedBytes(ctx context.Context, activeIDs map[string]s
 	}
 	var committed int64
 	for _, task := range tasks {
-		_, active := activeIDs[task.ID]
-		switch {
-		case active && (task.Status == model.TaskStatusQueued ||
-			task.Status == model.TaskStatusDownloading ||
-			task.Status == model.TaskStatusDownloadCompleted):
-			committed += taskDiskBytes(task)
-		case active && (task.Status == model.TaskStatusUploadPending ||
-			task.Status == model.TaskStatusUploading ||
-			task.Status == model.TaskStatusSaving):
-			// Uploading/saving tasks still hold the file on disk until the
-			// upload finishes and deletes it.
-			committed += taskDiskBytes(task)
-		case !active && task.Status == model.TaskStatusUploadPending:
-			committed += taskDiskBytes(task)
+		if _, active := activeIDs[task.ID]; !active {
+			continue
+		}
+		switch task.Status {
+		case model.TaskStatusQueued, model.TaskStatusDownloading:
+			committed += taskRemainingBytes(task)
 		}
 	}
 	return committed, nil
