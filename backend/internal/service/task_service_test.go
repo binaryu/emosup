@@ -512,3 +512,146 @@ func TestGetNextDownloadTask(t *testing.T) {
 		t.Fatal("expected no download task when the only queued task is excluded")
 	}
 }
+
+func TestListTasksSortsBySeasonEpisodeDeterministically(t *testing.T) {
+	t.Parallel()
+
+	fileStore := newTaskTestStore(t)
+	taskService := NewTaskService(fileStore)
+	scan := seedTaskTestScan(t, fileStore)
+
+	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
+		ScanSessionID: scan.ID,
+		ItemIDs:       []string{"item-confirmed"},
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	base, err := taskService.GetTask(context.Background(), result.Created[0].TaskID)
+	if err != nil {
+		t.Fatalf("get base task: %v", err)
+	}
+	baseID := base.ID // seeded item is S1E1
+
+	// Clone into tasks with deliberately out-of-order season/episode.
+	type se struct{ season, episode int }
+	for _, c := range []struct {
+		id  string
+		val se
+	}{
+		{"task-s2e1", se{2, 1}},
+		{"task-s1e10", se{1, 10}},
+		{"task-s1e2", se{1, 2}},
+	} {
+		cloned := base
+		cloned.ID = c.id
+		season, episode := c.val.season, c.val.episode
+		cloned.Parsed = model.TaskParsed{Season: &season, Episode: &episode}
+		if err := fileStore.SaveTask(cloned); err != nil {
+			t.Fatalf("save task %s: %v", c.id, err)
+		}
+	}
+
+	ids := func() []string {
+		list, err := taskService.ListTasks(context.Background(), ListTasksRequest{Page: 1, PageSize: 100})
+		if err != nil {
+			t.Fatalf("ListTasks: %v", err)
+		}
+		out := make([]string, 0, len(list.Items))
+		for _, item := range list.Items {
+			out = append(out, item.ID)
+		}
+		return out
+	}
+
+	// Numeric S/E order regardless of status grouping: S1E1 < S1E2 < S1E10 < S2E1.
+	want := []string{baseID, "task-s1e2", "task-s1e10", "task-s2e1"}
+	first := ids()
+	if !equalStrings(first, want) {
+		t.Fatalf("order = %v, want %v", first, want)
+	}
+
+	// Changing a task's status must not reshuffle the list.
+	if _, err := fileStore.UpdateTask("task-s1e10", func(task *model.Task) error {
+		task.Status = model.TaskStatusCompleted
+		return nil
+	}); err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+	if got := ids(); !equalStrings(got, want) {
+		t.Fatalf("status change reshuffled order: %v, want %v", got, want)
+	}
+
+	// Repeated calls return the same order (deterministic, no unstable ties).
+	if got := ids(); !equalStrings(got, first) {
+		t.Fatalf("second call order differs: %v vs %v", got, first)
+	}
+}
+
+func TestListTasksCompositeStatusFilter(t *testing.T) {
+	t.Parallel()
+
+	fileStore := newTaskTestStore(t)
+	taskService := NewTaskService(fileStore)
+	scan := seedTaskTestScan(t, fileStore)
+
+	result, err := taskService.BatchCreateTasks(context.Background(), BatchCreateTasksRequest{
+		ScanSessionID: scan.ID,
+		ItemIDs:       []string{"item-confirmed"},
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	base, err := taskService.GetTask(context.Background(), result.Created[0].TaskID)
+	if err != nil {
+		t.Fatalf("get base task: %v", err)
+	}
+	cloned := base
+	cloned.ID = "task-b"
+	cloned.Source.FileSize = 2048
+	if err := fileStore.SaveTask(cloned); err != nil {
+		t.Fatalf("save task B: %v", err)
+	}
+
+	if _, err := fileStore.UpdateTask(base.ID, func(task *model.Task) error {
+		task.Status = model.TaskStatusDownloading
+		return nil
+	}); err != nil {
+		t.Fatalf("set downloading: %v", err)
+	}
+	if _, err := fileStore.UpdateTask("task-b", func(task *model.Task) error {
+		task.Status = model.TaskStatusCompleted
+		return nil
+	}); err != nil {
+		t.Fatalf("set completed: %v", err)
+	}
+
+	list, err := taskService.ListTasks(context.Background(), ListTasksRequest{Status: "downloading,completed", Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(list.Items) != 2 {
+		t.Fatalf("composite filter returned %d items, want 2", len(list.Items))
+	}
+
+	// A composite filter that matches neither status returns nothing.
+	empty, err := taskService.ListTasks(context.Background(), ListTasksRequest{Status: "queued,canceled", Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(empty.Items) != 0 {
+		t.Fatalf("expected no items, got %d", len(empty.Items))
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

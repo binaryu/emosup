@@ -287,6 +287,7 @@ export interface BatchCreateTasksResponse {
 export interface TaskStats {
   total: number
   queued: number
+  active: number
   canceled: number
   completed: number
   failed: number

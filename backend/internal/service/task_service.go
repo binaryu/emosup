@@ -200,7 +200,7 @@ func (s *TaskService) ListAllTaskIDs(_ context.Context, statusFilter string) ([]
 	}
 	ids := make([]string, 0, len(tasks))
 	for _, task := range tasks {
-		if statusFilter != "" && string(task.Status) != statusFilter {
+		if !statusMatches(task.Status, statusFilter) {
 			continue
 		}
 		ids = append(ids, task.ID)
@@ -216,20 +216,16 @@ func (s *TaskService) ListTasks(_ context.Context, req ListTasksRequest) (model.
 
 	filtered := make([]model.Task, 0, len(tasks))
 	for _, task := range tasks {
-		if req.Status != "" && string(task.Status) != req.Status {
+		if !statusMatches(task.Status, req.Status) {
 			continue
 		}
 		filtered = append(filtered, task)
 	}
 
-	// Sort: active tasks first, then by season/episode, then filename
+	// Sort by season/episode (fixed S1E1 → E2 → … order), then filename, then
+	// id: no status grouping and no unstable tie order, so the queue does not
+	// reshuffle as tasks change status or on repeated fetches.
 	sort.Slice(filtered, func(i, j int) bool {
-		pi := statusPriority(filtered[i].Status)
-		pj := statusPriority(filtered[j].Status)
-		if pi != pj {
-			return pi < pj
-		}
-		// Same priority: sort by season then episode
 		si := taskSeason(filtered[i])
 		sj := taskSeason(filtered[j])
 		if si != sj {
@@ -240,7 +236,10 @@ func (s *TaskService) ListTasks(_ context.Context, req ListTasksRequest) (model.
 		if ei != ej {
 			return ei < ej
 		}
-		return filtered[i].Source.FileName < filtered[j].Source.FileName
+		if filtered[i].Source.FileName != filtered[j].Source.FileName {
+			return filtered[i].Source.FileName < filtered[j].Source.FileName
+		}
+		return filtered[i].ID < filtered[j].ID
 	})
 
 	page := req.Page
@@ -278,7 +277,8 @@ func (s *TaskService) ListAllTasks(_ context.Context) ([]model.Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Sort by season/episode so scheduler picks in order
+	// Sort by season/episode so the scheduler picks in a fixed order; id
+	// breaks ties so repeated calls return the same sequence.
 	sort.Slice(tasks, func(i, j int) bool {
 		si := taskSeason(tasks[i])
 		sj := taskSeason(tasks[j])
@@ -290,7 +290,10 @@ func (s *TaskService) ListAllTasks(_ context.Context) ([]model.Task, error) {
 		if ei != ej {
 			return ei < ej
 		}
-		return tasks[i].Source.FileName < tasks[j].Source.FileName
+		if tasks[i].Source.FileName != tasks[j].Source.FileName {
+			return tasks[i].Source.FileName < tasks[j].Source.FileName
+		}
+		return tasks[i].ID < tasks[j].ID
 	})
 	return tasks, nil
 }
@@ -515,6 +518,8 @@ func (s *TaskService) GetTaskStats(_ context.Context) (model.TaskStats, error) {
 		switch task.Status {
 		case model.TaskStatusQueued:
 			stats.Queued++
+		case model.TaskStatusDownloading, model.TaskStatusUploading, model.TaskStatusSaving:
+			stats.Active++
 		case model.TaskStatusCanceled:
 			stats.Canceled++
 		case model.TaskStatusCompleted:
@@ -525,6 +530,21 @@ func (s *TaskService) GetTaskStats(_ context.Context) (model.TaskStats, error) {
 	}
 
 	return stats, nil
+}
+
+// statusMatches reports whether the task status is listed in a comma-separated
+// status filter ("" matches everything). Composite filters let the UI group
+// statuses such as "进行中" or "失败异常" in one query.
+func statusMatches(status model.TaskStatus, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	for _, wanted := range strings.Split(filter, ",") {
+		if string(status) == strings.TrimSpace(wanted) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *TaskService) PrepareTaskDownload(ctx context.Context, taskID string) (model.Task, error) {
@@ -1499,23 +1519,4 @@ func taskEpisode(task model.Task) int {
 		return *task.Parsed.Episode
 	}
 	return 999
-}
-
-func statusPriority(status model.TaskStatus) int {
-	switch status {
-	case model.TaskStatusUploading, model.TaskStatusSaving:
-		return 1
-	case model.TaskStatusDownloading:
-		return 2
-	case model.TaskStatusQueued, model.TaskStatusUploadPending, model.TaskStatusDownloadCompleted:
-		return 3
-	case model.TaskStatusDownloadFailed, model.TaskStatusUploadFailed:
-		return 4
-	case model.TaskStatusCompleted:
-		return 5
-	case model.TaskStatusCanceled:
-		return 6
-	default:
-		return 10
-	}
 }

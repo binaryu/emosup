@@ -17,7 +17,7 @@ export const useTaskStore = defineStore('tasks', {
     total: 0,
     page: 1,
     pageSize: 20,
-    statusFilter: '' as TaskStatus | '',
+    statusFilter: '',
     activeTask: null as Task | null,
     activeTaskLog: null as TaskLog | null,
     stats: null as TaskStats | null,
@@ -26,7 +26,8 @@ export const useTaskStore = defineStore('tasks', {
   }),
   actions: {
     async fetchTasks(options?: {
-      status?: TaskStatus | ''
+      // Comma-separated values group statuses (e.g. "downloading,uploading,saving").
+      status?: string
       page?: number
       pageSize?: number
     }) {
@@ -56,19 +57,23 @@ export const useTaskStore = defineStore('tasks', {
       }
     },
     mergeTasks(items: Task[]) {
-      const newMap = new Map(items.map(t => [t.id, t]))
-      const existingIds = new Set(this.tasks.map(t => t.id))
-      // Update existing rows in-place
-      for (const t of this.tasks) {
-        const updated = newMap.get(t.id)
-        if (updated) Object.assign(t, updated)
-      }
-      // Add new rows at the beginning
+      // Rebuild in the server's order (already S/E sorted), mutating existing
+      // row objects in place so Element Plus reuses them without a full
+      // re-render. The old code kept the stale order and unshifted new tasks
+      // to the top, drifting the queue away from the server sort until a
+      // manual refresh.
+      const existingById = new Map(this.tasks.map(t => [t.id, t]))
+      const merged: Task[] = []
       for (const t of items) {
-        if (!existingIds.has(t.id)) this.tasks.unshift(t)
+        const prev = existingById.get(t.id)
+        if (prev) {
+          Object.assign(prev, t)
+          merged.push(prev)
+        } else {
+          merged.push(t)
+        }
       }
-      // Remove rows no longer in list
-      this.tasks = this.tasks.filter(t => newMap.has(t.id))
+      this.tasks = merged
     },
     async fetchTask(taskId: string) {
       this.loading = true

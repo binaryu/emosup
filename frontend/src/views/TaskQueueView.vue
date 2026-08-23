@@ -6,7 +6,7 @@
     >
       <div class="toolbar">
         <el-select v-model="filterStatus" placeholder="筛选状态" clearable class="filter-select" @change="reload">
-          <el-option v-for="status in statuses" :key="status" :label="status" :value="status" />
+          <el-option v-for="opt in filterOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
         <el-button :loading="taskStore.loading" @click="reload" class="tool-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -81,19 +81,22 @@
     </el-alert>
 
     <div v-if="taskStore.stats" class="stats-dashboard">
-      <div class="stat-widget primary">
+      <div class="stat-widget primary" :class="{ active: filterStatus === '' }" role="button" @click="setFilter('')">
         <div class="stat-content"><span class="stat-label">总任务</span><strong>{{ taskStore.stats.total }}</strong></div>
       </div>
-      <div class="stat-widget warning">
+      <div class="stat-widget warning" :class="{ active: filterStatus === 'queued' }" role="button" @click="setFilter('queued')">
         <div class="stat-content"><span class="stat-label">排队中</span><strong>{{ taskStore.stats.queued }}</strong></div>
       </div>
-      <div class="stat-widget muted">
+      <div class="stat-widget info" :class="{ active: filterStatus === 'downloading,uploading,saving' }" role="button" @click="setFilter('downloading,uploading,saving')">
+        <div class="stat-content"><span class="stat-label">进行中</span><strong>{{ taskStore.stats.active }}</strong></div>
+      </div>
+      <div class="stat-widget muted" :class="{ active: filterStatus === 'canceled' }" role="button" @click="setFilter('canceled')">
         <div class="stat-content"><span class="stat-label">已取消</span><strong>{{ taskStore.stats.canceled }}</strong></div>
       </div>
-      <div class="stat-widget danger">
+      <div class="stat-widget danger" :class="{ active: filterStatus === 'download_failed,upload_failed' }" role="button" @click="setFilter('download_failed,upload_failed')">
         <div class="stat-content"><span class="stat-label">失败异常</span><strong>{{ taskStore.stats.failed }}</strong></div>
       </div>
-      <div class="stat-widget success">
+      <div class="stat-widget success" :class="{ active: filterStatus === 'completed' }" role="button" @click="setFilter('completed')">
         <div class="stat-content"><span class="stat-label">已完成</span><strong>{{ taskStore.stats.completed }}</strong></div>
       </div>
     </div>
@@ -316,15 +319,31 @@ import { formatBytes, formatRemaining, formatSpeed, formatTime } from '@/utils/f
 const router = useRouter()
 const taskStore = useTaskStore()
 
-const filterStatus = ref<TaskStatus | ''>('')
+const filterStatus = ref('')
 const selectedTaskIds = ref<string[]>([])
 const allSelected = ref(false)
 const diskInfo = ref<{ total_bytes: number; used_bytes: number; free_bytes: number } | null>(null)
 const viewMode = ref<'table' | 'card'>(typeof window !== 'undefined' && window.innerWidth < 768 ? 'card' : 'table')
-const statuses: TaskStatus[] = [
-  'queued', 'downloading', 'download_failed', 'download_completed',
-  'upload_pending', 'uploading', 'saving', 'upload_failed', 'completed', 'canceled',
+// Comma-separated values group statuses (进行中 / 失败异常) into one filter.
+const filterOptions: { value: string; label: string }[] = [
+  { value: 'queued', label: '排队中' },
+  { value: 'downloading,uploading,saving', label: '进行中' },
+  { value: 'download_failed,upload_failed', label: '失败异常' },
+  { value: 'completed', label: '已完成' },
+  { value: 'canceled', label: '已取消' },
+  { value: 'downloading', label: '下载中' },
+  { value: 'uploading', label: '上传中' },
+  { value: 'saving', label: '保存中' },
+  { value: 'upload_pending', label: '待上传' },
+  { value: 'download_completed', label: '下载完成' },
+  { value: 'download_failed', label: '下载失败' },
+  { value: 'upload_failed', label: '上传失败' },
 ]
+
+function setFilter(value: string) {
+  filterStatus.value = value
+  reload()
+}
 
 function syncViewMode() {
   if (typeof window === 'undefined') return
@@ -704,10 +723,13 @@ onMounted(() => {
 .runtime-alert { margin-bottom: 0; }
 
 /* Stats Dashboard */
-.stats-dashboard { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
-.stat-widget { background: var(--bg-panel); border: 1px solid var(--line-soft); border-radius: 12px; padding: 16px 20px; text-align: center; }
+.stats-dashboard { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+.stat-widget { background: var(--bg-panel); border: 1px solid var(--line-soft); border-radius: 12px; padding: 16px 20px; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.stat-widget:hover { border-color: var(--line-strong, #9ca3af); }
+.stat-widget.active { outline: 2px solid var(--brand); outline-offset: -1px; background: color-mix(in srgb, var(--brand) 8%, transparent); }
 .stat-widget.primary { border-left: 3px solid var(--brand); }
 .stat-widget.warning { border-left: 3px solid #eab308; }
+.stat-widget.info { border-left: 3px solid #3b82f6; }
 .stat-widget.muted { border-left: 3px solid #9ca3af; }
 .stat-widget.danger { border-left: 3px solid #ef4444; }
 .stat-widget.success { border-left: 3px solid #22c55e; }

@@ -121,6 +121,7 @@ type TaskListResult struct {
 type TaskStats struct {
 	Total     int `json:"total"`
 	Queued    int `json:"queued"`
+	Active    int `json:"active"`
 	Canceled  int `json:"canceled"`
 	Completed int `json:"completed"`
 	Failed    int `json:"failed"`
