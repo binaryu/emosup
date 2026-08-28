@@ -21,9 +21,13 @@ defineProps<{
 .header-card {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 20px;
   align-items: center;
-  padding: 24px;
+  padding: 20px 24px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
 }
 
 .header-extra {
@@ -36,11 +40,14 @@ defineProps<{
 @media (max-width: 768px) {
   .header-card {
     flex-direction: column;
-    align-items: flex-start;
-    padding: 16px;
-    gap: 12px;
+    align-items: stretch;
+    padding: 16px 18px;
+    gap: 14px;
   }
-  .header-extra { width: 100%; }
+  .header-extra {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 </style>
 

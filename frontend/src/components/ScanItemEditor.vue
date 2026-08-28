@@ -105,38 +105,47 @@ async function fetchTitle(row: ScanItem) {
 <style scoped>
 .expand-panel {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  padding: 12px 8px;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 24px;
+  padding: 16px 20px;
+  background: var(--bg-hover);
+  border-radius: 10px;
+  margin: 6px 12px 12px 12px;
+  border: 1px solid var(--line-soft);
 }
 
 .expand-title {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   font-weight: 600;
   font-size: 13px;
   color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .expand-section .muted-text {
   font-size: 12px;
+  color: var(--text-muted);
 }
 
 .edit-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px;
   align-items: start;
 }
 
 .edit-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .edit-label {
   font-size: 12px;
-  color: var(--text-muted);
+  font-weight: 500;
+  color: var(--text-subtle);
 }
 
 .title-field {
@@ -146,21 +155,28 @@ async function fetchTitle(row: ScanItem) {
 .candidate-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .candidate-tag {
   cursor: pointer;
-  transition: opacity 0.15s;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  transition: all 0.2s ease;
+  user-select: none;
 }
 
 .candidate-tag:hover {
-  opacity: 0.75;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 @media (max-width: 960px) {
   .expand-panel {
     grid-template-columns: 1fr;
+    padding: 12px;
+    margin: 4px 0 8px 0;
   }
 
   .edit-grid {

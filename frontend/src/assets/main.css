@@ -1,29 +1,45 @@
 :root {
   color-scheme: light;
   /* Light Theme Variables */
-  --bg-app: #f5f7fa;
+  --bg-app: #f8fafc;
   --bg-panel: #ffffff;
   --bg-sidebar: #ffffff;
-  --bg-accent: #3b82f6;
-  --bg-hover: rgba(0, 0, 0, 0.04);
-  --line-soft: #e4e7ed;
-  --text-main: #303133;
-  --text-subtle: #606266;
-  --text-muted: #909399;
-  --brand: #3b82f6;
-  --brand-soft: rgba(59, 130, 246, 0.1);
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --bg-accent: #2563eb;
+  --bg-hover: rgba(15, 23, 42, 0.05);
+  --line-soft: #e2e8f0;
+  --line-subtle: #edf2f7;
+  --text-main: #0f172a;
+  --text-subtle: #475569;
+  --text-muted: #94a3b8;
+  --brand: #2563eb;
+  --brand-hover: #1d4ed8;
+  --brand-soft: rgba(37, 99, 235, 0.08);
+  --brand-border: rgba(37, 99, 235, 0.2);
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 12px 24px -4px rgba(15, 23, 42, 0.08), 0 4px 6px -2px rgba(15, 23, 42, 0.04);
+
+  /* Status Colors */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #64748b;
 
   /* Element Plus Light Theme Overrides */
   --el-color-primary: var(--brand);
+  --el-color-primary-light-3: #60a5fa;
+  --el-color-primary-light-7: #bfdbfe;
+  --el-color-primary-light-9: #eff6ff;
+  --el-color-primary-dark-2: var(--brand-hover);
   --el-bg-color: var(--bg-app);
   --el-bg-color-overlay: var(--bg-panel);
   --el-text-color-primary: var(--text-main);
   --el-text-color-regular: var(--text-subtle);
+  --el-text-color-secondary: var(--text-muted);
   --el-border-color: var(--line-soft);
   --el-border-color-light: var(--line-soft);
+  --el-border-color-lighter: var(--line-subtle);
   --el-fill-color-blank: var(--bg-panel);
   --el-border-radius-base: 8px;
   --el-border-radius-small: 6px;
@@ -34,28 +50,35 @@
 html.dark {
   color-scheme: dark;
   /* Dark Theme Variables */
-  --bg-app: #0f172a;
-  --bg-panel: #1e293b;
-  --bg-sidebar: #1e293b;
+  --bg-app: #0b0f17;
+  --bg-panel: #131b2e;
+  --bg-sidebar: #101728;
   --bg-accent: #3b82f6;
-  --bg-hover: rgba(255, 255, 255, 0.08);
-  --line-soft: #334155;
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --line-soft: #1e293b;
+  --line-subtle: #182234;
   --text-main: #f8fafc;
-  --text-subtle: #cbd5e1;
-  --text-muted: #94a3b8;
+  --text-subtle: #94a3b8;
+  --text-muted: #64748b;
   --brand: #3b82f6;
-  --brand-soft: rgba(59, 130, 246, 0.2);
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  --brand-hover: #60a5fa;
+  --brand-soft: rgba(59, 130, 246, 0.16);
+  --brand-border: rgba(59, 130, 246, 0.3);
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 14px 28px -4px rgba(0, 0, 0, 0.5), 0 6px 12px -2px rgba(0, 0, 0, 0.3);
 
   /* Element Plus Dark Theme Overrides */
+  --el-color-primary: var(--brand);
   --el-bg-color: var(--bg-app);
   --el-bg-color-overlay: var(--bg-panel);
   --el-text-color-primary: var(--text-main);
   --el-text-color-regular: var(--text-subtle);
+  --el-text-color-secondary: var(--text-muted);
   --el-border-color: var(--line-soft);
   --el-border-color-light: var(--line-soft);
+  --el-border-color-lighter: var(--line-subtle);
   --el-fill-color-blank: var(--bg-panel);
 }
 
@@ -101,21 +124,27 @@ a {
 .glass-panel {
   background: var(--bg-panel);
   border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  box-shadow: var(--shadow-md);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.glass-panel:hover {
+  border-color: var(--line-soft);
 }
 
 .el-card {
   background: var(--bg-panel) !important;
   border: 1px solid var(--line-soft) !important;
-  border-radius: 12px !important;
+  border-radius: 14px !important;
   box-shadow: var(--shadow-sm) !important;
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   color: var(--text-main) !important;
 }
 
 .el-card:hover {
   box-shadow: var(--shadow-md) !important;
+  border-color: var(--line-soft) !important;
 }
 
 .el-card__header {
@@ -131,10 +160,13 @@ a {
   --el-table-header-text-color: var(--text-main);
   --el-table-tr-bg-color: var(--bg-panel);
   background: transparent;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .el-table th.el-table__cell {
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .el-input__wrapper,
@@ -142,15 +174,43 @@ a {
 .el-textarea__inner {
   background-color: var(--bg-panel) !important;
   box-shadow: 0 0 0 1px var(--line-soft) inset !important;
+  border-radius: 8px !important;
+  transition: all 0.2s ease !important;
+}
+
+.el-input__wrapper:hover,
+.el-select__wrapper:hover,
+.el-textarea__inner:hover {
+  box-shadow: 0 0 0 1px var(--brand-border) inset !important;
 }
 
 .el-input__wrapper.is-focus,
 .el-select__wrapper.is-focused,
 .el-textarea__inner:focus {
-  box-shadow: 0 0 0 1px var(--brand) inset !important;
+  box-shadow: 0 0 0 1.5px var(--brand) inset !important;
 }
 
 .el-button {
+  font-weight: 500;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.el-button--primary {
+  box-shadow: 0 1px 2px 0 rgba(37, 99, 235, 0.2);
+}
+
+.el-button--primary:hover {
+  box-shadow: 0 4px 10px 0 rgba(37, 99, 235, 0.3);
+  transform: translateY(-1px);
+}
+
+.el-button--primary:active {
+  transform: translateY(0);
+}
+
+.el-tag {
+  border-radius: 6px;
   font-weight: 500;
 }
 
@@ -160,15 +220,17 @@ button, .el-button {
 
 .page-title {
   margin: 0;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  color: var(--text-main);
 }
 
 .page-subtitle {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--text-subtle);
-  font-size: 14px;
+  font-size: 13.5px;
+  line-height: 1.5;
 }
 
 @media (max-width: 960px) {

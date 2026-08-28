@@ -555,32 +555,39 @@ html.dark .source-toggle { background: rgba(255, 255, 255, 0.06); }
 .tmdb-results {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   max-height: 280px;
   overflow-y: auto;
   margin: -4px 0 12px;
+  padding-right: 4px;
 }
 .tmdb-card {
   display: flex;
-  gap: 10px;
-  padding: 8px;
+  gap: 12px;
+  padding: 8px 10px;
   border-radius: 10px;
   cursor: pointer;
-  transition: background 0.15s;
-  border: 2px solid transparent;
+  transition: all 0.2s ease;
+  border: 1.5px solid var(--line-soft);
+  background: var(--bg-panel);
 }
-.tmdb-card:hover { background: rgba(0, 0, 0, 0.03); }
+.tmdb-card:hover {
+  border-color: var(--brand-border);
+  background: var(--bg-hover);
+}
 .tmdb-card.selected {
-  border-color: var(--el-color-primary);
-  background: rgba(64, 158, 255, 0.06);
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 1px var(--brand);
 }
 .tmdb-poster {
-  width: 40px;
-  height: 56px;
-  border-radius: 4px;
+  width: 44px;
+  height: 60px;
+  border-radius: 6px;
   overflow: hidden;
   flex-shrink: 0;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--bg-hover);
+  border: 1px solid var(--line-soft);
 }
 .tmdb-poster img { width: 100%; height: 100%; object-fit: cover; }
 .tmdb-no-poster {

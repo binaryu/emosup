@@ -626,8 +626,13 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
+}
+
+.scan-header strong {
+  font-size: 15px;
+  color: var(--text-main);
 }
 
 .scan-header p,
@@ -640,7 +645,7 @@ onBeforeUnmount(() => {
 .scan-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-shrink: 0;
   flex-wrap: wrap;
 }
@@ -649,6 +654,7 @@ onBeforeUnmount(() => {
   --el-checkbox-height: 24px;
   margin-right: 0;
   white-space: nowrap;
+  font-size: 13px;
 }
 
 .selection-text {

@@ -49,6 +49,20 @@ func TestParseEpisodeInfo(t *testing.T) {
 			episode:  ptr(8),
 		},
 		{
+			name:     "lolihouse style anime dash episode S1",
+			fileName: "[LoliHouse] Hell Mode - 01 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv",
+			fullPath: "/anime/[LoliHouse] Hell Mode - 01 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv",
+			season:   ptr(1),
+			episode:  ptr(1),
+		},
+		{
+			name:     "lolihouse style anime dash episode S2",
+			fileName: "[LoliHouse] Hell Mode S2 - 01 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv",
+			fullPath: "/anime/[LoliHouse] Hell Mode S2 - 01 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv",
+			season:   ptr(2),
+			episode:  ptr(1),
+		},
+		{
 			name:     "bracket episode keeps path season",
 			fileName: "[Show][25][BIG5].mkv",
 			fullPath: "/TV/Show/Season 2/[Show][25][BIG5].mkv",

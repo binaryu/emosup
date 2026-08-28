@@ -724,17 +724,34 @@ onMounted(() => {
 
 /* Stats Dashboard */
 .stats-dashboard { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
-.stat-widget { background: var(--bg-panel); border: 1px solid var(--line-soft); border-radius: 12px; padding: 16px 20px; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
-.stat-widget:hover { border-color: var(--line-strong, #9ca3af); }
-.stat-widget.active { outline: 2px solid var(--brand); outline-offset: -1px; background: color-mix(in srgb, var(--brand) 8%, transparent); }
-.stat-widget.primary { border-left: 3px solid var(--brand); }
-.stat-widget.warning { border-left: 3px solid #eab308; }
-.stat-widget.info { border-left: 3px solid #3b82f6; }
-.stat-widget.muted { border-left: 3px solid #9ca3af; }
-.stat-widget.danger { border-left: 3px solid #ef4444; }
-.stat-widget.success { border-left: 3px solid #22c55e; }
-.stat-label { display: block; color: var(--text-subtle); font-size: 12px; margin-bottom: 4px; }
-.stat-content strong { font-size: 22px; color: var(--text-main); }
+.stat-widget {
+  background: var(--bg-panel);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 14px 16px;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.stat-widget:hover {
+  border-color: var(--brand-border);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+.stat-widget.active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 1px var(--brand);
+}
+.stat-widget.primary { border-top: 3px solid var(--brand); }
+.stat-widget.warning { border-top: 3px solid var(--color-warning); }
+.stat-widget.info { border-top: 3px solid #3b82f6; }
+.stat-widget.muted { border-top: 3px solid var(--color-info); }
+.stat-widget.danger { border-top: 3px solid var(--color-danger); }
+.stat-widget.success { border-top: 3px solid var(--color-success); }
+.stat-label { display: block; color: var(--text-subtle); font-size: 12px; font-weight: 500; margin-bottom: 6px; }
+.stat-content strong { font-size: 22px; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em; }
 
 /* Table View */
 .task-target { display: flex; flex-direction: column; gap: 2px; }

@@ -99,30 +99,31 @@ async function onSubmit() {
   place-items: center;
   padding: 24px;
   background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 40%),
-    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.08), transparent 35%),
+    radial-gradient(circle at 15% 15%, var(--brand-soft), transparent 45%),
+    radial-gradient(circle at 85% 85%, var(--brand-soft), transparent 40%),
     var(--bg-app);
 }
 
 .login-card {
-  width: min(420px, 100%);
+  width: min(440px, 100%);
   background: var(--bg-panel);
   border: 1px solid var(--line-soft);
-  border-radius: 16px;
+  border-radius: 18px;
   box-shadow: var(--shadow-lg);
-  padding: 32px 28px 24px;
+  padding: 36px 32px 28px;
+  backdrop-filter: blur(16px);
 }
 
 .login-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 28px;
+  gap: 16px;
+  margin-bottom: 30px;
 }
 
 .login-brand h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--text-main);
   letter-spacing: -0.02em;
@@ -137,35 +138,39 @@ async function onSubmit() {
 .brand-badge {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
   background: var(--brand-soft);
+  border: 1px solid var(--brand-border);
   color: var(--brand);
   font-weight: 700;
-  font-size: 18px;
+  font-size: 20px;
   flex-shrink: 0;
 }
 
 .login-form :deep(.el-form-item) {
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .login-error {
   margin-bottom: 16px;
+  border-radius: 8px;
 }
 
 .login-btn {
   width: 100%;
-  margin-top: 4px;
+  margin-top: 8px;
   font-weight: 600;
+  height: 44px;
+  border-radius: 10px;
 }
 
 .login-hint {
-  margin: 18px 0 0;
+  margin: 20px 0 0;
   text-align: center;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.5;
 }
 </style>

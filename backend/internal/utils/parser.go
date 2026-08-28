@@ -28,6 +28,7 @@ var (
 	reBracketEpisode = regexp.MustCompile(`\[(\d{1,3})\]`)
 	reLeadingEpisode = regexp.MustCompile(`(?i)^(\d{1,3})([\s_.\-–—]+)(.+?)\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
 	reEpisodeSuffix  = regexp.MustCompile(`(?i)(?:^|[\s_.\-–—]+)(\d{1,3})\s*\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
+	reEpisodeDash    = regexp.MustCompile(`(?i)(?:^|[\s_.\-–—]+)-\s*(\d{1,3})\s*(?:\[|\(|\s|$)`)
 	reNumericFile    = regexp.MustCompile(`(?i)^(\d{1,3})\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
 	reCompactEpisode = regexp.MustCompile(`(?i)^(.+?)(\d{1,3})\.(mkv|mp4|avi|mov|wmv|flv|m4v|ts|mpg|mpeg|webm)$`)
 	reCompactE       = regexp.MustCompile(`(?i)\s+E\s*$`)
@@ -102,6 +103,17 @@ func ParseEpisodeInfo(fileName, fullPath string) model.ParsedEpisodeInfo {
 		}
 	}
 
+	// Anime / Release pattern with " - 01 [...]" (e.g. "[LoliHouse] Hell Mode - 01 [WebRip...].mkv" or "Hell Mode S2 - 01 [...]")
+	if info.Episode == nil {
+		if matched := reEpisodeDash.FindStringSubmatch(name); len(matched) == 2 {
+			ep := mustAtoi(matched[1])
+			if ep > 0 && ep <= 200 {
+				info.Episode = intPtr(ep)
+				info.RawText = matched[0]
+			}
+		}
+	}
+
 	// "001 标题.mkv" / "530 标题 6.mp4": episode number at the start of the
 	// filename. Checked before the trailing-number rule so titles that end in
 	// digits (e.g. "530 神秘大三角 6.mp4") are not misread as episode 6.
@@ -163,10 +175,11 @@ func finalizeParsed(info model.ParsedEpisodeInfo, fullPath string) model.ParsedE
 	if info.Season == nil {
 		if season := parseSeasonFromPath(fullPath); season != nil {
 			info.Season = season
-	} else if info.Episode != nil &&
-		(reBracketEpisode.MatchString(info.RawText) ||
-			reLeadingEpisode.MatchString(info.RawText) ||
-			(info.RawText == filepath.Base(fullPath) && reCompactEpisode.MatchString(info.RawText))) {
+		} else if info.Episode != nil &&
+			(reBracketEpisode.MatchString(info.RawText) ||
+				reLeadingEpisode.MatchString(info.RawText) ||
+				reEpisodeDash.MatchString(info.RawText) ||
+				(info.RawText == filepath.Base(fullPath) && reCompactEpisode.MatchString(info.RawText))) {
 			if season := seasonFromBracketShowName(fullPath); season != nil {
 				info.Season = season
 			} else {

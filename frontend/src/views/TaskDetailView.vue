@@ -498,27 +498,32 @@ onUnmounted(() => {
 /* Sidebar */
 .sticky-sidebar {
   position: sticky;
-  top: 80px;
+  top: 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
 .sidebar-card {
-  border-radius: 12px;
+  border-radius: 14px;
 }
 
 .main-status {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 16px 0 24px;
+  gap: 10px;
+  padding: 20px 0 24px;
+  background: var(--bg-hover);
+  border-radius: 10px;
+  border: 1px dashed var(--line-soft);
+  margin-bottom: 16px;
 }
 
 .status-label {
   font-size: 13px;
   color: var(--text-subtle);
+  font-weight: 500;
 }
 
 .action-buttons {
@@ -531,6 +536,8 @@ onUnmounted(() => {
   width: 100%;
   margin-left: 0 !important;
   border-radius: 8px;
+  height: 40px;
+  font-weight: 600;
 }
 
 .logs-card :deep(.el-card__body) {
