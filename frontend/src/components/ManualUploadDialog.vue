@@ -2,179 +2,247 @@
   <el-dialog
     v-model="visible"
     title="手动上传 / 直接入队"
-    :width="isBatch ? '720px' : '520px'"
+    :width="isBatch ? '760px' : '520px'"
     destroy-on-close
     append-to-body
+    class="manual-upload-modal"
   >
-    <div class="manual-upload-dialog">
-      <el-alert
-        title="跳过 TMDB 与剧集扫描，直接指定 EMOS 的 ve (分集) 或 vl (单片) ID 并创建上传任务。"
-        type="info"
-        :closable="false"
-        show-icon
-        style="margin-bottom: 16px"
-      />
+    <div class="manual-dialog-body">
+      <!-- 顶部功能说明横幅 -->
+      <div class="header-banner">
+        <div class="banner-icon">⚡</div>
+        <div class="banner-content">
+          <div class="banner-title">免扫描直传模式</div>
+          <div class="banner-desc">
+            支持直接粘贴 <code>ve1024</code>、<code>vl2048</code> 或纯数字 ID，系统会自动提取并联网校验 EMOS 视频条目。
+          </div>
+        </div>
+      </div>
 
       <!-- 单文件模式 -->
-      <div v-if="!isBatch && singleItem">
-        <el-form label-position="top">
-          <el-form-item label="待上传文件">
-            <div class="file-preview-box">
-              <span class="file-name">{{ singleItem.name }}</span>
-              <span class="file-size">{{ formatSizeInMB(singleItem.size) }}</span>
+      <div v-if="!isBatch && singleItem" class="single-mode-wrapper">
+        <!-- 文件信息卡片 -->
+        <div class="file-summary-card">
+          <div class="file-icon">🎬</div>
+          <div class="file-meta">
+            <div class="file-name" :title="singleItem.name">{{ singleItem.name }}</div>
+            <div class="file-tags">
+              <span class="file-size-badge">{{ formatSizeInMB(singleItem.size) }}</span>
+              <el-tag size="small" effect="plain" :type="source === 'local' ? 'warning' : 'primary'">
+                {{ source === 'local' ? '本地媒体' : source === 'bt' ? 'BT 下载' : 'OpenList 网盘' }}
+              </el-tag>
+            </div>
+          </div>
+        </div>
+
+        <el-form label-position="top" class="custom-form">
+          <!-- 目标类型与输入框 -->
+          <el-form-item label="EMOS 条目 ID">
+            <div class="id-input-group">
+              <el-select
+                v-model="singleType"
+                style="width: 130px; flex-shrink: 0"
+                size="large"
+                @change="onSingleTypeChange"
+              >
+                <el-option label="ve (分集)" value="ve" />
+                <el-option label="vl (电影)" value="vl" />
+              </el-select>
+              <el-input
+                v-model="singleRawInput"
+                size="large"
+                placeholder="例如: ve1024 或 1024"
+                clearable
+                class="id-input-field"
+                @input="onSingleInput"
+                @blur="verifySingleItem"
+              >
+                <template #prefix>
+                  <span class="input-prefix-icon">🆔</span>
+                </template>
+              </el-input>
+            </div>
+            <div class="form-hint">
+              可直接粘贴类似 <code>ve1829946</code>、<code>vl-2048</code> 或纯数字 ID
+            </div>
+
+            <!-- 回显信息卡片 -->
+            <div v-if="singleParsed.valid" class="echo-result-card" :class="echoStatusClass">
+              <div v-if="echoLoading" class="echo-loading">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>正在查询 EMOS 条目信息...</span>
+              </div>
+              <div v-else-if="echoTitle" class="echo-success">
+                <span class="echo-badge">已匹配</span>
+                <span class="echo-title-text" :title="echoTitle">{{ echoTitle }}</span>
+              </div>
+              <div v-else-if="echoChecked" class="echo-warning">
+                <span class="echo-warn-badge">未查到</span>
+                <span>未在 EMOS 找到该 ID 对应的条目，请确认 ID 是否正确</span>
+              </div>
             </div>
           </el-form-item>
 
-          <el-form-item label="目标类型">
-            <el-radio-group v-model="singleForm.item_type" @change="fetchSingleBaseTitle">
-              <el-radio-button value="ve">ve (剧集分集)</el-radio-button>
-              <el-radio-button value="vl">vl (电影 / 独立视频)</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
-
-          <el-form-item label="EMOS Item ID">
-            <el-input-number
-              v-model="singleForm.item_id"
-              :min="1"
-              :step="1"
-              style="width: 100%"
-              placeholder="请输入 EMOS 对应的 Item ID"
-              controls-position="right"
-              @change="fetchSingleBaseTitle"
-            />
-            <div v-if="singleEchoTitle" class="echo-title success">
-              <span>回显标题：</span>
-              <strong>{{ singleEchoTitle }}</strong>
-            </div>
-            <div v-else-if="singleEchoLoading" class="echo-title loading">
-              <span>正在获取 EMOS 标题...</span>
-            </div>
-          </el-form-item>
-
-          <el-form-item label="自定义任务标题 (可选)">
+          <!-- 自定义任务标题 -->
+          <el-form-item label="任务展示标题 (可选)">
             <el-input
-              v-model="singleForm.item_title"
-              :placeholder="singleEchoTitle || singleItem.name"
+              v-model="singleCustomTitle"
+              :placeholder="echoTitle || singleItem.name"
+              size="default"
               clearable
             />
           </el-form-item>
 
-          <el-form-item v-if="source === 'local'">
-            <el-checkbox v-model="keepLocalFile">上传完成后保留本地文件</el-checkbox>
-          </el-form-item>
+          <!-- 本地保留设置 -->
+          <div v-if="source === 'local'" class="local-keep-row">
+            <el-checkbox v-model="keepLocalFile">
+              <span class="checkbox-label">上传完成后保留本地文件（不删除源文件）</span>
+            </el-checkbox>
+          </div>
         </el-form>
       </div>
 
       <!-- 多文件批量模式 -->
-      <div v-else>
-        <div class="batch-toolbar">
-          <div class="batch-setting-item">
-            <span class="label">类型:</span>
-            <el-radio-group v-model="batchItemType" size="small" @change="applyBatchType">
-              <el-radio-button value="ve">ve (分集)</el-radio-button>
-              <el-radio-button value="vl">vl (电影)</el-radio-button>
-            </el-radio-group>
-          </div>
+      <div v-else class="batch-mode-wrapper">
+        <!-- 批量填充快捷工具栏 -->
+        <div class="batch-smart-bar">
+          <div class="smart-bar-title">⚡ 序列填充</div>
+          <div class="smart-bar-controls">
+            <div class="control-unit">
+              <span class="unit-label">类型:</span>
+              <el-radio-group v-model="batchDefaultType" size="small" @change="applyBatchType">
+                <el-radio-button value="ve">ve (分集)</el-radio-button>
+                <el-radio-button value="vl">vl (单片)</el-radio-button>
+              </el-radio-group>
+            </div>
 
-          <div class="batch-setting-item">
-            <span class="label">起始 ID:</span>
-            <el-input-number
-              v-model="batchStartId"
-              :min="1"
-              size="small"
-              placeholder="如 1001"
-              controls-position="right"
-              style="width: 130px"
-            />
-          </div>
+            <div class="control-unit">
+              <span class="unit-label">起始 ID:</span>
+              <el-input
+                v-model="batchStartRaw"
+                size="small"
+                placeholder="如 ve1001"
+                style="width: 110px"
+                @keyup.enter="applyBatchSequence"
+              />
+            </div>
 
-          <div class="batch-setting-item">
-            <span class="label">递增:</span>
-            <el-input-number
-              v-model="batchStep"
-              :min="0"
-              :max="10"
-              size="small"
-              controls-position="right"
-              style="width: 90px"
-            />
-          </div>
-
-          <el-button type="primary" size="small" @click="applyBatchSeq">
-            快速填充
-          </el-button>
-        </div>
-
-        <el-table :data="batchItems" stripe max-height="360" size="small" style="width: 100%">
-          <el-table-column label="文件名" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }">
-              🎬 {{ row.name }}
-            </template>
-          </el-table-column>
-          <el-table-column label="大小" width="80" align="right">
-            <template #default="{ row }">
-              {{ formatSizeInMB(row.size) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="类型" width="90">
-            <template #default="{ row }">
-              <el-select v-model="row.item_type" size="small" style="width: 75px">
-                <el-option label="ve" value="ve" />
-                <el-option label="vl" value="vl" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="Item ID" width="130">
-            <template #default="{ row }">
+            <div class="control-unit">
+              <span class="unit-label">步长:</span>
               <el-input-number
-                v-model="row.item_id"
-                :min="1"
+                v-model="batchStep"
+                :min="0"
+                :max="10"
                 size="small"
                 controls-position="right"
-                style="width: 110px"
-                @change="() => fetchRowEchoTitle(row)"
+                style="width: 75px"
               />
-            </template>
-          </el-table-column>
-          <el-table-column label="回显 / 标题" min-width="130" show-overflow-tooltip>
-            <template #default="{ row }">
-              <span v-if="row.echoTitle" class="echo-text">{{ row.echoTitle }}</span>
-              <span v-else class="muted-text">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="55" align="center">
-            <template #default="{ $index }">
-              <el-button link type="danger" size="small" @click="removeBatchRow($index)">移除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+            </div>
 
-        <div v-if="source === 'local'" style="margin-top: 12px">
-          <el-checkbox v-model="keepLocalFile">上传完成后保留本地文件</el-checkbox>
+            <el-button type="primary" size="small" plain @click="applyBatchSequence">
+              一键填充
+            </el-button>
+          </div>
+        </div>
+
+        <!-- 批量表格 -->
+        <div class="batch-table-container">
+          <el-table
+            :data="batchRows"
+            stripe
+            max-height="340"
+            size="small"
+            class="custom-batch-table"
+          >
+            <el-table-column label="待传文件" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="table-file-name">🎬 {{ row.name }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="大小" width="85" align="right">
+              <template #default="{ row }">
+                <span class="table-file-size">{{ formatSizeInMB(row.size) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="类型" width="95">
+              <template #default="{ row }">
+                <el-select v-model="row.item_type" size="small" @change="() => onRowTypeChange(row)">
+                  <el-option label="ve" value="ve" />
+                  <el-option label="vl" value="vl" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="EMOS ID (可输 ve/vl/数字)" width="160">
+              <template #default="{ row }">
+                <el-input
+                  v-model="row.raw_input"
+                  size="small"
+                  placeholder="如: ve1001"
+                  clearable
+                  @input="() => onRowInput(row)"
+                  @blur="() => verifyRowItem(row)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column label="EMOS 回显" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <div v-if="row.loading" class="row-echo loading">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  <span>查询中...</span>
+                </div>
+                <span v-else-if="row.echoTitle" class="row-echo success" :title="row.echoTitle">
+                  ✓ {{ row.echoTitle }}
+                </span>
+                <span v-else-if="row.item_id > 0 && row.checked" class="row-echo warn">
+                  ? 未查到
+                </span>
+                <span v-else class="muted-text">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="55" align="center">
+              <template #default="{ $index }">
+                <el-button link type="danger" size="small" @click="removeBatchRow($index)">移除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div v-if="source === 'local'" class="local-keep-row" style="margin-top: 12px">
+          <el-checkbox v-model="keepLocalFile">
+            <span class="checkbox-label">上传完成后保留本地文件（不删除源文件）</span>
+          </el-checkbox>
         </div>
       </div>
     </div>
 
     <template #footer>
-      <div class="dialog-footer">
-        <el-button @click="visible = false">取消</el-button>
-        <el-button
-          type="primary"
-          :loading="submitting"
-          :disabled="!canSubmit"
-          @click="submitTasks"
-        >
-          立即创建入队
-        </el-button>
+      <div class="dialog-actions">
+        <div class="summary-info">
+          <span v-if="isBatch">已选 {{ batchRows.length }} 个文件，准备入队</span>
+          <span v-else-if="singleParsed.valid && echoTitle">目标：{{ singleParsed.item_type }}-{{ singleParsed.item_id }} · {{ echoTitle }}</span>
+        </div>
+        <div class="button-group">
+          <el-button @click="visible = false">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="submitting"
+            :disabled="!canSubmit"
+            class="submit-btn"
+            @click="submitTasks"
+          >
+            立即创建入队 {{ isBatch ? `(${validBatchCount})` : '' }}
+          </el-button>
+        </div>
       </div>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
 
 import { useTaskStore } from '@/stores/tasks'
 import type { CreateManualTaskItemPayload, OpenListEntry } from '@/types/api'
@@ -192,151 +260,264 @@ const visible = ref(false)
 const submitting = ref(false)
 const keepLocalFile = ref(false)
 
-// Data state
-const singleItem = ref<OpenListEntry | null>(null)
-const singleForm = ref<{
-  item_type: 've' | 'vl'
-  item_id: number | undefined
-  item_title: string
-}>({
-  item_type: 've',
-  item_id: undefined,
-  item_title: '',
-})
-const singleEchoTitle = ref('')
-const singleEchoLoading = ref(false)
+// ----------------------------------------------------
+// 智能解析函数：支持 ve12345, ve-12345, vl12345, 12345 等
+// ----------------------------------------------------
+function parseEmosId(raw: string, fallbackType: 've' | 'vl' = 've'): { item_type: 've' | 'vl'; item_id: number; valid: boolean } {
+  if (!raw) return { item_type: fallbackType, item_id: 0, valid: false }
+  const text = raw.trim()
 
-interface BatchRowItem extends OpenListEntry {
-  item_type: 've' | 'vl'
-  item_id: number | undefined
-  item_title?: string
-  echoTitle?: string
+  // 匹配以 ve 或 vl 开头（支持 ve1024, ve-1024, ve_1024, VL2048 等）
+  const prefixMatch = text.match(/(ve|vl)[-_/:\s]*(\d+)/i)
+  if (prefixMatch) {
+    const type = prefixMatch[1].toLowerCase() as 've' | 'vl'
+    const id = parseInt(prefixMatch[2], 10)
+    return { item_type: type, item_id: id, valid: id > 0 }
+  }
+
+  // 匹配纯数字提取
+  const digitMatch = text.match(/(\d+)/)
+  if (digitMatch) {
+    const id = parseInt(digitMatch[1], 10)
+    return { item_type: fallbackType, item_id: id, valid: id > 0 }
+  }
+
+  return { item_type: fallbackType, item_id: 0, valid: false }
 }
-const batchItems = ref<BatchRowItem[]>([])
-const batchItemType = ref<'ve' | 'vl'>('ve')
-const batchStartId = ref<number | undefined>(undefined)
+
+// ----------------------------------------------------
+// 单文件状态
+// ----------------------------------------------------
+const singleItem = ref<OpenListEntry | null>(null)
+const singleType = ref<'ve' | 'vl'>('ve')
+const singleRawInput = ref('')
+const singleCustomTitle = ref('')
+const echoTitle = ref('')
+const echoLoading = ref(false)
+const echoChecked = ref(false)
+
+const singleParsed = computed(() => parseEmosId(singleRawInput.value, singleType.value))
+
+const echoStatusClass = computed(() => {
+  if (echoLoading.value) return 'status-loading'
+  if (echoTitle.value) return 'status-success'
+  if (echoChecked.value) return 'status-warning'
+  return ''
+})
+
+// ----------------------------------------------------
+// 多文件批量状态
+// ----------------------------------------------------
+interface BatchRowItem extends OpenListEntry {
+  raw_input: string
+  item_type: 've' | 'vl'
+  item_id: number
+  custom_title?: string
+  echoTitle?: string
+  loading?: boolean
+  checked?: boolean
+}
+const batchRows = ref<BatchRowItem[]>([])
+const batchDefaultType = ref<'ve' | 'vl'>('ve')
+const batchStartRaw = ref('')
 const batchStep = ref(1)
 
-const isBatch = computed(() => batchItems.value.length > 1 || (batchItems.value.length === 1 && !singleItem.value))
+const isBatch = computed(() => batchRows.value.length > 1 || (batchRows.value.length === 1 && !singleItem.value))
+
+const validBatchCount = computed(() => {
+  return batchRows.value.filter((r) => r.item_id > 0).length
+})
 
 const canSubmit = computed(() => {
   if (submitting.value) return false
   if (!isBatch.value) {
-    return Boolean(singleItem.value && singleForm.value.item_type && Number(singleForm.value.item_id) > 0)
+    return Boolean(singleItem.value && singleParsed.value.valid && singleParsed.value.item_id > 0)
   }
-  return batchItems.value.length > 0 && batchItems.value.every((row) => row.item_type && Number(row.item_id) > 0)
+  return batchRows.value.length > 0 && batchRows.value.every((r) => r.item_id > 0)
 })
 
+// ----------------------------------------------------
+// 打开弹窗入口
+// ----------------------------------------------------
 function open(items: OpenListEntry[]) {
   if (!items.length) return
-
   keepLocalFile.value = false
+
   if (items.length === 1) {
     singleItem.value = items[0]
-    batchItems.value = []
-    singleForm.value = {
-      item_type: 've',
-      item_id: undefined,
-      item_title: '',
-    }
-    singleEchoTitle.value = ''
-    singleEchoLoading.value = false
+    batchRows.value = []
+    singleType.value = 've'
+    singleRawInput.value = ''
+    singleCustomTitle.value = ''
+    echoTitle.value = ''
+    echoLoading.value = false
+    echoChecked.value = false
   } else {
     singleItem.value = null
-    batchItemType.value = 've'
-    batchStartId.value = undefined
+    batchDefaultType.value = 've'
+    batchStartRaw.value = ''
     batchStep.value = 1
-    batchItems.value = items.map((item) => ({
+    batchRows.value = items.map((item) => ({
       ...item,
+      raw_input: '',
       item_type: 've',
-      item_id: undefined,
+      item_id: 0,
       echoTitle: '',
+      loading: false,
+      checked: false,
     }))
   }
+
   visible.value = true
 }
 
-async function fetchSingleBaseTitle() {
-  const type = singleForm.value.item_type
-  const id = singleForm.value.item_id
-  if (!id || id <= 0) {
-    singleEchoTitle.value = ''
-    return
+// ----------------------------------------------------
+// 单文件事件
+// ----------------------------------------------------
+function onSingleInput(val: string) {
+  const parsed = parseEmosId(val, singleType.value)
+  if (parsed.item_type !== singleType.value) {
+    singleType.value = parsed.item_type
   }
-  singleEchoLoading.value = true
-  try {
-    const res = await apiGet<{ title: string }>(`/api/emos/video/base?item_type=${type}&item_id=${id}`)
-    singleEchoTitle.value = res.title || ''
-  } catch {
-    singleEchoTitle.value = ''
-  } finally {
-    singleEchoLoading.value = false
+  if (parsed.valid) {
+    verifySingleItem()
+  } else {
+    echoTitle.value = ''
+    echoChecked.value = false
   }
 }
 
-async function fetchRowEchoTitle(row: BatchRowItem) {
-  if (!row.item_id || row.item_id <= 0) {
-    row.echoTitle = ''
-    return
+function onSingleTypeChange() {
+  if (singleParsed.value.valid) {
+    verifySingleItem()
   }
+}
+
+let singleTimer: ReturnType<typeof setTimeout> | null = null
+async function verifySingleItem() {
+  const parsed = singleParsed.value
+  if (!parsed.valid || parsed.item_id <= 0) return
+
+  if (singleTimer) clearTimeout(singleTimer)
+  singleTimer = setTimeout(async () => {
+    echoLoading.value = true
+    echoChecked.value = false
+    try {
+      const res = await apiGet<{ title: string }>(
+        `/api/emos/video/base?item_type=${parsed.item_type}&item_id=${parsed.item_id}`,
+      )
+      echoTitle.value = res.title || ''
+    } catch {
+      echoTitle.value = ''
+    } finally {
+      echoLoading.value = false
+      echoChecked.value = true
+    }
+  }, 250)
+}
+
+// ----------------------------------------------------
+// 批量行事件
+// ----------------------------------------------------
+function onRowInput(row: BatchRowItem) {
+  const parsed = parseEmosId(row.raw_input, row.item_type)
+  row.item_type = parsed.item_type
+  row.item_id = parsed.item_id
+  if (parsed.valid) {
+    verifyRowItem(row)
+  } else {
+    row.echoTitle = ''
+    row.checked = false
+  }
+}
+
+function onRowTypeChange(row: BatchRowItem) {
+  if (row.item_id > 0) {
+    verifyRowItem(row)
+  }
+}
+
+async function verifyRowItem(row: BatchRowItem) {
+  if (!row.item_id || row.item_id <= 0) return
+  row.loading = true
+  row.checked = false
   try {
-    const res = await apiGet<{ title: string }>(`/api/emos/video/base?item_type=${row.item_type}&item_id=${row.item_id}`)
+    const res = await apiGet<{ title: string }>(
+      `/api/emos/video/base?item_type=${row.item_type}&item_id=${row.item_id}`,
+    )
     row.echoTitle = res.title || ''
   } catch {
     row.echoTitle = ''
+  } finally {
+    row.loading = false
+    row.checked = true
   }
 }
 
 function applyBatchType() {
-  for (const item of batchItems.value) {
-    item.item_type = batchItemType.value
+  for (const row of batchRows.value) {
+    row.item_type = batchDefaultType.value
+    if (row.item_id > 0) {
+      verifyRowItem(row)
+    }
   }
 }
 
-function applyBatchSeq() {
-  if (!batchStartId.value || batchStartId.value <= 0) {
-    ElMessage.warning('请先输入有效的起始 Item ID')
+function applyBatchSequence() {
+  const parsed = parseEmosId(batchStartRaw.value, batchDefaultType.value)
+  if (!parsed.valid || parsed.item_id <= 0) {
+    ElMessage.warning('请先在「起始 ID」输入有效的 ID（如 ve1001 或 1001）')
     return
   }
-  let currentId = batchStartId.value
+
+  let currentId = parsed.item_id
+  const targetType = parsed.item_type
+  batchDefaultType.value = targetType
   const step = batchStep.value ?? 1
-  for (const item of batchItems.value) {
-    item.item_type = batchItemType.value
-    item.item_id = currentId
-    fetchRowEchoTitle(item)
+
+  for (const row of batchRows.value) {
+    row.item_type = targetType
+    row.item_id = currentId
+    row.raw_input = `${targetType}${currentId}`
+    verifyRowItem(row)
     currentId += step
   }
+  ElMessage.success(`已为 ${batchRows.value.length} 个文件填充序列 ID`)
 }
 
 function removeBatchRow(index: number) {
-  batchItems.value.splice(index, 1)
-  if (batchItems.value.length === 0) {
+  batchRows.value.splice(index, 1)
+  if (batchRows.value.length === 0) {
     visible.value = false
   }
 }
 
+// ----------------------------------------------------
+// 提交创建入队
+// ----------------------------------------------------
 async function submitTasks() {
   if (!canSubmit.value) return
 
   const payloadItems: CreateManualTaskItemPayload[] = []
   if (!isBatch.value && singleItem.value) {
+    const parsed = singleParsed.value
     payloadItems.push({
       path: singleItem.value.path,
       file_name: singleItem.value.name,
       file_size: singleItem.value.size,
-      item_type: singleForm.value.item_type,
-      item_id: Number(singleForm.value.item_id),
-      item_title: singleForm.value.item_title.trim() || singleEchoTitle.value || singleItem.value.name,
+      item_type: parsed.item_type,
+      item_id: parsed.item_id,
+      item_title: singleCustomTitle.value.trim() || echoTitle.value || singleItem.value.name,
     })
   } else {
-    for (const row of batchItems.value) {
+    for (const row of batchRows.value) {
       payloadItems.push({
         path: row.path,
         file_name: row.name,
         file_size: row.size,
         item_type: row.item_type,
-        item_id: Number(row.item_id),
-        item_title: row.item_title?.trim() || row.echoTitle || row.name,
+        item_id: row.item_id,
+        item_title: row.custom_title?.trim() || row.echoTitle || row.name,
       })
     }
   }
@@ -370,71 +551,281 @@ defineExpose({
 </script>
 
 <style scoped>
-.manual-upload-dialog {
-  padding: 4px 0;
-}
-.file-preview-box {
+.manual-dialog-body {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 顶部横幅 */
+.header-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(37, 99, 235, 0.03) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  padding: 12px 14px;
+  border-radius: 12px;
+}
+.banner-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+.banner-content {
+  flex: 1;
+}
+.banner-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-color-primary, #3b82f6);
+  margin-bottom: 3px;
+}
+.banner-desc {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  line-height: 1.5;
+}
+.banner-desc code {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--el-color-primary, #2563eb);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+/* 文件概览卡片 */
+.file-summary-card {
+  display: flex;
   align-items: center;
-  background: var(--bg-soft, #f6f8fa);
-  padding: 8px 12px;
-  border-radius: 8px;
-  width: 100%;
+  gap: 12px;
+  background: var(--bg-hover, #f8fafc);
+  border: 1px solid var(--line-soft, #e2e8f0);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.file-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+.file-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .file-name {
-  font-weight: 500;
-  color: var(--text-main, #303133);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main, #1e293b);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-size {
-  color: var(--text-muted, #909399);
+.file-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.file-size-badge {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  font-family: monospace;
+}
+
+/* 表单与输入框 */
+.custom-form {
+  margin-top: 4px;
+}
+.id-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.id-input-field {
+  flex: 1;
+}
+.input-prefix-icon {
+  font-size: 14px;
+  margin-right: 4px;
+}
+.form-hint {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 5px;
+}
+.form-hint code {
+  background: var(--bg-hover, #f1f5f9);
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: var(--text-main, #475569);
+}
+
+/* 回显结果卡片 */
+.echo-result-card {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
   font-size: 13px;
+  transition: all 0.2s ease;
+  background: var(--bg-hover, #f8fafc);
+  border: 1px solid var(--line-soft, #e2e8f0);
+}
+.echo-result-card.status-loading {
+  color: #d97706;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+.echo-result-card.status-success {
+  color: #15803d;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+.echo-result-card.status-warning {
+  color: #b45309;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+.echo-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.echo-success {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.echo-badge {
+  background: #22c55e;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 6px;
   flex-shrink: 0;
-  margin-left: 12px;
 }
-.echo-title {
-  margin-top: 6px;
+.echo-title-text {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.echo-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.echo-warn-badge {
+  background: #f59e0b;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.local-keep-row {
+  margin-top: 4px;
+  padding: 8px 12px;
+  background: var(--bg-hover, #f8fafc);
+  border-radius: 8px;
+}
+.checkbox-label {
   font-size: 13px;
-  line-height: 1.4;
+  color: var(--text-main, #334155);
 }
-.echo-title.success {
-  color: #67c23a;
+
+/* 批量模式工具栏 */
+.batch-smart-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--bg-hover, #f8fafc);
+  border: 1px solid var(--line-soft, #e2e8f0);
+  padding: 10px 14px;
+  border-radius: 12px;
 }
-.echo-title.loading {
-  color: #e6a23c;
+.smart-bar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-primary, #3b82f6);
 }
-.echo-text {
-  color: #67c23a;
-  font-weight: 500;
-}
-.muted-text {
-  color: var(--text-muted, #909399);
-}
-.batch-toolbar {
+.smart-bar-controls {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  background: var(--bg-soft, #f8f9fa);
-  padding: 10px 12px;
-  border-radius: 8px;
-  margin-bottom: 12px;
 }
-.batch-setting-item {
+.control-unit {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.batch-setting-item .label {
-  font-size: 13px;
-  color: var(--text-muted, #606266);
+.unit-label {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  flex-shrink: 0;
 }
-.dialog-footer {
+
+/* 批量表格 */
+.batch-table-container {
+  border: 1px solid var(--line-soft, #e2e8f0);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.table-file-name {
+  font-weight: 500;
+  color: var(--text-main, #1e293b);
+}
+.table-file-size {
+  font-family: monospace;
+  color: var(--text-muted, #64748b);
+}
+.row-echo {
+  font-size: 12px;
+  font-weight: 500;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+}
+.row-echo.loading {
+  color: #d97706;
+}
+.row-echo.success {
+  color: #16a34a;
+}
+.row-echo.warn {
+  color: #d97706;
+}
+.muted-text {
+  color: var(--text-muted, #94a3b8);
+}
+
+/* 底部操作 */
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.summary-info {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50%;
+}
+.button-group {
+  display: flex;
   gap: 10px;
+}
+.submit-btn {
+  font-weight: 600;
 }
 </style>
