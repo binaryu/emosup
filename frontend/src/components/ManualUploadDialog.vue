@@ -562,8 +562,8 @@ defineExpose({
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(37, 99, 235, 0.03) 100%);
-  border: 1px solid rgba(59, 130, 246, 0.18);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-border);
   padding: 12px 14px;
   border-radius: 12px;
 }
@@ -577,17 +577,17 @@ defineExpose({
 .banner-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--el-color-primary, #3b82f6);
+  color: var(--brand);
   margin-bottom: 3px;
 }
 .banner-desc {
   font-size: 12px;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
   line-height: 1.5;
 }
 .banner-desc code {
-  background: rgba(59, 130, 246, 0.12);
-  color: var(--el-color-primary, #2563eb);
+  background: var(--brand-soft);
+  color: var(--brand);
   padding: 1px 5px;
   border-radius: 4px;
   font-family: monospace;
@@ -598,8 +598,8 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 12px;
-  background: var(--bg-hover, #f8fafc);
-  border: 1px solid var(--line-soft, #e2e8f0);
+  background: var(--bg-hover);
+  border: 1px solid var(--line-soft);
   border-radius: 12px;
   padding: 12px 14px;
 }
@@ -617,7 +617,7 @@ defineExpose({
 .file-name {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-main, #1e293b);
+  color: var(--text-main);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -629,7 +629,7 @@ defineExpose({
 }
 .file-size-badge {
   font-size: 12px;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
   font-family: monospace;
 }
 
@@ -652,14 +652,14 @@ defineExpose({
 }
 .form-hint {
   font-size: 12px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted);
   margin-top: 5px;
 }
 .form-hint code {
-  background: var(--bg-hover, #f1f5f9);
+  background: var(--bg-hover);
   padding: 1px 4px;
   border-radius: 4px;
-  color: var(--text-main, #475569);
+  color: var(--text-main);
 }
 
 /* 回显结果卡片 */
@@ -669,23 +669,23 @@ defineExpose({
   border-radius: 10px;
   font-size: 13px;
   transition: all 0.2s ease;
-  background: var(--bg-hover, #f8fafc);
-  border: 1px solid var(--line-soft, #e2e8f0);
+  background: var(--bg-hover);
+  border: 1px solid var(--line-soft);
 }
 .echo-result-card.status-loading {
-  color: #d97706;
-  background: #fffbeb;
-  border-color: #fde68a;
+  color: var(--color-warning);
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
 }
 .echo-result-card.status-success {
-  color: #15803d;
-  background: #f0fdf4;
-  border-color: #bbf7d0;
+  color: var(--color-success);
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.3);
 }
 .echo-result-card.status-warning {
-  color: #b45309;
-  background: #fffbeb;
-  border-color: #fde68a;
+  color: var(--color-warning);
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
 }
 .echo-loading {
   display: flex;
@@ -698,7 +698,7 @@ defineExpose({
   gap: 10px;
 }
 .echo-badge {
-  background: #22c55e;
+  background: var(--color-success);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -718,7 +718,7 @@ defineExpose({
   gap: 8px;
 }
 .echo-warn-badge {
-  background: #f59e0b;
+  background: var(--color-warning);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -730,12 +730,12 @@ defineExpose({
 .local-keep-row {
   margin-top: 4px;
   padding: 8px 12px;
-  background: var(--bg-hover, #f8fafc);
+  background: var(--bg-hover);
   border-radius: 8px;
 }
 .checkbox-label {
   font-size: 13px;
-  color: var(--text-main, #334155);
+  color: var(--text-main);
 }
 
 /* 批量模式工具栏 */
@@ -745,15 +745,15 @@ defineExpose({
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  background: var(--bg-hover, #f8fafc);
-  border: 1px solid var(--line-soft, #e2e8f0);
+  background: var(--bg-hover);
+  border: 1px solid var(--line-soft);
   padding: 10px 14px;
   border-radius: 12px;
 }
 .smart-bar-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--el-color-primary, #3b82f6);
+  color: var(--brand);
 }
 .smart-bar-controls {
   display: flex;
@@ -768,23 +768,23 @@ defineExpose({
 }
 .unit-label {
   font-size: 12px;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
 /* 批量表格 */
 .batch-table-container {
-  border: 1px solid var(--line-soft, #e2e8f0);
+  border: 1px solid var(--line-soft);
   border-radius: 12px;
   overflow: hidden;
 }
 .table-file-name {
   font-weight: 500;
-  color: var(--text-main, #1e293b);
+  color: var(--text-main);
 }
 .table-file-size {
   font-family: monospace;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
 }
 .row-echo {
   font-size: 12px;
@@ -794,16 +794,16 @@ defineExpose({
   gap: 4px;
 }
 .row-echo.loading {
-  color: #d97706;
+  color: var(--color-warning);
 }
 .row-echo.success {
-  color: #16a34a;
+  color: var(--color-success);
 }
 .row-echo.warn {
-  color: #d97706;
+  color: var(--color-warning);
 }
 .muted-text {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted);
 }
 
 /* 底部操作 */
@@ -815,7 +815,7 @@ defineExpose({
 }
 .summary-info {
   font-size: 12px;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
