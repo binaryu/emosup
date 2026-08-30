@@ -101,6 +101,8 @@ func (s *FileStore) Init() error {
 	if err := s.migrate(); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
+	// Clean up stale or failed scans that have no items so they don't pollute the UI
+	_, _ = s.db.Exec(`DELETE FROM scans WHERE total_count = 0 OR status = 'failed' OR id NOT IN (SELECT DISTINCT scan_session_id FROM scan_items)`)
 	if err := s.ensureConfig(); err != nil {
 		return err
 	}
@@ -679,7 +681,7 @@ func (s *FileStore) DeleteScanItems(scanID string, itemIDs []string) (model.Scan
 func (s *FileStore) ListScans() ([]model.ScanSession, error) {
 	rows, err := s.db.Query(`
 SELECT id, source, path, tmdb_id, video_type, status, total_count, matched_count, unmatched_count, created_at, updated_at
-FROM scans ORDER BY created_at DESC`)
+FROM scans WHERE status = 'completed' AND total_count > 0 ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -701,6 +703,9 @@ FROM scans ORDER BY created_at DESC`)
 		items, err := s.listScanItems(scan.ID)
 		if err != nil {
 			return nil, err
+		}
+		if len(items) == 0 {
+			continue
 		}
 		scan.Items = items
 		scans = append(scans, scan)

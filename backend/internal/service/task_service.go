@@ -63,6 +63,26 @@ type FailedTaskItem struct {
 	Reason string `json:"reason"`
 }
 
+type CreateManualTaskItem struct {
+	Path      string `json:"path"`
+	FileName  string `json:"file_name"`
+	FileSize  int64  `json:"file_size"`
+	ItemType  string `json:"item_type"` // "ve" or "vl"
+	ItemID    int64  `json:"item_id"`
+	ItemTitle string `json:"item_title"`
+}
+
+type CreateManualTasksRequest struct {
+	Source        string                 `json:"source"` // "openlist" or "local"
+	Items         []CreateManualTaskItem `json:"items"`
+	KeepLocalFile *bool                  `json:"keep_local_file"`
+}
+
+type CreateManualTasksResult struct {
+	Created []model.Task     `json:"created"`
+	Failed  []FailedTaskItem `json:"failed"`
+}
+
 type ListTasksRequest struct {
 	Status   string
 	Page     int
@@ -187,6 +207,173 @@ func (s *TaskService) BatchCreateTasks(ctx context.Context, req BatchCreateTasks
 		}
 		for _, failure := range stored.Failed {
 			result.Failed = append(result.Failed, FailedTaskItem{ItemID: failure.ItemID, Reason: failure.Reason})
+		}
+	}
+
+	return result, nil
+}
+
+func (s *TaskService) CreateManualTasks(ctx context.Context, req CreateManualTasksRequest) (CreateManualTasksResult, error) {
+	if len(req.Items) == 0 {
+		return CreateManualTasksResult{}, newTaskServiceError(http.StatusBadRequest, "items is required")
+	}
+
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		return CreateManualTasksResult{}, err
+	}
+
+	keepLocalFile := false
+	if req.KeepLocalFile != nil {
+		keepLocalFile = *req.KeepLocalFile
+	}
+
+	isLocal := isDiskSource(req.Source)
+	storage := cfg.Emos.Storage
+	if strings.TrimSpace(storage) == "" {
+		storage = "default"
+	}
+
+	var openListAccess client.OpenListAccess
+	if !isLocal && s.openListClient != nil {
+		openListAccess = client.OpenListAccess{
+			BaseURL:  strings.TrimSpace(cfg.OpenList.BaseURL),
+			Username: strings.TrimSpace(cfg.OpenList.Username),
+			Password: strings.TrimSpace(cfg.OpenList.Password),
+			Token:    strings.TrimSpace(cfg.OpenList.Token),
+		}
+		if openListAccess.Token == "" && openListAccess.Username != "" && openListAccess.Password != "" {
+			if token, authErr := s.openListClient.Login(ctx, openListAccess); authErr == nil {
+				openListAccess.Token = token
+			}
+		}
+	}
+
+	now := time.Now()
+	tasksToCreate := make([]model.Task, 0, len(req.Items))
+	result := CreateManualTasksResult{
+		Created: make([]model.Task, 0, len(req.Items)),
+		Failed:  make([]FailedTaskItem, 0),
+	}
+
+	for _, item := range req.Items {
+		itemPath := strings.TrimSpace(item.Path)
+		if itemPath == "" {
+			result.Failed = append(result.Failed, FailedTaskItem{ItemID: item.FileName, Reason: "path is required"})
+			continue
+		}
+		fileName := strings.TrimSpace(item.FileName)
+		if fileName == "" {
+			fileName = filepath.Base(itemPath)
+		}
+		itemType := strings.ToLower(strings.TrimSpace(item.ItemType))
+		if itemType != "ve" && itemType != "vl" {
+			result.Failed = append(result.Failed, FailedTaskItem{ItemID: fileName, Reason: "item_type must be 've' or 'vl'"})
+			continue
+		}
+		if item.ItemID <= 0 {
+			result.Failed = append(result.Failed, FailedTaskItem{ItemID: fileName, Reason: "item_id must be greater than 0"})
+			continue
+		}
+
+		rawURL := ""
+		fileSize := item.FileSize
+		if !isLocal {
+			if s.openListClient != nil && openListAccess.BaseURL != "" {
+				if rLink, rErr := s.openListClient.GetRawLink(ctx, openListAccess, itemPath); rErr == nil {
+					rawURL = rLink
+				}
+			}
+		}
+
+		parsed := utils.ParseEpisodeInfo(fileName, itemPath)
+		title := strings.TrimSpace(item.ItemTitle)
+		if title == "" {
+			title = fileName
+		}
+
+		sourceType := "openlist"
+		status := model.TaskStatusQueued
+		localPath := ""
+		downloadStatus := ""
+		downloadProgress := float64(0)
+		uploadStatus := "pending"
+
+		if isLocal {
+			if strings.EqualFold(req.Source, "bt") {
+				sourceType = "bt"
+			} else {
+				sourceType = "local"
+			}
+			status = model.TaskStatusUploadPending
+			localRoot := resolveLocalMediaRoot(cfg.Local.Root, cfg.Download.Dir)
+			cleanRel := filepath.Clean(strings.TrimPrefix(filepath.Clean(itemPath), "/"))
+			localPath = filepath.Join(localRoot, cleanRel)
+			downloadStatus = "complete"
+			downloadProgress = 100
+			uploadStatus = "pending"
+
+			// If fileSize was 0, try to stat local file
+			if fileSize <= 0 {
+				if fi, statErr := os.Stat(localPath); statErr == nil {
+					fileSize = fi.Size()
+				}
+			}
+		}
+
+		task := model.Task{
+			ID:            utils.NewID("task"),
+			ScanSessionID: "",
+			ScanItemID:    "",
+			Status:        status,
+			KeepLocalFile: keepLocalFile,
+			RetryCount:    0,
+			Source: model.TaskSource{
+				Type:     sourceType,
+				Path:     itemPath,
+				RawURL:   rawURL,
+				FileName: fileName,
+				FileSize: fileSize,
+			},
+			Parsed: model.TaskParsed{
+				Season:    parsed.Season,
+				Episode:   parsed.Episode,
+				IsSpecial: parsed.IsSpecial,
+			},
+			Target: model.TaskTarget{
+				TMDBID:   0,
+				ItemType: itemType,
+				ItemID:   item.ItemID,
+				Title:    title,
+			},
+			Download: model.TaskDownload{
+				TotalBytes:     fileSize,
+				CompletedBytes: fileSize,
+				LocalPath:      localPath,
+				Status:         downloadStatus,
+				Progress:       downloadProgress,
+			},
+			Upload: model.TaskUpload{
+				Storage:    storage,
+				TotalBytes: fileSize,
+				Status:     uploadStatus,
+			},
+			Result:    model.TaskResult{},
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+
+		tasksToCreate = append(tasksToCreate, task)
+	}
+
+	if len(tasksToCreate) > 0 {
+		batchRes, storeErr := s.store.CreateManualTasks(ctx, tasksToCreate)
+		if storeErr != nil {
+			return result, storeErr
+		}
+		result.Created = append(result.Created, batchRes.Created...)
+		for _, f := range batchRes.Failed {
+			result.Failed = append(result.Failed, FailedTaskItem{ItemID: f.ItemID, Reason: f.Reason})
 		}
 	}
 

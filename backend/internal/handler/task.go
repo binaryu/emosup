@@ -22,6 +22,7 @@ func NewTaskHandler(service *service.TaskService) *TaskHandler {
 
 func (h *TaskHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/tasks/batch-create", h.batchCreateTasks)
+	router.POST("/tasks/manual", h.createManualTasks)
 	router.POST("/tasks/batch-delete", h.batchDeleteTasks)
 	router.POST("/tasks/batch-pause", h.batchPauseTasks)
 	router.POST("/tasks/batch-resume", h.batchResumeTasks)
@@ -35,6 +36,25 @@ func (h *TaskHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/tasks/:id/cancel", h.cancelTask)
 	router.POST("/tasks/:id/pause", h.pauseTask)
 	router.POST("/tasks/:id/resume", h.resumeTask)
+}
+
+func (h *TaskHandler) createManualTasks(c *gin.Context) {
+	var req service.CreateManualTasksRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Minute)
+	defer cancel()
+
+	result, err := h.service.CreateManualTasks(ctx, req)
+	if err != nil {
+		respondTaskError(c, err)
+		return
+	}
+
+	respondOK(c, result)
 }
 
 func (h *TaskHandler) batchCreateTasks(c *gin.Context) {

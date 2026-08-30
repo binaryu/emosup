@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 
 import type {
   BatchCreateTasksResponse,
+  CreateManualTasksPayload,
+  CreateManualTasksResponse,
   RuntimeStatus,
   Task,
   TaskListResponse,
@@ -113,6 +115,14 @@ export const useTaskStore = defineStore('tasks', {
           item_ids: itemIds,
           keep_local_file: keepLocalFile,
         })
+      } finally {
+        this.loading = false
+      }
+    },
+    async createManualTasks(payload: CreateManualTasksPayload) {
+      this.loading = true
+      try {
+        return await apiSend<CreateManualTasksResponse>('/api/tasks/manual', 'POST', payload)
       } finally {
         this.loading = false
       }

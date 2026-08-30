@@ -655,3 +655,62 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+func TestCreateManualTasks(t *testing.T) {
+	t.Parallel()
+
+	fileStore := newTaskTestStore(t)
+	taskService := NewTaskService(fileStore)
+
+	result, err := taskService.CreateManualTasks(context.Background(), CreateManualTasksRequest{
+		Source: "local",
+		Items: []CreateManualTaskItem{
+			{
+				Path:      "/TV/Show/Episode01.mkv",
+				FileName:  "Episode01.mkv",
+				FileSize:  102400,
+				ItemType:  "ve",
+				ItemID:    2001,
+				ItemTitle: "第 1 集",
+			},
+			{
+				Path:      "/Movies/Movie.mkv",
+				FileName:  "Movie.mkv",
+				FileSize:  204800,
+				ItemType:  "vl",
+				ItemID:    3001,
+				ItemTitle: "电影全片",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create manual tasks: %v", err)
+	}
+
+	if len(result.Created) != 2 {
+		t.Fatalf("expected 2 created tasks, got %d", len(result.Created))
+	}
+	if len(result.Failed) != 0 {
+		t.Fatalf("expected 0 failures, got %d", len(result.Failed))
+	}
+
+	task1, err := taskService.GetTask(context.Background(), result.Created[0].ID)
+	if err != nil {
+		t.Fatalf("get task 1: %v", err)
+	}
+	if task1.Target.ItemType != "ve" || task1.Target.ItemID != 2001 || task1.Target.Title != "第 1 集" {
+		t.Fatalf("unexpected target snapshot for task 1: %#v", task1.Target)
+	}
+	if task1.Status != model.TaskStatusUploadPending {
+		t.Fatalf("expected local task to be upload_pending, got %s", task1.Status)
+	}
+
+	task2, err := taskService.GetTask(context.Background(), result.Created[1].ID)
+	if err != nil {
+		t.Fatalf("get task 2: %v", err)
+	}
+	if task2.Target.ItemType != "vl" || task2.Target.ItemID != 3001 {
+		t.Fatalf("unexpected target snapshot for task 2: %#v", task2.Target)
+	}
+}
+

@@ -8,8 +8,14 @@
       <el-button :loading="scanStore.loading" @click="scanStore.fetchScans()">刷新</el-button>
     </PageHeaderCard>
 
-    <el-space direction="vertical" fill size="large" style="width: 100%">
-      <el-card v-for="scan in scanStore.scans" :key="scan.id" class="scan-card">
+    <el-empty
+      v-if="!scanStore.loading && validScans.length === 0"
+      description="暂无扫描结果，请先在文件浏览页面发起扫描"
+      style="margin-top: 40px"
+    />
+
+    <el-space v-else direction="vertical" fill size="large" style="width: 100%">
+      <el-card v-for="scan in validScans" :key="scan.id" class="scan-card">
         <template #header>
           <div class="scan-header">
             <div>
@@ -228,7 +234,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { TableInstance } from 'element-plus'
 import { useRouter } from 'vue-router'
@@ -244,6 +250,10 @@ import { formatSizeInMB } from '@/utils/format'
 const router = useRouter()
 const scanStore = useScanStore()
 const taskStore = useTaskStore()
+
+const validScans = computed(() => {
+  return scanStore.scans.filter((s) => s.total_count > 0 && s.items && s.items.length > 0)
+})
 
 const selectedItemIdsByScan = ref<Record<string, string[]>>({})
 const lastClickedIndexByScan = ref<Record<string, number>>({})
@@ -284,7 +294,7 @@ function tableEl(scanId: string): HTMLElement | null {
 function syncTableSelection(scanId: string) {
   const table = tableRefs.value[scanId]
   if (!table) return
-  const scan = scanStore.scans.find((s) => s.id === scanId)
+  const scan = validScans.value.find((s) => s.id === scanId)
   if (!scan) return
   const ids = new Set(selectedItemIdsByScan.value[scanId] ?? [])
   for (const row of scan.items) {
@@ -294,7 +304,7 @@ function syncTableSelection(scanId: string) {
 
 function restoreTableSelection() {
   nextTick(() => {
-    for (const scan of scanStore.scans) {
+    for (const scan of validScans.value) {
       syncTableSelection(scan.id)
     }
   })
@@ -305,7 +315,7 @@ function onRowClick(scanId: string, row: ScanItem, event: MouseEvent) {
   if (target.closest('.el-checkbox, .el-table__expand-icon, button, a, input, textarea')) {
     return
   }
-  const scan = scanStore.scans.find((s) => s.id === scanId)
+  const scan = validScans.value.find((s) => s.id === scanId)
   if (!scan || !canCreateTask(row, scan.source)) return
 
   const idx = scan.items.indexOf(row)

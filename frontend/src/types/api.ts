@@ -284,6 +284,29 @@ export interface BatchCreateTasksResponse {
   }>
 }
 
+export interface CreateManualTaskItemPayload {
+  path: string
+  file_name?: string
+  file_size?: number
+  item_type: 've' | 'vl'
+  item_id: number
+  item_title?: string
+}
+
+export interface CreateManualTasksPayload {
+  source: 'openlist' | 'local' | 'bt'
+  items: CreateManualTaskItemPayload[]
+  keep_local_file?: boolean
+}
+
+export interface CreateManualTasksResponse {
+  created: Task[]
+  failed: Array<{
+    item_id: string
+    reason: string
+  }>
+}
+
 export interface TaskStats {
   total: number
   queued: number

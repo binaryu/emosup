@@ -1,6 +1,14 @@
 <template>
   <div class="browse-view">
-    <PageHeaderCard title="影片扫描" subtitle="浏览目录 → 勾选文件/文件夹 → 选择 TMDB → 开始扫描。">
+    <PageHeaderCard title="影片扫描" subtitle="浏览目录 → 勾选文件/文件夹 → 选择 TMDB → 开始扫描；或直接手动指定 ID 上传。">
+      <el-button
+        type="warning"
+        plain
+        :disabled="selectedVideos.length === 0"
+        @click="openManualUpload(selectedVideos)"
+      >
+        手动上传 {{ selectedVideos.length > 0 ? `(${selectedVideos.length})` : '' }}
+      </el-button>
       <el-button
         type="primary"
         :loading="scanStore.loading"
@@ -163,10 +171,19 @@
                 {{ row.is_dir ? '-' : formatSizeInMB(row.size) }}
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="100" fixed="right">
+            <el-table-column label="操作" width="130" fixed="right">
               <template #default="{ row }">
                 <el-button v-if="row.is_dir" link type="primary" size="small" @click="enterDirectory(row.path)">
                   进入
+                </el-button>
+                <el-button
+                  v-else-if="isVideoFile(row.name)"
+                  link
+                  type="warning"
+                  size="small"
+                  @click="openManualUpload([row])"
+                >
+                  手动上传
                 </el-button>
               </template>
             </el-table-column>
@@ -196,19 +213,32 @@
                   <span v-if="!row.is_dir" class="card-size">{{ formatSizeInMB(row.size) }}</span>
                 </div>
               </div>
-              <button
-                v-if="row.is_dir"
-                type="button"
-                class="card-enter"
-                @click.stop="enterDirectory(row.path)"
-              >
-                进入
-              </button>
+              <div class="card-actions-right">
+                <button
+                  v-if="row.is_dir"
+                  type="button"
+                  class="card-enter"
+                  @click.stop="enterDirectory(row.path)"
+                >
+                  进入
+                </button>
+                <button
+                  v-else-if="isVideoFile(row.name)"
+                  type="button"
+                  class="card-manual"
+                  @click.stop="openManualUpload([row])"
+                >
+                  上传
+                </button>
+              </div>
             </div>
           </div>
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- Manual Upload Dialog -->
+    <ManualUploadDialog ref="manualDialogRef" :source="source" />
   </div>
 </template>
 
@@ -218,6 +248,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { TableInstance } from 'element-plus'
 
+import ManualUploadDialog from '@/components/ManualUploadDialog.vue'
 import PageHeaderCard from '@/components/PageHeaderCard.vue'
 import { useScanStore } from '@/stores/scans'
 import type { OpenListEntry } from '@/types/api'
@@ -228,6 +259,7 @@ import { extractShowTitle, isVideoFile } from '@/utils/media'
 const router = useRouter()
 const scanStore = useScanStore()
 const tableRef = ref<TableInstance>()
+const manualDialogRef = ref<InstanceType<typeof ManualUploadDialog>>()
 
 const source = ref<'openlist' | 'local'>('openlist')
 const loading = ref(false)
@@ -450,6 +482,15 @@ async function startScan() {
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '扫描失败')
   }
+}
+
+function openManualUpload(items: OpenListEntry[]) {
+  const videos = items.filter((e) => !e.is_dir && isVideoFile(e.name))
+  if (videos.length === 0) {
+    ElMessage.warning('请选择至少一个视频文件')
+    return
+  }
+  manualDialogRef.value?.open(videos)
 }
 
 onMounted(() => {
@@ -709,8 +750,14 @@ html.dark .source-toggle { background: rgba(255, 255, 255, 0.06); }
   color: var(--text-subtle);
 }
 
-.card-enter {
+.card-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
+}
+
+.card-enter {
   border: none;
   background: var(--brand-soft);
   color: var(--brand);
@@ -722,4 +769,17 @@ html.dark .source-toggle { background: rgba(255, 255, 255, 0.06); }
   font-family: inherit;
 }
 .card-enter:active { opacity: 0.8; }
+
+.card-manual {
+  border: none;
+  background: rgba(230, 162, 60, 0.15);
+  color: #e6a23c;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.card-manual:active { opacity: 0.8; }
 </style>

@@ -240,13 +240,15 @@ func (c *HTTPEmosClient) GetVideoTree(ctx context.Context, access EmosAccess, tm
 
 	var tree EmosVideoTree
 	if err := json.Unmarshal(body, &tree); err == nil {
-		return tree, nil
+		if tree.ItemID != 0 || tree.TMDBID != 0 || len(tree.Seasons) > 0 || strings.TrimSpace(tree.Title) != "" {
+			return tree, nil
+		}
 	}
 
 	var trees []EmosVideoTree
 	if err := json.Unmarshal(body, &trees); err == nil {
 		if len(trees) == 0 {
-			return EmosVideoTree{}, errors.New("emos tree response is empty")
+			return EmosVideoTree{}, fmt.Errorf("EMOS 媒体库中未找到该剧集/影视信息 (TMDB ID: %d)，请确认已在 EMOS 中添加该条目", tmdbID)
 		}
 		if len(trees) == 1 {
 			return trees[0], nil
@@ -259,7 +261,7 @@ func (c *HTTPEmosClient) GetVideoTree(ctx context.Context, access EmosAccess, tm
 		return trees[0], nil
 	}
 
-	return EmosVideoTree{}, errors.New("emos tree response format unexpected")
+	return EmosVideoTree{}, fmt.Errorf("EMOS 媒体库中未找到该剧集/影视信息 (TMDB ID: %d)，请确认已在 EMOS 中添加该条目", tmdbID)
 }
 
 func (c *HTTPEmosClient) GetVideoBase(ctx context.Context, access EmosAccess, itemType string, itemID int64) (EmosVideoBase, error) {

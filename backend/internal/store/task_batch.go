@@ -129,3 +129,41 @@ WHERE scan_session_id = ? AND scan_item_id <> ''`, scanID)
 	}
 	return result, nil
 }
+
+// CreateManualTasks inserts manually created tasks and their initial log entries directly into the database.
+func (s *FileStore) CreateManualTasks(ctx context.Context, tasks []model.Task) (TaskBatchCreateResult, error) {
+	result := TaskBatchCreateResult{
+		Created: make([]model.Task, 0, len(tasks)),
+		Failed:  make([]TaskBatchCreateFailure, 0),
+	}
+	if len(tasks) == 0 {
+		return result, nil
+	}
+
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return result, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, task := range tasks {
+		if err := upsertTaskTx(ctx, tx.Tx, task); err != nil {
+			return result, err
+		}
+		if err := insertLogTx(ctx, tx.Tx, task.ID, model.TaskLogItem{
+			ID:      utils.NewID("log"),
+			Level:   "info",
+			Message: "manual task created",
+			Time:    time.Now(),
+		}); err != nil {
+			return result, err
+		}
+		result.Created = append(result.Created, task)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+

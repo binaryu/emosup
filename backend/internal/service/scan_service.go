@@ -96,27 +96,21 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 	}
 
 	log.Printf("scan started: id=%s path=%s targets=%d tmdb_id=%d source=%s", scan.ID, scanPath, len(targets), req.TMDBID, req.Source)
-	if err := s.store.SaveScan(scan); err != nil {
-		return model.ScanSession{}, err
-	}
 
 	isLocal := isDiskSource(req.Source)
 	entries, err := s.collectVideoEntries(ctx, isLocal, targets)
 	if err != nil {
 		log.Printf("scan collect failed: scan=%s err=%v", scan.ID, err)
-		scan.Status = model.ScanSessionStatusFailed
-		scan.UpdatedAt = time.Now()
-		_ = s.store.SaveScan(scan)
 		return model.ScanSession{}, err
+	}
+	if len(entries) == 0 {
+		return model.ScanSession{}, errors.New("未在指定路径下找到任何视频文件")
 	}
 	log.Printf("scan collect success: scan=%s videos=%d", scan.ID, len(entries))
 
 	tree, err := s.emosService.GetVideoTree(ctx, req.TMDBID, req.VideoType)
 	if err != nil {
 		log.Printf("emos tree failed: scan=%s err=%v", scan.ID, err)
-		scan.Status = model.ScanSessionStatusFailed
-		scan.UpdatedAt = time.Now()
-		_ = s.store.SaveScan(scan)
 		return model.ScanSession{}, err
 	}
 	log.Printf("emos tree success: scan=%s video_type=%s seasons=%d", scan.ID, tree.VideoType, len(tree.Seasons))
@@ -136,17 +130,11 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 		cfg, cfgErr := s.store.LoadConfig()
 		if cfgErr != nil {
 			log.Printf("scan config load failed: scan=%s err=%v", scan.ID, cfgErr)
-			scan.Status = model.ScanSessionStatusFailed
-			scan.UpdatedAt = time.Now()
-			_ = s.store.SaveScan(scan)
 			return model.ScanSession{}, cfgErr
 		}
 		openListAccess = s.openListService.buildAccess(cfg)
 		if err := s.openListService.ensureToken(ctx, &openListAccess); err != nil {
 			log.Printf("scan openlist auth failed: scan=%s err=%v", scan.ID, err)
-			scan.Status = model.ScanSessionStatusFailed
-			scan.UpdatedAt = time.Now()
-			_ = s.store.SaveScan(scan)
 			return model.ScanSession{}, err
 		}
 	}
@@ -156,10 +144,10 @@ func (s *ScanService) CreateScan(ctx context.Context, req CreateScanRequest) (mo
 	items, err := s.processEntries(ctx, scan.ID, treeIndex, isLocal, openListAccess, entries, now)
 	if err != nil {
 		log.Printf("scan aborted: scan=%s err=%v", scan.ID, err)
-		scan.Status = model.ScanSessionStatusFailed
-		scan.UpdatedAt = time.Now()
-		_ = s.store.SaveScan(scan)
 		return model.ScanSession{}, err
+	}
+	if len(items) == 0 {
+		return model.ScanSession{}, errors.New("扫描未发现有效视频文件")
 	}
 
 	scan.Items = items

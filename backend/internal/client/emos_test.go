@@ -326,3 +326,105 @@ func TestCompleteMultipartOmitsUploadURL(t *testing.T) {
 		t.Fatalf("unexpected complete part payload: %#v", payload.Parts[0])
 	}
 }
+
+func TestGetVideoTree(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		tmdbID     int64
+		videoType  string
+		statusCode int
+		response   string
+		wantErrMsg string
+		wantTitle  string
+	}{
+		{
+			name:       "valid single tree object",
+			tmdbID:     12345,
+			videoType:  "tv",
+			statusCode: http.StatusOK,
+			response:   `{"video_type":"tv","item_type":"vl","item_id":10,"tmdb_id":12345,"title":"Demo Show","seasons":[{"season_number":1}]}`,
+			wantTitle:  "Demo Show",
+		},
+		{
+			name:       "valid tree array with multiple items matching tmdb id",
+			tmdbID:     12345,
+			videoType:  "tv",
+			statusCode: http.StatusOK,
+			response:   `[{"video_type":"tv","item_id":9,"tmdb_id":9999,"title":"Other Show"},{"video_type":"tv","item_id":10,"tmdb_id":12345,"title":"Target Show"}]`,
+			wantTitle:  "Target Show",
+		},
+		{
+			name:       "empty tree array",
+			tmdbID:     12345,
+			videoType:  "tv",
+			statusCode: http.StatusOK,
+			response:   `[]`,
+			wantErrMsg: "EMOS 媒体库中未找到该剧集/影视信息 (TMDB ID: 12345)",
+		},
+		{
+			name:       "empty object",
+			tmdbID:     12345,
+			videoType:  "tv",
+			statusCode: http.StatusOK,
+			response:   `{}`,
+			wantErrMsg: "EMOS 媒体库中未找到该剧集/影视信息 (TMDB ID: 12345)",
+		},
+		{
+			name:       "null response",
+			tmdbID:     12345,
+			videoType:  "tv",
+			statusCode: http.StatusOK,
+			response:   `null`,
+			wantErrMsg: "EMOS 媒体库中未找到该剧集/影视信息 (TMDB ID: 12345)",
+		},
+		{
+			name:       "http 404 error",
+			tmdbID:     12345,
+			videoType:  "tv",
+			statusCode: http.StatusNotFound,
+			response:   `{"message":"not found"}`,
+			wantErrMsg: "emos tree request failed: 404",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/video/tree" {
+					http.NotFound(w, r)
+					return
+				}
+				if r.URL.Query().Get("tmdb_id") != "12345" {
+					t.Errorf("unexpected tmdb_id query %s", r.URL.Query().Get("tmdb_id"))
+				}
+				w.WriteHeader(tt.statusCode)
+				_, _ = w.Write([]byte(tt.response))
+			}))
+			defer server.Close()
+
+			tree, err := NewHTTPEmosClient().GetVideoTree(context.Background(), EmosAccess{
+				BaseURL: server.URL,
+				Token:   "demo-token",
+			}, tt.tmdbID, tt.videoType)
+
+			if tt.wantErrMsg != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErrMsg)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrMsg) {
+					t.Fatalf("expected error containing %q, got: %v", tt.wantErrMsg, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tree.Title != tt.wantTitle {
+				t.Fatalf("tree.Title = %q, want %q", tree.Title, tt.wantTitle)
+			}
+		})
+	}
+}
