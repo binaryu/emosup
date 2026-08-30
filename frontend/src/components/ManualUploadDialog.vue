@@ -1,233 +1,230 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="手动上传 / 直接入队"
-    :width="isBatch ? '760px' : '520px'"
+    :title="isBatch ? `批量手动上传 (${batchRows.length} 个文件)` : '手动指定 ID 上传'"
+    :width="isBatch ? '820px' : '520px'"
     destroy-on-close
     append-to-body
-    class="manual-upload-modal"
+    class="manual-upload-dialog"
   >
-    <div class="manual-dialog-body">
-      <!-- 顶部功能说明横幅 -->
-      <div class="header-banner">
-        <div class="banner-icon">⚡</div>
-        <div class="banner-content">
-          <div class="banner-title">免扫描直传模式</div>
-          <div class="banner-desc">
-            支持直接粘贴 <code>ve1024</code>、<code>vl2048</code> 或纯数字 ID，系统会自动提取并联网校验 EMOS 视频条目。
+    <div class="dialog-inner">
+      <!-- 批量模式快速填充面板 -->
+      <div v-if="isBatch" class="batch-quick-panel">
+        <div class="quick-panel-header">
+          <div class="quick-title">
+            <span class="dot-indicator"></span>
+            <span>批量序列填充</span>
           </div>
+          <span class="quick-tip">设置起始 ID 与步长，按顺序快速填充下方所有文件</span>
+        </div>
+
+        <div class="quick-form-row">
+          <div class="quick-field">
+            <span class="field-label">类型</span>
+            <el-radio-group v-model="batchDefaultType" size="default" @change="applyBatchType">
+              <el-radio-button value="ve">ve (分集)</el-radio-button>
+              <el-radio-button value="vl">vl (单片)</el-radio-button>
+            </el-radio-group>
+          </div>
+
+          <div class="quick-field">
+            <span class="field-label">起始 ID</span>
+            <el-input
+              v-model="batchStartRaw"
+              size="default"
+              placeholder="如 ve1001 或 1001"
+              style="width: 140px"
+              @keyup.enter="applyBatchSequence"
+            />
+          </div>
+
+          <div class="quick-field">
+            <span class="field-label">步长</span>
+            <el-input-number
+              v-model="batchStep"
+              :min="0"
+              :max="10"
+              size="default"
+              controls-position="right"
+              style="width: 85px"
+            />
+          </div>
+
+          <el-button type="primary" size="default" class="quick-apply-btn" @click="applyBatchSequence">
+            一键填充
+          </el-button>
         </div>
       </div>
 
-      <!-- 单文件模式 -->
-      <div v-if="!isBatch && singleItem" class="single-mode-wrapper">
-        <!-- 文件信息卡片 -->
-        <div class="file-summary-card">
-          <div class="file-icon">🎬</div>
-          <div class="file-meta">
-            <div class="file-name" :title="singleItem.name">{{ singleItem.name }}</div>
-            <div class="file-tags">
-              <span class="file-size-badge">{{ formatSizeInMB(singleItem.size) }}</span>
-              <el-tag size="small" effect="plain" :type="source === 'local' ? 'warning' : 'primary'">
-                {{ source === 'local' ? '本地媒体' : source === 'bt' ? 'BT 下载' : 'OpenList 网盘' }}
-              </el-tag>
+      <!-- 单文件模式卡片 -->
+      <div v-if="!isBatch && singleItem" class="single-panel">
+        <!-- 待上传文件简报 -->
+        <div class="file-card">
+          <div class="file-avatar">🎬</div>
+          <div class="file-details">
+            <div class="file-primary-name" :title="singleItem.name">{{ singleItem.name }}</div>
+            <div class="file-secondary-meta">
+              <span class="meta-tag size">{{ formatSizeInMB(singleItem.size) }}</span>
+              <span class="meta-tag source">{{ sourceLabel }}</span>
             </div>
           </div>
         </div>
 
-        <el-form label-position="top" class="custom-form">
-          <!-- 目标类型与输入框 -->
-          <el-form-item label="EMOS 条目 ID">
-            <div class="id-input-group">
+        <!-- 核心输入区域 -->
+        <div class="input-card">
+          <div class="input-card-title">EMOS 目标配置</div>
+
+          <div class="form-row">
+            <label class="form-label">条目类型与 ID</label>
+            <div class="combo-input-wrapper">
               <el-select
                 v-model="singleType"
-                style="width: 130px; flex-shrink: 0"
+                class="type-select"
                 size="large"
                 @change="onSingleTypeChange"
               >
-                <el-option label="ve (分集)" value="ve" />
-                <el-option label="vl (电影)" value="vl" />
+                <el-option label="ve · 剧集分集" value="ve" />
+                <el-option label="vl · 电影单片" value="vl" />
               </el-select>
               <el-input
                 v-model="singleRawInput"
                 size="large"
-                placeholder="例如: ve1024 或 1024"
+                placeholder="直接输入或粘贴，如 ve1829946 或 1024"
                 clearable
-                class="id-input-field"
+                class="id-input"
                 @input="onSingleInput"
                 @blur="verifySingleItem"
-              >
-                <template #prefix>
-                  <span class="input-prefix-icon">🆔</span>
-                </template>
-              </el-input>
+              />
             </div>
-            <div class="form-hint">
-              可直接粘贴类似 <code>ve1829946</code>、<code>vl-2048</code> 或纯数字 ID
+            <div class="field-hint">
+              支持直接粘贴 <code>ve1829946</code>、<code>vl-2048</code> 或纯数字 ID，系统会自动识别并联网校验。
             </div>
+          </div>
 
-            <!-- 回显信息卡片 -->
-            <div v-if="singleParsed.valid" class="echo-result-card" :class="echoStatusClass">
-              <div v-if="echoLoading" class="echo-loading">
-                <el-icon class="is-loading"><Loading /></el-icon>
-                <span>正在查询 EMOS 条目信息...</span>
-              </div>
-              <div v-else-if="echoTitle" class="echo-success">
-                <span class="echo-badge">已匹配</span>
-                <span class="echo-title-text" :title="echoTitle">{{ echoTitle }}</span>
-              </div>
-              <div v-else-if="echoChecked" class="echo-warning">
-                <span class="echo-warn-badge">未查到</span>
-                <span>未在 EMOS 找到该 ID 对应的条目，请确认 ID 是否正确</span>
-              </div>
+          <!-- EMOS 校验结果回显状态条 -->
+          <div v-if="singleParsed.valid" class="echo-strip" :class="echoStatusClass">
+            <div v-if="echoLoading" class="echo-state loading">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>正在获取 EMOS 标题...</span>
             </div>
-          </el-form-item>
+            <div v-else-if="echoTitle" class="echo-state success">
+              <span class="echo-badge">已关联</span>
+              <span class="echo-title-text" :title="echoTitle">{{ echoTitle }}</span>
+            </div>
+            <div v-else-if="echoChecked" class="echo-state notfound">
+              <span class="echo-badge warn">未查到</span>
+              <span>EMOS 中未查到该 ID，请确认是否已录入或 ID 是否正确</span>
+            </div>
+          </div>
 
-          <!-- 自定义任务标题 -->
-          <el-form-item label="任务展示标题 (可选)">
+          <div class="form-row" style="margin-top: 14px">
+            <label class="form-label">任务自定义标题 (可选)</label>
             <el-input
               v-model="singleCustomTitle"
               :placeholder="echoTitle || singleItem.name"
               size="default"
               clearable
             />
-          </el-form-item>
-
-          <!-- 本地保留设置 -->
-          <div v-if="source === 'local'" class="local-keep-row">
-            <el-checkbox v-model="keepLocalFile">
-              <span class="checkbox-label">上传完成后保留本地文件（不删除源文件）</span>
-            </el-checkbox>
           </div>
-        </el-form>
+        </div>
       </div>
 
-      <!-- 多文件批量模式 -->
-      <div v-else class="batch-mode-wrapper">
-        <!-- 批量填充快捷工具栏 -->
-        <div class="batch-smart-bar">
-          <div class="smart-bar-title">⚡ 序列填充</div>
-          <div class="smart-bar-controls">
-            <div class="control-unit">
-              <span class="unit-label">类型:</span>
-              <el-radio-group v-model="batchDefaultType" size="small" @change="applyBatchType">
-                <el-radio-button value="ve">ve (分集)</el-radio-button>
-                <el-radio-button value="vl">vl (单片)</el-radio-button>
-              </el-radio-group>
-            </div>
+      <!-- 批量表格区域 -->
+      <div v-else class="batch-table-wrapper">
+        <el-table
+          :data="batchRows"
+          stripe
+          max-height="360"
+          size="default"
+          class="batch-table"
+        >
+          <el-table-column label="视频文件" min-width="220" show-overflow-tooltip>
+            <template #default="{ row }">
+              <div class="table-file-cell">
+                <span class="file-icon">🎬</span>
+                <span class="file-name">{{ row.name }}</span>
+              </div>
+            </template>
+          </el-table-column>
 
-            <div class="control-unit">
-              <span class="unit-label">起始 ID:</span>
+          <el-table-column label="大小" width="90" align="right">
+            <template #default="{ row }">
+              <span class="table-size">{{ formatSizeInMB(row.size) }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="类型" width="105">
+            <template #default="{ row }">
+              <el-select v-model="row.item_type" size="small" @change="() => onRowTypeChange(row)">
+                <el-option label="ve (分集)" value="ve" />
+                <el-option label="vl (电影)" value="vl" />
+              </el-select>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="EMOS ID" width="150">
+            <template #default="{ row }">
               <el-input
-                v-model="batchStartRaw"
+                v-model="row.raw_input"
                 size="small"
                 placeholder="如 ve1001"
-                style="width: 110px"
-                @keyup.enter="applyBatchSequence"
+                clearable
+                @input="() => onRowInput(row)"
+                @blur="() => verifyRowItem(row)"
               />
-            </div>
+            </template>
+          </el-table-column>
 
-            <div class="control-unit">
-              <span class="unit-label">步长:</span>
-              <el-input-number
-                v-model="batchStep"
-                :min="0"
-                :max="10"
-                size="small"
-                controls-position="right"
-                style="width: 75px"
-              />
-            </div>
+          <el-table-column label="EMOS 标题回显" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">
+              <div v-if="row.loading" class="row-echo loading">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>查询中...</span>
+              </div>
+              <span v-else-if="row.echoTitle" class="row-echo success" :title="row.echoTitle">
+                {{ row.echoTitle }}
+              </span>
+              <span v-else-if="row.item_id > 0 && row.checked" class="row-echo warn">
+                未查到
+              </span>
+              <span v-else class="muted-text">-</span>
+            </template>
+          </el-table-column>
 
-            <el-button type="primary" size="small" plain @click="applyBatchSequence">
-              一键填充
-            </el-button>
-          </div>
-        </div>
+          <el-table-column label="操作" width="60" align="center">
+            <template #default="{ $index }">
+              <el-button link type="danger" size="small" @click="removeBatchRow($index)">移除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
 
-        <!-- 批量表格 -->
-        <div class="batch-table-container">
-          <el-table
-            :data="batchRows"
-            stripe
-            max-height="340"
-            size="small"
-            class="custom-batch-table"
-          >
-            <el-table-column label="待传文件" min-width="200" show-overflow-tooltip>
-              <template #default="{ row }">
-                <span class="table-file-name">🎬 {{ row.name }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="大小" width="85" align="right">
-              <template #default="{ row }">
-                <span class="table-file-size">{{ formatSizeInMB(row.size) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="类型" width="95">
-              <template #default="{ row }">
-                <el-select v-model="row.item_type" size="small" @change="() => onRowTypeChange(row)">
-                  <el-option label="ve" value="ve" />
-                  <el-option label="vl" value="vl" />
-                </el-select>
-              </template>
-            </el-table-column>
-            <el-table-column label="EMOS ID (可输 ve/vl/数字)" width="160">
-              <template #default="{ row }">
-                <el-input
-                  v-model="row.raw_input"
-                  size="small"
-                  placeholder="如: ve1001"
-                  clearable
-                  @input="() => onRowInput(row)"
-                  @blur="() => verifyRowItem(row)"
-                />
-              </template>
-            </el-table-column>
-            <el-table-column label="EMOS 回显" min-width="140" show-overflow-tooltip>
-              <template #default="{ row }">
-                <div v-if="row.loading" class="row-echo loading">
-                  <el-icon class="is-loading"><Loading /></el-icon>
-                  <span>查询中...</span>
-                </div>
-                <span v-else-if="row.echoTitle" class="row-echo success" :title="row.echoTitle">
-                  ✓ {{ row.echoTitle }}
-                </span>
-                <span v-else-if="row.item_id > 0 && row.checked" class="row-echo warn">
-                  ? 未查到
-                </span>
-                <span v-else class="muted-text">-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="55" align="center">
-              <template #default="{ $index }">
-                <el-button link type="danger" size="small" @click="removeBatchRow($index)">移除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-
-        <div v-if="source === 'local'" class="local-keep-row" style="margin-top: 12px">
-          <el-checkbox v-model="keepLocalFile">
-            <span class="checkbox-label">上传完成后保留本地文件（不删除源文件）</span>
-          </el-checkbox>
-        </div>
+      <!-- 本地文件保留开关 -->
+      <div v-if="source === 'local'" class="keep-local-bar">
+        <el-checkbox v-model="keepLocalFile">
+          <span class="keep-label">上传完成后保留本地文件（不清理源文件）</span>
+        </el-checkbox>
       </div>
     </div>
 
     <template #footer>
-      <div class="dialog-actions">
-        <div class="summary-info">
-          <span v-if="isBatch">已选 {{ batchRows.length }} 个文件，准备入队</span>
-          <span v-else-if="singleParsed.valid && echoTitle">目标：{{ singleParsed.item_type }}-{{ singleParsed.item_id }} · {{ echoTitle }}</span>
+      <div class="dialog-foot">
+        <div class="foot-info">
+          <template v-if="isBatch">
+            已填写有效 ID: <strong>{{ validBatchCount }}</strong> / {{ batchRows.length }}
+          </template>
+          <template v-else-if="singleParsed.valid">
+            目标: <strong>{{ singleParsed.item_type }}-{{ singleParsed.item_id }}</strong>
+            <span v-if="echoTitle" class="foot-echo-title">({{ echoTitle }})</span>
+          </template>
         </div>
-        <div class="button-group">
+        <div class="foot-btns">
           <el-button @click="visible = false">取消</el-button>
           <el-button
             type="primary"
             :loading="submitting"
             :disabled="!canSubmit"
-            class="submit-btn"
+            class="submit-action-btn"
             @click="submitTasks"
           >
             立即创建入队 {{ isBatch ? `(${validBatchCount})` : '' }}
@@ -259,6 +256,12 @@ const taskStore = useTaskStore()
 const visible = ref(false)
 const submitting = ref(false)
 const keepLocalFile = ref(false)
+
+const sourceLabel = computed(() => {
+  if (props.source === 'local') return '本地媒体'
+  if (props.source === 'bt') return 'BT 下载'
+  return 'OpenList 网盘'
+})
 
 // ----------------------------------------------------
 // 智能解析函数：支持 ve12345, ve-12345, vl12345, 12345 等
@@ -551,70 +554,101 @@ defineExpose({
 </script>
 
 <style scoped>
-.manual-dialog-body {
+.dialog-inner {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-/* 顶部横幅 */
-.header-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  background: var(--brand-soft);
-  border: 1px solid var(--brand-border);
-  padding: 12px 14px;
-  border-radius: 12px;
-}
-.banner-icon {
-  font-size: 20px;
-  line-height: 1;
-}
-.banner-content {
-  flex: 1;
-}
-.banner-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--brand);
-  margin-bottom: 3px;
-}
-.banner-desc {
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.5;
-}
-.banner-desc code {
-  background: var(--brand-soft);
-  color: var(--brand);
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-family: monospace;
-}
-
-/* 文件概览卡片 */
-.file-summary-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+/* 顶部批量快速填充面板 */
+.batch-quick-panel {
   background: var(--bg-hover);
   border: 1px solid var(--line-soft);
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.file-icon {
-  font-size: 24px;
+.quick-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.quick-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+.dot-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+.quick-tip {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.quick-form-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.quick-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.field-label {
+  font-size: 13px;
+  color: var(--text-subtle);
+  font-weight: 500;
+}
+.quick-apply-btn {
+  font-weight: 600;
+}
+
+/* 单文件面板 */
+.single-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--bg-hover);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.file-avatar {
+  font-size: 26px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  display: grid;
+  place-items: center;
   flex-shrink: 0;
 }
-.file-meta {
+.file-details {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
-.file-name {
+.file-primary-name {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-main);
@@ -622,89 +656,120 @@ defineExpose({
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-tags {
+.file-secondary-meta {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.file-size-badge {
+.meta-tag {
   font-size: 12px;
-  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.meta-tag.size {
+  background: var(--line-subtle);
+  color: var(--text-subtle);
   font-family: monospace;
 }
+.meta-tag.source {
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 500;
+}
 
-/* 表单与输入框 */
-.custom-form {
-  margin-top: 4px;
+.input-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
 }
-.id-input-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-.id-input-field {
-  flex: 1;
-}
-.input-prefix-icon {
+.input-card-title {
   font-size: 14px;
-  margin-right: 4px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-subtle);
 }
-.form-hint {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 5px;
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.form-hint code {
-  background: var(--bg-hover);
-  padding: 1px 4px;
-  border-radius: 4px;
+.form-label {
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-main);
 }
-
-/* 回显结果卡片 */
-.echo-result-card {
-  margin-top: 10px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  font-size: 13px;
-  transition: all 0.2s ease;
-  background: var(--bg-hover);
-  border: 1px solid var(--line-soft);
-}
-.echo-result-card.status-loading {
-  color: var(--color-warning);
-  background: rgba(245, 158, 11, 0.1);
-  border-color: rgba(245, 158, 11, 0.3);
-}
-.echo-result-card.status-success {
-  color: var(--color-success);
-  background: rgba(16, 185, 129, 0.1);
-  border-color: rgba(16, 185, 129, 0.3);
-}
-.echo-result-card.status-warning {
-  color: var(--color-warning);
-  background: rgba(245, 158, 11, 0.1);
-  border-color: rgba(245, 158, 11, 0.3);
-}
-.echo-loading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.echo-success {
+.combo-input-wrapper {
   display: flex;
   align-items: center;
   gap: 10px;
 }
+.type-select {
+  width: 150px;
+  flex-shrink: 0;
+}
+.id-input {
+  flex: 1;
+}
+.field-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 4px;
+}
+.field-hint code {
+  background: var(--bg-hover);
+  color: var(--brand);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+/* 回显结果条 */
+.echo-strip {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+.echo-strip.status-loading {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.2);
+  color: var(--color-warning);
+}
+.echo-strip.status-success {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.2);
+  color: var(--color-success);
+}
+.echo-strip.status-warning {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.2);
+  color: var(--color-warning);
+}
+
+.echo-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .echo-badge {
-  background: var(--color-success);
-  color: #fff;
   font-size: 11px;
   font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 6px;
+  background: var(--color-success);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 4px;
   flex-shrink: 0;
+}
+.echo-badge.warn {
+  background: var(--color-warning);
 }
 .echo-title-text {
   font-weight: 600;
@@ -712,92 +777,43 @@ defineExpose({
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.echo-warning {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.echo-warn-badge {
-  background: var(--color-warning);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 6px;
-  flex-shrink: 0;
-}
-
-.local-keep-row {
-  margin-top: 4px;
-  padding: 8px 12px;
-  background: var(--bg-hover);
-  border-radius: 8px;
-}
-.checkbox-label {
-  font-size: 13px;
-  color: var(--text-main);
-}
-
-/* 批量模式工具栏 */
-.batch-smart-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  background: var(--bg-hover);
-  border: 1px solid var(--line-soft);
-  padding: 10px 14px;
-  border-radius: 12px;
-}
-.smart-bar-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--brand);
-}
-.smart-bar-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.control-unit {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.unit-label {
-  font-size: 12px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
 
 /* 批量表格 */
-.batch-table-container {
+.batch-table-wrapper {
   border: 1px solid var(--line-soft);
   border-radius: 12px;
   overflow: hidden;
 }
-.table-file-name {
+.batch-table {
+  width: 100%;
+}
+.table-file-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.table-file-cell .file-name {
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-main);
 }
-.table-file-size {
+.table-size {
   font-family: monospace;
   color: var(--text-muted);
+  font-size: 12px;
 }
 .row-echo {
   font-size: 12px;
-  font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 .row-echo.loading {
   color: var(--color-warning);
 }
 .row-echo.success {
   color: var(--color-success);
+  font-weight: 500;
 }
 .row-echo.warn {
   color: var(--color-warning);
@@ -806,26 +822,41 @@ defineExpose({
   color: var(--text-muted);
 }
 
+.keep-local-bar {
+  padding: 10px 14px;
+  background: var(--bg-hover);
+  border-radius: 8px;
+  border: 1px solid var(--line-soft);
+}
+.keep-label {
+  font-size: 13px;
+  color: var(--text-main);
+}
+
 /* 底部操作 */
-.dialog-actions {
+.dialog-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
 }
-.summary-info {
-  font-size: 12px;
+.foot-info {
+  font-size: 13px;
   color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 50%;
 }
-.button-group {
+.foot-info strong {
+  color: var(--text-main);
+}
+.foot-echo-title {
+  color: var(--color-success);
+  margin-left: 4px;
+  font-weight: 500;
+}
+.foot-btns {
   display: flex;
   gap: 10px;
 }
-.submit-btn {
+.submit-action-btn {
   font-weight: 600;
 }
 </style>
