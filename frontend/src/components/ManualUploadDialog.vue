@@ -2,10 +2,11 @@
   <el-dialog
     v-model="visible"
     :title="isBatch ? `批量手动上传 (${batchRows.length} 个文件)` : '手动指定 ID 上传'"
-    :width="isBatch ? '820px' : '520px'"
+    :width="isBatch ? '820px' : '560px'"
     destroy-on-close
     append-to-body
     class="manual-upload-dialog"
+    @opened="onDialogOpened"
   >
     <div class="dialog-inner">
       <!-- 批量模式快速填充面板 -->
@@ -87,17 +88,30 @@
                 <el-option label="vl · 电影单片" value="vl" />
               </el-select>
               <el-input
+                ref="singleInputRef"
                 v-model="singleRawInput"
                 size="large"
-                placeholder="直接输入或粘贴，如 ve1829946 或 1024"
+                placeholder="直接输入 ID（如 ve1829946 或 1024），回车直接上传"
                 clearable
                 class="id-input"
                 @input="onSingleInput"
                 @blur="verifySingleItem"
+                @keyup.enter="handleSingleEnter"
               />
+              <el-button
+                type="primary"
+                size="large"
+                :loading="submitting"
+                :disabled="!canSubmit"
+                class="quick-submit-btn"
+                @click="submitTasks"
+              >
+                <el-icon><Upload /></el-icon>
+                <span>立即上传</span>
+              </el-button>
             </div>
             <div class="field-hint">
-              支持直接粘贴 <code>ve1829946</code>、<code>vl-2048</code> 或纯数字 ID，系统会自动识别并联网校验。
+              支持直接粘贴 <code>ve1829946</code>、<code>vl-2048</code> 或纯数字 ID；输入 ID 后按回车或直接点击【立即上传】即可入队上传。
             </div>
           </div>
 
@@ -113,7 +127,7 @@
             </div>
             <div v-else-if="echoChecked" class="echo-state notfound">
               <span class="echo-badge warn">未查到</span>
-              <span>EMOS 中未查到该 ID，请确认是否已录入或 ID 是否正确</span>
+              <span>EMOS 中未查到该 ID，请确认是否已录入（仍可点击上传）</span>
             </div>
           </div>
 
@@ -124,6 +138,7 @@
               :placeholder="echoTitle || singleItem.name"
               size="default"
               clearable
+              @keyup.enter="handleSingleEnter"
             />
           </div>
         </div>
@@ -163,14 +178,16 @@
           </el-table-column>
 
           <el-table-column label="EMOS ID" width="150">
-            <template #default="{ row }">
+            <template #default="{ row, $index }">
               <el-input
+                :ref="(el: any) => setBatchInputRef(el, $index)"
                 v-model="row.raw_input"
                 size="small"
                 placeholder="如 ve1001"
                 clearable
                 @input="() => onRowInput(row)"
                 @blur="() => verifyRowItem(row)"
+                @keyup.enter="() => handleBatchRowEnter($index)"
               />
             </template>
           </el-table-column>
@@ -227,7 +244,8 @@
             class="submit-action-btn"
             @click="submitTasks"
           >
-            立即创建入队 {{ isBatch ? `(${validBatchCount})` : '' }}
+            <el-icon style="margin-right: 4px"><Upload /></el-icon>
+            {{ isBatch ? `立即批量上传 (${validBatchCount})` : '立即上传' }}
           </el-button>
         </div>
       </div>
@@ -236,10 +254,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Loading } from '@element-plus/icons-vue'
+import { ElMessage, type InputInstance } from 'element-plus'
+import { Loading, Upload } from '@element-plus/icons-vue'
 
 import { useTaskStore } from '@/stores/tasks'
 import type { CreateManualTaskItemPayload, OpenListEntry } from '@/types/api'
@@ -256,6 +274,23 @@ const taskStore = useTaskStore()
 const visible = ref(false)
 const submitting = ref(false)
 const keepLocalFile = ref(false)
+
+const singleInputRef = ref<InputInstance>()
+const batchInputRefs = ref<Record<number, InputInstance | null>>({})
+
+function setBatchInputRef(el: any, index: number) {
+  if (el) {
+    batchInputRefs.value[index] = el
+  }
+}
+
+function onDialogOpened() {
+  nextTick(() => {
+    if (!isBatch.value) {
+      singleInputRef.value?.focus()
+    }
+  })
+}
 
 const sourceLabel = computed(() => {
   if (props.source === 'local') return '本地媒体'
@@ -488,6 +523,27 @@ function applyBatchSequence() {
   ElMessage.success(`已为 ${batchRows.value.length} 个文件填充序列 ID`)
 }
 
+function handleSingleEnter() {
+  if (canSubmit.value) {
+    submitTasks()
+  } else if (!singleRawInput.value.trim()) {
+    ElMessage.warning('请先输入 EMOS ID')
+  } else if (!singleParsed.value.valid) {
+    ElMessage.warning('请输入有效的 EMOS ID（如 ve1001 或纯数字）')
+  }
+}
+
+function handleBatchRowEnter(index: number) {
+  if (canSubmit.value) {
+    submitTasks()
+    return
+  }
+  const nextIndex = index + 1
+  if (nextIndex < batchRows.value.length && batchInputRefs.value[nextIndex]) {
+    batchInputRefs.value[nextIndex]?.focus()
+  }
+}
+
 function removeBatchRow(index: number) {
   batchRows.value.splice(index, 1)
   if (batchRows.value.length === 0) {
@@ -500,6 +556,11 @@ function removeBatchRow(index: number) {
 // ----------------------------------------------------
 async function submitTasks() {
   if (!canSubmit.value) return
+
+  if (singleTimer) {
+    clearTimeout(singleTimer)
+    singleTimer = null
+  }
 
   const payloadItems: CreateManualTaskItemPayload[] = []
   if (!isBatch.value && singleItem.value) {
@@ -709,11 +770,33 @@ defineExpose({
   gap: 10px;
 }
 .type-select {
-  width: 150px;
+  width: 140px;
   flex-shrink: 0;
 }
 .id-input {
   flex: 1;
+}
+.quick-submit-btn {
+  flex-shrink: 0;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+@media (max-width: 600px) {
+  .combo-input-wrapper {
+    flex-wrap: wrap;
+  }
+  .type-select {
+    width: 100%;
+  }
+  .id-input {
+    width: 100%;
+  }
+  .quick-submit-btn {
+    width: 100%;
+    margin-top: 4px;
+  }
 }
 .field-hint {
   font-size: 12px;
